@@ -1,0 +1,18 @@
+# Nested git repos — each managed independently
+PROJECTS/line-reminder/
+PROJECTS/rw-inv-redirect/
+PROJECTS/SheetAppScriptRW01/
+
+# Sensitive files
+.env
+credentials/
+*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# macOS
+.DS_Store
