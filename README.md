@@ -57,11 +57,23 @@ AI-HQ คือระบบจัดการทีม AI ของ KTony Team
 AI-HQ/
 │
 ├── README.md
-├── PERSONAS/
-├── PROJECTS/
-├── CONTEXT/
-├── PROMPTS/
-└── ARCHIVE/
+├── PERSONAS/                        # AI team member role definitions
+│   ├── Roxi.md
+│   ├── Nova.md
+│   ├── Kiki.md
+│   ├── Vixi.md
+│   ├── Cipher.md
+│   ├── Luna.md
+│   └── Speedy.md
+├── PROJECTS/                        # Active projects (see PROJECTS/README.md)
+│   ├── README.md                    # Project index
+│   ├── line-reminder/               # LINE reminder bot (Railway) — own git repo
+│   ├── SheetAppScriptRW01/          # Police station system backend — own git repo
+│   └── rw-inv-redirect/             # Police station system frontend — own git repo
+├── CONTEXT/                         # Shared context files
+├── PROMPTS/                         # Reusable prompt templates
+├── SYSTEM/                          # System-level configuration
+└── ARCHIVE/                         # Inactive / retired work
 ```
 
 ---
