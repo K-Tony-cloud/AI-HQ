@@ -33,6 +33,10 @@ async function sheetsPost(action, payload = {}) {
   return json.data
 }
 
+/* ── Health check ────────────────────────────────────────────── */
+
+export const ping = () => sheetsGet('ping')
+
 /* ── Events ──────────────────────────────────────────────────── */
 
 export const getEvents = (date) =>

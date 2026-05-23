@@ -60,6 +60,14 @@ export const createLog = async (data) => {
   return sheets.addLog(data)
 }
 
+/* ── Connection test ─────────────────────────────────────────── */
+
+export const testConnection = async () => {
+  if (USE_MOCK) return { ok: true, mode: 'mock', events: 0, logs: 0 }
+  const data = await sheets.ping()
+  return { ok: true, mode: 'live', ...data }
+}
+
 /* ── Meta ────────────────────────────────────────────────────── */
 
 export const IS_MOCK = USE_MOCK

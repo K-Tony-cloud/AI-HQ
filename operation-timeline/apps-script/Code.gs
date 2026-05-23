@@ -54,6 +54,17 @@ function doGet(e) {
         if (!eventId) return err('eventId required')
         return ok(getLogsByEventId(eventId))
       }
+      case 'ping': {
+        return ok({
+          status:    'ok',
+          timestamp: new Date().toISOString(),
+          mode:      'live',
+          sheets: {
+            events:    readSheet(SHEET_NAMES.EVENTS).length,
+            logs:      readSheet(SHEET_NAMES.LOGS).length,
+          },
+        })
+      }
       default:
         return err('Unknown action: ' + action, 404)
     }

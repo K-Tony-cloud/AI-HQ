@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { LoginButton } from '../admin/LoginButton'
 import { AddEventModal } from '../admin/AddEventModal'
+import { ConnectionPanel } from '../admin/ConnectionPanel'
 import clsx from 'clsx'
 
 /* ── Live clock ──────────────────────────────────────────────── */
@@ -112,6 +113,7 @@ export const Header = () => {
                 <span>เพิ่มเหตุการณ์</span>
               </button>
             )}
+            <ConnectionPanel />
             <LoginButton />
           </div>
         </div>
