@@ -1,6 +1,9 @@
 import { AppProvider, useApp } from './context/AppContext'
+import { ToastProvider } from './context/ToastContext'
+import { ToastContainer } from './components/ui/Toast'
 import { Header } from './components/layout/Header'
 import { Sidebar } from './components/layout/Sidebar'
+import { MobileBar as MobileBottomBar } from './components/layout/MobileBar'
 import { Timeline } from './components/timeline/Timeline'
 import { LoadingSpinner } from './components/ui/LoadingSpinner'
 import { ErrorBanner } from './components/ui/ErrorBanner'
@@ -9,7 +12,7 @@ import { getEventState } from './utils/timeUtils'
 import clsx from 'clsx'
 
 /* ── Mobile progress bar (visible below xl) ──────────────────── */
-const MobileBar = () => {
+const MobileProgressBar = () => {
   const { events } = useApp()
   const { timeStr } = useCurrentTime(10000)
   if (!events.length) return null
@@ -90,7 +93,7 @@ const AppContent = () => {
   return (
     <div className="flex flex-col h-screen bg-ops-bg overflow-hidden">
       <Header />
-      <MobileBar />
+      <MobileProgressBar />
 
       {error && (
         <div className="flex-shrink-0 px-4 py-2">
@@ -117,14 +120,18 @@ const AppContent = () => {
       </main>
 
       <Footer />
+      <MobileBottomBar />
     </div>
   )
 }
 
 export default function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <ToastProvider>
+      <AppProvider>
+        <AppContent />
+        <ToastContainer />
+      </AppProvider>
+    </ToastProvider>
   )
 }

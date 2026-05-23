@@ -37,10 +37,12 @@ export default {
         '2xs': ['10px', { lineHeight: '14px' }],
       },
       animation: {
-        blink:        'blink 1.1s step-end infinite',
-        'fade-in':    'fadeIn 0.25s ease-out',
-        'slide-down': 'slideDown 0.2s ease-out',
-        'expand':     'expand 0.28s cubic-bezier(0.16,1,0.3,1)',
+        blink:           'blink 1.1s step-end infinite',
+        'fade-in':       'fadeIn 0.25s ease-out',
+        'slide-down':    'slideDown 0.2s ease-out',
+        'expand':        'expand 0.28s cubic-bezier(0.16,1,0.3,1)',
+        'shake':         'shake 0.4s ease-in-out',
+        'slide-in-right':'slideInRight 0.25s ease-out',
       },
       keyframes: {
         blink: {
@@ -58,6 +60,17 @@ export default {
         expand: {
           from: { opacity: '0', transform: 'scaleY(0.96) translateY(-6px)' },
           to:   { opacity: '1', transform: 'scaleY(1)    translateY(0)' },
+        },
+        slideInRight: {
+          from: { opacity: '0', transform: 'translateX(16px)' },
+          to:   { opacity: '1', transform: 'translateX(0)' },
+        },
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%':      { transform: 'translateX(-8px)' },
+          '40%':      { transform: 'translateX(8px)' },
+          '60%':      { transform: 'translateX(-6px)' },
+          '80%':      { transform: 'translateX(6px)' },
         },
       },
       boxShadow: {

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
+import { useToast } from '../../context/ToastContext'
+import { createLog } from '../../services/eventService'
 import clsx from 'clsx'
 
 const TYPES = [
@@ -35,6 +37,8 @@ const Field = ({ label, children }) => (
 
 export const EditEventModal = ({ event, onClose }) => {
   const { updateEvent } = useApp()
+  const { addToast }    = useToast()
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [form, setForm] = useState({
     planned_time: event.planned_time || '',
     actual_time:  event.actual_time  || '',
@@ -49,13 +53,35 @@ export const EditEventModal = ({ event, onClose }) => {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    updateEvent(event.id, {
-      ...form,
-      actual_time: form.actual_time || null,
-    })
-    onClose()
+    setIsSubmitting(true)
+    try {
+      const updates = { ...form, actual_time: form.actual_time || null }
+      await updateEvent(event.id, updates)
+
+      // Auto-log status change
+      if (form.status !== event.status) {
+        try {
+          await createLog({
+            event_id: event.id,
+            time:     new Date().toTimeString().slice(0, 5),
+            message:  `อัปเดตสถานะ: ${event.status} → ${form.status}`,
+            user:     'ADMIN',
+            type:     'update',
+          })
+        } catch (_) {
+          // Non-critical
+        }
+      }
+
+      addToast('บันทึกเรียบร้อย', 'success')
+      onClose()
+    } catch (ex) {
+      addToast(ex.message || 'บันทึกไม่สำเร็จ', 'error')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -178,15 +204,24 @@ export const EditEventModal = ({ event, onClose }) => {
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-2.5 rounded-xl border border-ops-border/50 text-sm text-ops-text-muted hover:text-ops-text-primary hover:bg-ops-surface transition-all font-semibold"
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 rounded-xl border border-ops-border/50 text-sm text-ops-text-muted hover:text-ops-text-primary hover:bg-ops-surface transition-all font-semibold disabled:opacity-50"
               >
                 ยกเลิก
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-xl bg-ops-warning/10 border border-ops-warning/40 text-sm text-ops-warning hover:bg-ops-warning/18 transition-all font-bold"
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 rounded-xl bg-ops-warning/10 border border-ops-warning/40 text-sm text-ops-warning hover:bg-ops-warning/18 transition-all font-bold disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                บันทึกการเปลี่ยนแปลง
+                {isSubmitting ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-ops-warning/40 border-t-ops-warning rounded-full animate-spin" />
+                    กำลังบันทึก...
+                  </>
+                ) : (
+                  'บันทึกการเปลี่ยนแปลง'
+                )}
               </button>
             </div>
           </form>

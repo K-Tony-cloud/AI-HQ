@@ -1,15 +1,35 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
-import { testConnection } from '../../services/eventService'
+import { testConnection, POLL_INTERVAL } from '../../services/eventService'
 import clsx from 'clsx'
 
 const STATUS = { idle: 'idle', testing: 'testing', ok: 'ok', fail: 'fail' }
 
+const POLL_SECS = Math.round(POLL_INTERVAL / 1000)
+
 export const ConnectionPanel = () => {
-  const { isMockMode, lastSyncAt, refetch } = useApp()
-  const [status,  setStatus]  = useState(STATUS.idle)
-  const [result,  setResult]  = useState(null)
-  const [open,    setOpen]    = useState(false)
+  const { isMockMode, lastSyncAt, isSyncing, refetch } = useApp()
+  const [status,    setStatus]    = useState(STATUS.idle)
+  const [result,    setResult]    = useState(null)
+  const [open,      setOpen]      = useState(false)
+  const [countdown, setCountdown] = useState(POLL_SECS)
+
+  /* ── Polling countdown ────────────────────────────────────── */
+  const lastSyncRef = useRef(lastSyncAt)
+  useEffect(() => {
+    lastSyncRef.current = lastSyncAt
+    setCountdown(POLL_SECS)
+  }, [lastSyncAt])
+
+  useEffect(() => {
+    if (isMockMode) return
+    const tick = setInterval(() => {
+      setCountdown(prev => (prev <= 1 ? POLL_SECS : prev - 1))
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [isMockMode])
+
+  const progress = ((POLL_SECS - countdown) / POLL_SECS) * 100
 
   const runTest = async () => {
     setStatus(STATUS.testing)
@@ -49,6 +69,17 @@ export const ConnectionPanel = () => {
             : 'text-ops-success bg-ops-success-light border-ops-success/30 hover:bg-emerald-100',
         )}
       >
+        {/* Syncing ring indicator */}
+        <span className="relative flex items-center justify-center w-3 h-3">
+          {isSyncing && (
+            <span className={clsx(
+              'absolute inset-0 rounded-full border-2 border-transparent',
+              isMockMode
+                ? 'border-t-ops-warning animate-spin'
+                : 'border-t-ops-success animate-spin',
+            )} />
+          )}
+        </span>
         <span className="font-mono">{isMockMode ? 'MOCK' : 'LIVE'}</span>
         <span className={clsx('text-[10px]', statusColor)}>{statusIcon}</span>
       </button>
@@ -115,11 +146,27 @@ export const ConnectionPanel = () => {
               </div>
             )}
 
-            {/* Sync info */}
+            {/* Sync info + countdown */}
             {lastSyncAt && (
-              <p className="text-[10px] text-ops-text-muted mb-3">
-                ซิงก์ล่าสุด: {lastSyncAt.toLocaleTimeString('th-TH')}
-              </p>
+              <div className="mb-3">
+                <p className="text-[10px] text-ops-text-muted">
+                  ซิงก์ล่าสุด: {lastSyncAt.toLocaleTimeString('th-TH')}
+                </p>
+                {!isMockMode && (
+                  <>
+                    <p className="text-[10px] text-ops-text-muted mt-0.5">
+                      ซิงก์ครั้งถัดไปใน {countdown}s
+                    </p>
+                    {/* Progress bar */}
+                    <div className="mt-1.5 h-0.5 bg-ops-accent/30 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-ops-accent rounded-full transition-all duration-1000"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             )}
 
             {/* Actions */}
