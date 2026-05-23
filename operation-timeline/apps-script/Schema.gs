@@ -1,8 +1,8 @@
 /**
- * Schema.gs — Sheet initialization and column definitions
+ * Schema.gs — Sheet initialization, column definitions, and read helpers
  *
- * Run initSchema() once after creating the Google Spreadsheet.
- * Script Property "SPREADSHEET_ID" must be set before deploying as Web App.
+ * Run resetAll() to fully reset and re-seed the spreadsheet from scratch.
+ * Run initSchema() alone to create headers without touching data.
  */
 
 const SHEET_NAMES = {
@@ -30,20 +30,13 @@ const HEADERS = {
   ],
 }
 
-/**
- * Returns the active spreadsheet (via script property or active).
- * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet}
- */
+/* ── Spreadsheet accessor ─────────────────────────────────────── */
+
 function getSpreadsheet() {
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')
   return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet()
 }
 
-/**
- * Returns a sheet by name, creating it if missing.
- * @param {string} name
- * @returns {GoogleAppsScript.Spreadsheet.Sheet}
- */
 function getOrCreateSheet(name) {
   const ss    = getSpreadsheet()
   let   sheet = ss.getSheetByName(name)
@@ -51,41 +44,45 @@ function getOrCreateSheet(name) {
   return sheet
 }
 
-/**
- * Reads all rows from a sheet and returns them as an array of objects
- * keyed by the header row.
- * @param {string} sheetName
- * @returns {Object[]}
- */
+/* ── Value formatter ──────────────────────────────────────────────
+   Google Sheets auto-converts "09:00" → Date (epoch 1899-12-30)
+   and "2026-05-22" → Date. Convert back to clean strings.
+─────────────────────────────────────────────────────────────────── */
+function formatValue(value) {
+  if (value === '' || value === null || value === undefined) return null
+  if (!(value instanceof Date)) return value
+
+  const y = value.getFullYear()
+  if (y <= 1900) {
+    // Time-only value: Sheets stores as 1899-12-30 epoch
+    return String(value.getHours()).padStart(2, '0') + ':' +
+           String(value.getMinutes()).padStart(2, '0')
+  }
+  // Regular date: use LOCAL parts to avoid UTC midnight shift
+  const mm = String(value.getMonth() + 1).padStart(2, '0')
+  const dd = String(value.getDate()).padStart(2, '0')
+  return `${y}-${mm}-${dd}`
+}
+
+/* ── Sheet I/O ────────────────────────────────────────────────── */
+
 function readSheet(sheetName) {
   const sheet  = getOrCreateSheet(sheetName)
   const values = sheet.getDataRange().getValues()
   if (values.length < 2) return []
   const headers = values[0]
   return values.slice(1).map(row =>
-    Object.fromEntries(headers.map((h, i) => [h, row[i] === '' ? null : row[i]]))
+    Object.fromEntries(headers.map((h, i) => [h, formatValue(row[i])]))
   )
 }
 
-/**
- * Appends a row to a sheet in header-column order.
- * @param {string} sheetName
- * @param {Object} obj
- */
 function appendRow(sheetName, obj) {
   const sheet   = getOrCreateSheet(sheetName)
   const headers = HEADERS[sheetName]
-  const row     = headers.map(h => obj[h] !== undefined ? obj[h] : '')
+  const row     = headers.map(h => (obj[h] !== undefined && obj[h] !== null) ? obj[h] : '')
   sheet.appendRow(row)
 }
 
-/**
- * Updates a row where column 'id' matches the given id.
- * @param {string} sheetName
- * @param {string} id
- * @param {Object} updates
- * @returns {boolean} true if a row was updated
- */
 function updateRowById(sheetName, id, updates) {
   const sheet   = getOrCreateSheet(sheetName)
   const headers = HEADERS[sheetName]
@@ -103,9 +100,11 @@ function updateRowById(sheetName, id, updates) {
   return false
 }
 
+/* ── Schema init ──────────────────────────────────────────────── */
+
 /**
- * Run once to initialize all sheets with header rows.
- * Safe to re-run — only writes headers if the sheet is empty.
+ * Creates each sheet and writes the header row if the sheet is empty.
+ * Safe to re-run — only writes headers to completely empty sheets.
  */
 function initSchema() {
   Object.entries(HEADERS).forEach(([name, headers]) => {
@@ -118,4 +117,41 @@ function initSchema() {
     }
   })
   Logger.log('Schema initialized')
+}
+
+/**
+ * Wipes ALL rows (including headers) from every sheet,
+ * re-creates headers via initSchema, then re-seeds all data.
+ * USE WITH CAUTION — destroys all existing data.
+ */
+function resetAll() {
+  Logger.log('Starting full reset...')
+  const sheetList = [SHEET_NAMES.EVENTS, SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS]
+  sheetList.forEach(name => {
+    const sheet = getOrCreateSheet(name)
+    const last  = sheet.getLastRow()
+    if (last > 0) sheet.deleteRows(1, last)
+    Logger.log('Cleared: ' + name)
+  })
+  initSchema()
+  seedAll()
+  Logger.log('Reset complete — all sheets initialized and seeded.')
+}
+
+/**
+ * Alternative to resetAll() — uses sheet.clear() instead of deleteRows.
+ * Use this if resetAll() silently fails (e.g. frozen rows, protected ranges).
+ */
+function forceReset() {
+  Logger.log('Starting force reset...')
+  const ss        = getSpreadsheet()
+  const sheetList = [SHEET_NAMES.EVENTS, SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS]
+  sheetList.forEach(name => {
+    const sheet = ss.getSheetByName(name) || ss.insertSheet(name)
+    sheet.clear()
+    Logger.log('Cleared: ' + name)
+  })
+  initSchema()
+  seedAll()
+  Logger.log('Force reset complete.')
 }
