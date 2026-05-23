@@ -124,15 +124,18 @@ export const EventCardExpanded = ({ event, state, onCollapse, dense }) => {
       'rounded-xl border overflow-hidden transition-all duration-300 animate-expand relative',
       dense ? 'p-3' : 'p-4',
       isActive
-        ? 'bg-sky-50/70 border-sky-200 shadow-card-active'
+        ? 'bg-sky-50 border-sky-300 shadow-card-active'
         : isEmergency
-          ? 'bg-red-50/60 border-red-200 shadow-card'
+          ? 'bg-red-50/70 border-red-200 shadow-card'
           : `${typeConfig.cardClass} border-ops-border shadow-card`,
     )}>
 
       {/* Active left accent bar */}
       {isActive && (
-        <div className="absolute left-0 top-3 bottom-3 w-1 bg-ops-accent rounded-r-full" />
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[3px] bg-ops-accent rounded-r-full"
+          style={{ boxShadow: '2px 0 10px rgba(14,165,233,0.45)' }}
+        />
       )}
 
       {/* Header */}
@@ -152,9 +155,9 @@ export const EventCardExpanded = ({ event, state, onCollapse, dense }) => {
               {event.title}
             </h3>
             {isActive && (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-ops-now bg-ops-now-light border border-ops-now/30 px-1.5 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-ops-now animate-blink" />
-                สด
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-ops-accent bg-sky-100 border border-ops-accent/30 px-2 py-0.5 rounded-full shadow-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-ops-accent animate-blink" />
+                กำลังดำเนินการ
               </span>
             )}
           </div>

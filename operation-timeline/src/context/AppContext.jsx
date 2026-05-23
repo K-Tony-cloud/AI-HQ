@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react'
-import { MOCK_EVENTS, OPERATION_META } from '../data/mockEvents'
+import { MOCK_EVENTS, OPERATION_META } from '../mock/events'
 
 const AppContext = createContext(null)
 

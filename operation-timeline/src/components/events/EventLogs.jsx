@@ -1,4 +1,4 @@
-import { getLogsForEvent } from '../../data/mockLogs'
+import { getLogsForEvent } from '../../mock/logs'
 import { getLogTypeConfig } from '../../utils/statusUtils'
 import clsx from 'clsx'
 

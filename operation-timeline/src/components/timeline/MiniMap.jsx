@@ -1,6 +1,7 @@
+import { useState, useEffect } from 'react'
 import { useCurrentTime } from '../../hooks/useCurrentTime'
 import { DAY_START_HOUR, DAY_END_HOUR, parseTimeString } from '../../utils/timeUtils'
-import { getTypeConfig, getStatusConfig } from '../../utils/statusUtils'
+import { getTypeConfig } from '../../utils/statusUtils'
 import clsx from 'clsx'
 
 const DAY_MINS = (DAY_END_HOUR - DAY_START_HOUR) * 60
@@ -11,6 +12,29 @@ const toPct = (timeStr) => {
 
 export const MiniMap = ({ events, containerRef, ppm }) => {
   const { percent } = useCurrentTime(5000)
+  const [viewport, setViewport] = useState({ top: 0, height: 0.3 })
+
+  useEffect(() => {
+    const container = containerRef?.current
+    if (!container) return
+
+    const update = () => {
+      const { scrollTop, clientHeight, scrollHeight } = container
+      if (scrollHeight <= 0) return
+      setViewport({
+        top: scrollTop / scrollHeight,
+        height: Math.min(1, clientHeight / scrollHeight),
+      })
+    }
+
+    update()
+    container.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [containerRef])
 
   const scrollTo = (eventId) => {
     const el = document.getElementById(`event-${eventId}`)
@@ -30,6 +54,18 @@ export const MiniMap = ({ events, containerRef, ppm }) => {
       <div className="flex-1 relative mx-auto w-6 min-h-0">
         <div className="absolute left-1/2 top-0 bottom-0 w-px bg-ops-border -translate-x-1/2" />
 
+        {/* Viewport indicator */}
+        <div
+          className="absolute left-0 right-0 rounded pointer-events-none transition-all duration-75"
+          style={{
+            top: `${viewport.top * 100}%`,
+            height: `${viewport.height * 100}%`,
+            background: 'rgba(14,165,233,0.07)',
+            borderTop: '1px solid rgba(14,165,233,0.25)',
+            borderBottom: '1px solid rgba(14,165,233,0.25)',
+          }}
+        />
+
         {/* Hour ticks */}
         {Array.from({ length: 12 }, (_, i) => (
           <div key={i} className="absolute left-0 right-0 flex justify-center" style={{ top: `${(i / 11) * 100}%` }}>
@@ -39,9 +75,9 @@ export const MiniMap = ({ events, containerRef, ppm }) => {
 
         {/* Event dots */}
         {events.map(event => {
-          const pos   = toPct(event.planned_time)
-          const cfg   = getTypeConfig(event.type)
-          const isAct = event.status === 'active'
+          const pos    = toPct(event.planned_time)
+          const cfg    = getTypeConfig(event.type)
+          const isAct  = event.status === 'active'
           const isDone = event.status === 'completed' || event.status === 'resolved'
 
           return (
