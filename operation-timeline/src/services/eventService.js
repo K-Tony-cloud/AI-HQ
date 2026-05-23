@@ -1,30 +1,66 @@
+/**
+ * eventService.js — unified data access layer
+ *
+ * Reads VITE_API_MODE from environment:
+ *   'mock' (default) — returns local mock data synchronously
+ *   'live'           — calls Google Sheets via sheetsAdapter
+ *
+ * All exported functions are async to allow transparent switching.
+ */
+
 import { MOCK_EVENTS, OPERATION_META } from '../mock/events'
 import { getLogsForEvent as mockGetLogs } from '../mock/logs'
-import { apiFetch } from './api'
+import * as sheets from './sheetsAdapter'
 
-// Switch to 'live' to hit the real API (set VITE_API_MODE=live in .env.local)
 const USE_MOCK = import.meta.env.VITE_API_MODE !== 'live'
 
-export const fetchEvents = async () => {
-  if (USE_MOCK) return MOCK_EVENTS
-  return apiFetch('/events')
+/* ── Read ────────────────────────────────────────────────────── */
+
+export const fetchEvents = async (date) => {
+  if (USE_MOCK) {
+    if (date) return MOCK_EVENTS.filter(e => e.date === date)
+    return MOCK_EVENTS
+  }
+  return sheets.getEvents(date)
 }
 
 export const fetchMeta = async () => {
   if (USE_MOCK) return OPERATION_META
-  return apiFetch('/meta')
+  return sheets.getMeta()
 }
 
-export const fetchLogs = (eventId) => {
+export const fetchLogs = async (eventId) => {
   if (USE_MOCK) return mockGetLogs(eventId)
-  // TODO: wire to apiFetch('/logs/' + eventId) when backend is ready
-  return []
+  return sheets.getLogs(eventId)
 }
 
-export const postEventUpdate = async (eventId, updates) => {
-  if (USE_MOCK) return { ok: true }
-  return apiFetch(`/events/${eventId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(updates),
-  })
+/* ── Write ───────────────────────────────────────────────────── */
+
+export const createEvent = async (data) => {
+  const newEvent = {
+    ...data,
+    id:         `EVT-${Date.now()}`,
+    date:       data.date       || '2026-05-22',
+    actual_time: data.actual_time || null,
+    end_time:    data.end_time    || null,
+    status:     data.status     || 'upcoming',
+    duration:   data.duration   || 30,
+  }
+  if (USE_MOCK) return newEvent
+  return sheets.addEvent(newEvent)
 }
+
+export const patchEvent = async (id, updates) => {
+  if (USE_MOCK) return { ok: true }
+  return sheets.patchEvent(id, updates)
+}
+
+export const createLog = async (data) => {
+  if (USE_MOCK) return data
+  return sheets.addLog(data)
+}
+
+/* ── Meta ────────────────────────────────────────────────────── */
+
+export const IS_MOCK = USE_MOCK
+export const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL || '30000', 10)

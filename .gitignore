@@ -7,6 +7,7 @@ PROJECTS/SheetAppScriptRW01/
 .env
 credentials/
 *.json
+!operation-timeline/**/*.json
 
 # Python
 __pycache__/
