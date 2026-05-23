@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { testConnection, POLL_INTERVAL } from '../../services/eventService'
+import { useNetworkStatus } from '../../hooks/useNetworkStatus'
 import clsx from 'clsx'
 
 const STATUS = { idle: 'idle', testing: 'testing', ok: 'ok', fail: 'fail' }
@@ -9,6 +10,7 @@ const POLL_SECS = Math.round(POLL_INTERVAL / 1000)
 
 export const ConnectionPanel = () => {
   const { isMockMode, lastSyncAt, isSyncing, refetch } = useApp()
+  const isOnline = useNetworkStatus()
   const [status,    setStatus]    = useState(STATUS.idle)
   const [result,    setResult]    = useState(null)
   const [open,      setOpen]      = useState(false)
@@ -108,6 +110,20 @@ export const ConnectionPanel = () => {
                   : 'text-ops-success bg-ops-success-light border border-ops-success/30',
               )}>
                 {isMockMode ? 'MOCK — ข้อมูลทดสอบ' : 'LIVE — Google Sheets'}
+              </span>
+            </div>
+
+            {/* Network status */}
+            <div className="flex items-center justify-between mb-3 p-2.5 rounded-lg bg-ops-bg border border-ops-border">
+              <span className="text-xs text-ops-text-secondary font-medium">สัญญาณเครือข่าย</span>
+              <span className={clsx(
+                'flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded',
+                isOnline
+                  ? 'text-ops-success bg-ops-success-light border border-ops-success/30'
+                  : 'text-ops-danger bg-ops-danger-light border border-ops-danger/30',
+              )}>
+                <span className={clsx('w-1.5 h-1.5 rounded-full', isOnline ? 'bg-ops-success' : 'bg-ops-danger animate-pulse')} />
+                {isOnline ? 'ออนไลน์' : 'ออฟไลน์'}
               </span>
             </div>
 

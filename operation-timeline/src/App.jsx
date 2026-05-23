@@ -2,6 +2,7 @@ import { AppProvider, useApp } from './context/AppContext'
 import { ToastProvider } from './context/ToastContext'
 import { ToastContainer } from './components/ui/Toast'
 import { Header } from './components/layout/Header'
+import { OfflineBanner } from './components/ui/OfflineBanner'
 import { Sidebar } from './components/layout/Sidebar'
 import { MobileBar as MobileBottomBar } from './components/layout/MobileBar'
 import { Timeline } from './components/timeline/Timeline'
@@ -93,6 +94,7 @@ const AppContent = () => {
   return (
     <div className="flex flex-col h-screen bg-ops-bg overflow-hidden">
       <Header />
+      <OfflineBanner />
       <MobileProgressBar />
 
       {error && (

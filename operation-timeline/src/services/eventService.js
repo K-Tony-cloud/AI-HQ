@@ -9,7 +9,7 @@
  */
 
 import { MOCK_EVENTS, OPERATION_META } from '../mock/events'
-import { getLogsForEvent as mockGetLogs } from '../mock/logs'
+import { getLogsForEvent as mockGetLogs, MOCK_LOGS } from '../mock/logs'
 import * as sheets from './sheetsAdapter'
 
 const USE_MOCK = import.meta.env.VITE_API_MODE !== 'live'
@@ -59,6 +59,11 @@ export const createLog = async (data) => {
   if (USE_MOCK) return data
   return sheets.addLog(data)
 }
+
+export const fetchAllLogs = (limit = 50) =>
+  USE_MOCK
+    ? Promise.resolve(Object.values(MOCK_LOGS).flat().slice(0, limit))
+    : sheets.getAllLogs(limit)
 
 /* ── Connection test ─────────────────────────────────────────── */
 

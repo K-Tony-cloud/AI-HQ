@@ -12,6 +12,7 @@
  *   GET  ?action=getEvents[&date=YYYY-MM-DD]
  *   GET  ?action=getMeta
  *   GET  ?action=getLogs&eventId=EVT-xxx
+ *   GET  ?action=getAllLogs[&limit=N]
  *   POST {action:'addEvent',    data:{...}}
  *   POST {action:'updateEvent', id:'EVT-xxx', data:{...}}
  *   POST {action:'addLog',      data:{...}}
@@ -53,6 +54,10 @@ function doGet(e) {
         const eventId = e.parameter.eventId
         if (!eventId) return err('eventId required')
         return ok(getLogsByEventId(eventId))
+      }
+      case 'getAllLogs': {
+        const limit = e.parameter.limit ? parseInt(e.parameter.limit) : 50
+        return ok(getAllLogs(limit))
       }
       case 'ping': {
         return ok({

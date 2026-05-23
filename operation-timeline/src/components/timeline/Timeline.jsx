@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useCurrentTime } from '../../hooks/useCurrentTime'
 import { EventCard } from '../events/EventCard'
@@ -100,8 +100,20 @@ export const Timeline = () => {
   const { timeStr } = useCurrentTime(10000)
   const containerRef = useRef(null)
   const activeRef    = useRef(null)
-  const ppm          = PPM[densityMode] || PPM.normal
-  const hours        = getHourMarkers()
+
+  const ppm   = useMemo(() => PPM[densityMode] ?? PPM.normal, [densityMode])
+  const hours = useMemo(() => getHourMarkers(), [])
+
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => a.planned_time.localeCompare(b.planned_time)),
+    [events],
+  )
+
+  const eventStates = useMemo(() => {
+    const map = new Map()
+    sortedEvents.forEach(ev => map.set(ev.id, getEventState(ev, timeStr)))
+    return map
+  }, [sortedEvents, timeStr])
 
   // Estimated rendered heights per card state (used to push siblings down)
   const COMPACT_H  = densityMode === 'compact' ? 28 : 33
@@ -116,13 +128,13 @@ export const Timeline = () => {
 
   // Compute y for each event; accumulate extra pixels when a card overflows its natural gap
   let cumulativeExtra = 0
-  const eventsWithY = events.map((event, i) => {
+  const eventsWithY = sortedEvents.map((event, i) => {
     const baseY = toPx(event.planned_time, ppm)
     const y     = baseY + cumulativeExtra
-    const state = getEventState(event, timeStr)
+    const state = eventStates.get(event.id)
 
-    if (i < events.length - 1) {
-      const naturalGap = toPx(events[i + 1].planned_time, ppm) - baseY
+    if (i < sortedEvents.length - 1) {
+      const naturalGap = toPx(sortedEvents[i + 1].planned_time, ppm) - baseY
       cumulativeExtra += Math.max(0, getCardH(event, state) - naturalGap)
     }
 
@@ -210,7 +222,7 @@ export const Timeline = () => {
           className="sticky top-0 bg-white border border-ops-border rounded-xl p-2.5 shadow-card"
           style={{ height: 'calc(100vh - 148px)' }}
         >
-          <MiniMap events={events} containerRef={containerRef} ppm={ppm} />
+          <MiniMap events={sortedEvents} containerRef={containerRef} ppm={ppm} />
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TypeIcon } from '../ui/TypeIcon'
@@ -36,7 +36,7 @@ const TimeStamp = ({ planned, actual, state }) => (
 )
 
 /* ── COMPACT — past / future ─────────────────────────────────── */
-export const EventCardCompact = ({ event, state, onClick, dense }) => {
+export const EventCardCompact = memo(function EventCardCompact({ event, state, onClick, dense }) {
   const typeConfig = getTypeConfig(event.type)
   const isPast = state === 'past'
 
@@ -66,10 +66,10 @@ export const EventCardCompact = ({ event, state, onClick, dense }) => {
       <StatusBadge status={event.status} size="xs" showIcon={false} />
     </button>
   )
-}
+})
 
 /* ── SEMI-EXPANDED — upcoming-near ───────────────────────────── */
-export const EventCardSemiExpanded = ({ event, onClick }) => {
+export const EventCardSemiExpanded = memo(function EventCardSemiExpanded({ event, onClick }) {
   const typeConfig = getTypeConfig(event.type)
 
   return (
@@ -108,10 +108,10 @@ export const EventCardSemiExpanded = ({ event, onClick }) => {
       </div>
     </button>
   )
-}
+})
 
 /* ── FULL EXPANDED — active or manually opened ───────────────── */
-export const EventCardExpanded = ({ event, state, onCollapse, dense }) => {
+export const EventCardExpanded = memo(function EventCardExpanded({ event, state, onCollapse, dense }) {
   const { isAdminMode, densityMode } = useApp()
   const [showEdit, setShowEdit] = useState(false)
   const typeConfig = getTypeConfig(event.type)
@@ -248,32 +248,40 @@ export const EventCardExpanded = ({ event, state, onCollapse, dense }) => {
     {showEdit && <EditEventModal event={event} onClose={() => setShowEdit(false)} />}
     </>
   )
-}
+})
 
 /* ── SMART WRAPPER ───────────────────────────────────────────── */
-export const EventCard = ({ event, state }) => {
-  const { toggleEventExpand, isEventExpanded, densityMode } = useApp()
-  const expanded = isEventExpanded(event.id)
-  const isActive = state === 'active'
-  const isNear   = state === 'upcoming-near'
-  const dense    = densityMode === 'compact'
+export const EventCard = memo(
+  function EventCard({ event, state }) {
+    const { toggleEventExpand, isEventExpanded, densityMode } = useApp()
+    const expanded = isEventExpanded(event.id)
+    const isActive = state === 'active'
+    const isNear   = state === 'upcoming-near'
+    const dense    = densityMode === 'compact'
 
-  if (isActive || expanded) {
+    if (isActive || expanded) {
+      return (
+        <EventCardExpanded
+          event={event} state={state} dense={dense}
+          onCollapse={() => { if (!isActive) toggleEventExpand(event.id) }}
+        />
+      )
+    }
+    // Semi-expand upcoming-near events in normal mode
+    if (isNear && !dense) {
+      return <EventCardSemiExpanded event={event} onClick={() => toggleEventExpand(event.id)} />
+    }
     return (
-      <EventCardExpanded
+      <EventCardCompact
         event={event} state={state} dense={dense}
-        onCollapse={() => { if (!isActive) toggleEventExpand(event.id) }}
+        onClick={() => toggleEventExpand(event.id)}
       />
     )
-  }
-  // Semi-expand upcoming-near events in normal mode
-  if (isNear && !dense) {
-    return <EventCardSemiExpanded event={event} onClick={() => toggleEventExpand(event.id)} />
-  }
-  return (
-    <EventCardCompact
-      event={event} state={state} dense={dense}
-      onClick={() => toggleEventExpand(event.id)}
-    />
-  )
-}
+  },
+  (prev, next) =>
+    prev.event.id          === next.event.id &&
+    prev.event.status      === next.event.status &&
+    prev.event.updated_at  === next.event.updated_at &&
+    prev.event.actual_time === next.event.actual_time &&
+    prev.state             === next.state,
+)

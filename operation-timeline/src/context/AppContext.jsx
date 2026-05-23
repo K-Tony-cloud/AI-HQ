@@ -9,6 +9,7 @@ import {
 } from '../services/eventService'
 import { createPoller } from '../services/realtime'
 import { useToast } from './ToastContext'
+import { useNetworkStatus } from '../hooks/useNetworkStatus'
 
 const AppContext = createContext(null)
 
@@ -33,6 +34,17 @@ export const AppProvider = ({ children }) => {
 
   /* ── Toast ────────────────────────────────────────────────── */
   const { addToast } = useToast()
+
+  /* ── Network status ───────────────────────────────────────── */
+  const isOnline = useNetworkStatus()
+  const isOnlineRef      = useRef(navigator.onLine)
+  const networkInitRef   = useRef(false)
+
+  /* ── Events ref (for optimistic rollback) ─────────────────── */
+  const eventsRef = useRef(MOCK_EVENTS)
+
+  /* ── Snapshot recorder ────────────────────────────────────── */
+  const snapshotsRef = useRef([])
 
   /* ── Previous events ref for change detection ─────────────── */
   const prevEventsRef  = useRef(null)
@@ -93,6 +105,49 @@ export const AppProvider = ({ children }) => {
     return () => { poller.stop(); unsub() }
   }, [addToast])
 
+  /* ── Keep isOnlineRef and eventsRef in sync ──────────────── */
+  useEffect(() => { isOnlineRef.current = isOnline }, [isOnline])
+  useEffect(() => { eventsRef.current = events }, [events])
+
+  /* ── Snapshot recorder (live only) ───────────────────────── */
+  useEffect(() => {
+    if (IS_MOCK || events.length === 0) return
+    const snap = { ts: Date.now(), events: events }
+    snapshotsRef.current = [...snapshotsRef.current.slice(-119), snap]
+  }, [events])
+
+  /* ── Pause/resume polling on network change ──────────────── */
+  useEffect(() => {
+    if (IS_MOCK || !pollerRef.current) return
+    if (!networkInitRef.current) { networkInitRef.current = true; return }
+    if (isOnline) {
+      if (!document.hidden) {
+        pollerRef.current.start()
+        pollerRef.current.refresh()
+      }
+      addToast('กลับมาออนไลน์แล้ว', 'success')
+    } else {
+      pollerRef.current.stop()
+      addToast('ขาดการเชื่อมต่ออินเทอร์เน็ต', 'warning')
+    }
+  }, [isOnline, addToast])
+
+  /* ── Pause/resume polling on tab visibility change ───────── */
+  useEffect(() => {
+    if (IS_MOCK) return
+    const handleVisibility = () => {
+      if (!pollerRef.current) return
+      if (document.hidden) {
+        pollerRef.current.stop()
+      } else if (isOnlineRef.current) {
+        pollerRef.current.start()
+        pollerRef.current.refresh()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [])
+
   /* ── Event CRUD ───────────────────────────────────────────── */
   const addEvent = useCallback(async (eventData) => {
     const newEvent = await apiCreateEvent(eventData)
@@ -108,23 +163,29 @@ export const AppProvider = ({ children }) => {
   }
 
   const updateEvent = useCallback(async (eventId, updates) => {
-    await apiPatchEvent(eventId, updates)
+    const snapshot = eventsRef.current
+    // Optimistic update
     setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...updates } : e))
-    // Audit log (live mode only)
-    if (!IS_MOCK) {
-      try {
-        await createLog({
-          event_id: eventId,
-          time:     new Date().toTimeString().slice(0, 5),
-          message:  buildAuditMessage(updates),
-          user:     'ADMIN',
-          type:     'update',
-        })
-      } catch (_) {
-        // Non-critical — silently ignore
+    try {
+      await apiPatchEvent(eventId, updates)
+      if (!IS_MOCK) {
+        try {
+          await createLog({
+            event_id: eventId,
+            time:     new Date().toTimeString().slice(0, 5),
+            message:  buildAuditMessage(updates),
+            user:     'ADMIN',
+            type:     'update',
+          })
+        } catch (_) {}
       }
+    } catch (err) {
+      // Rollback
+      setEvents(snapshot)
+      addToast('บันทึกไม่สำเร็จ — ข้อมูลถูกยกเลิก', 'error')
+      throw err
     }
-  }, [])
+  }, [addToast])
 
   /* ── Expand/collapse ──────────────────────────────────────── */
   const toggleEventExpand = useCallback((eventId) => {
@@ -159,6 +220,7 @@ export const AppProvider = ({ children }) => {
       updateEvent,
       densityMode, setDensityMode,
       isMockMode: IS_MOCK,
+      getSnapshots: () => snapshotsRef.current,
     }}>
       {children}
     </AppContext.Provider>

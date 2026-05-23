@@ -36,9 +36,11 @@ const Field = ({ label, children }) => (
 )
 
 export const EditEventModal = ({ event, onClose }) => {
-  const { updateEvent } = useApp()
-  const { addToast }    = useToast()
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { updateEvent, events } = useApp()
+  const { addToast }            = useToast()
+  const [isSubmitting,  setIsSubmitting]  = useState(false)
+  const [showConflict,  setShowConflict]  = useState(false)
+  const [openedUpdatedAt] = useState(() => event.updated_at)
   const [form, setForm] = useState({
     planned_time: event.planned_time || '',
     actual_time:  event.actual_time  || '',
@@ -53,8 +55,7 @@ export const EditEventModal = ({ event, onClose }) => {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const doSave = async () => {
     setIsSubmitting(true)
     try {
       const updates = { ...form, actual_time: form.actual_time || null }
@@ -84,10 +85,44 @@ export const EditEventModal = ({ event, onClose }) => {
     }
   }
 
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    // Conflict check
+    const current = events.find(ev => ev.id === event.id)
+    if (current && current.updated_at && openedUpdatedAt && current.updated_at !== openedUpdatedAt) {
+      setShowConflict(true)
+      return
+    }
+    await doSave()
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-ops-card border border-ops-border rounded-2xl shadow-2xl animate-slide-down overflow-hidden">
+        {showConflict && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 backdrop-blur-sm rounded-2xl">
+            <div className="text-center p-6 max-w-xs">
+              <p className="text-2xl mb-3">⚠️</p>
+              <p className="font-bold text-ops-text-primary text-sm mb-1">ข้อมูลถูกแก้ไขล่าสุด</p>
+              <p className="text-xs text-ops-text-muted mb-4">เหตุการณ์นี้ถูกแก้ไขหลังจากที่คุณเปิดหน้านี้ บันทึกทับหรือไม่?</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowConflict(false)}
+                  className="flex-1 py-2 rounded-lg border border-ops-border text-xs font-semibold text-ops-text-muted hover:bg-ops-bg transition-all"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={() => { setShowConflict(false); doSave() }}
+                  className="flex-1 py-2 rounded-lg bg-ops-warning/10 border border-ops-warning/40 text-xs font-bold text-ops-warning hover:bg-ops-warning/20 transition-all"
+                >
+                  บันทึกทับ
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="h-px bg-gradient-to-r from-transparent via-ops-warning/60 to-transparent" />
         <div className="p-6">
           <div className="flex items-center justify-between mb-5">

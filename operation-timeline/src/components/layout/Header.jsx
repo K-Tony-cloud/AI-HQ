@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { LoginButton } from '../admin/LoginButton'
 import { AddEventModal } from '../admin/AddEventModal'
+import { AuditPanel } from '../admin/AuditPanel'
 import { ConnectionPanel } from '../admin/ConnectionPanel'
 import clsx from 'clsx'
 
@@ -56,7 +57,8 @@ const DensityToggle = () => {
 /* ── Main Header ─────────────────────────────────────────────── */
 export const Header = () => {
   const { operationMeta, isAdminMode } = useApp()
-  const [showAddModal, setShowAddModal] = useState(false)
+  const [showAddModal,  setShowAddModal]  = useState(false)
+  const [showAudit,     setShowAudit]     = useState(false)
 
   return (
     <>
@@ -113,6 +115,14 @@ export const Header = () => {
                 <span>เพิ่มเหตุการณ์</span>
               </button>
             )}
+            {isAdminMode && (
+              <button
+                onClick={() => setShowAudit(true)}
+                className="text-[11px] font-semibold text-ops-text-secondary border border-ops-border hover:bg-ops-bg px-2.5 py-1.5 rounded-lg transition-all"
+              >
+                📋 ประวัติ
+              </button>
+            )}
             <ConnectionPanel />
             <LoginButton />
           </div>
@@ -135,6 +145,7 @@ export const Header = () => {
       </header>
 
       {showAddModal && <AddEventModal onClose={() => setShowAddModal(false)} />}
+      {showAudit    && <AuditPanel onClose={() => setShowAudit(false)} />}
     </>
   )
 }

@@ -14,6 +14,17 @@ function getLogsByEventId(eventId) {
 }
 
 /**
+ * Returns all logs, sorted by created_at descending.
+ * @param {number} [limit]  Max number of rows to return
+ * @returns {Object[]}
+ */
+function getAllLogs(limit) {
+  const all = readSheet(SHEET_NAMES.LOGS)
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  return limit ? all.slice(0, Number(limit)) : all
+}
+
+/**
  * Appends a new log entry.
  * @param {Object} data  Partial EventLog (id auto-generated)
  * @returns {Object}     The created log entry
