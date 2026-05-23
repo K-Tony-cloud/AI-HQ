@@ -4,6 +4,7 @@ import { LoginButton } from '../admin/LoginButton'
 import { AddEventModal } from '../admin/AddEventModal'
 import { AuditPanel } from '../admin/AuditPanel'
 import { ConnectionPanel } from '../admin/ConnectionPanel'
+import { exportEventsCSV } from '../../services/exportService'
 import clsx from 'clsx'
 
 /* ── Live clock ──────────────────────────────────────────────── */
@@ -56,7 +57,7 @@ const DensityToggle = () => {
 
 /* ── Main Header ─────────────────────────────────────────────── */
 export const Header = () => {
-  const { operationMeta, isAdminMode } = useApp()
+  const { operationMeta, isAdminMode, events } = useApp()
   const [showAddModal,  setShowAddModal]  = useState(false)
   const [showAudit,     setShowAudit]     = useState(false)
 
@@ -121,6 +122,14 @@ export const Header = () => {
                 className="text-[11px] font-semibold text-ops-text-secondary border border-ops-border hover:bg-ops-bg px-2.5 py-1.5 rounded-lg transition-all"
               >
                 📋 ประวัติ
+              </button>
+            )}
+            {isAdminMode && (
+              <button
+                onClick={() => exportEventsCSV(events, operationMeta)}
+                className="hidden sm:flex text-[11px] font-semibold text-ops-text-secondary border border-ops-border hover:bg-ops-bg px-2.5 py-1.5 rounded-lg transition-all"
+              >
+                ↓ CSV
               </button>
             )}
             <ConnectionPanel />

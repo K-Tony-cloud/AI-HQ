@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useToast } from '../../context/ToastContext'
 import { createLog } from '../../services/eventService'
@@ -36,9 +36,14 @@ const Field = ({ label, children }) => (
 )
 
 export const EditEventModal = ({ event, onClose }) => {
-  const { updateEvent, events } = useApp()
-  const { addToast }            = useToast()
+  const { updateEvent, events, setEditingEventId } = useApp()
+  const { addToast }                               = useToast()
   const [isSubmitting,  setIsSubmitting]  = useState(false)
+
+  useEffect(() => {
+    setEditingEventId(event.id)
+    return () => setEditingEventId(null)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [showConflict,  setShowConflict]  = useState(false)
   const [openedUpdatedAt] = useState(() => event.updated_at)
   const [form, setForm] = useState({

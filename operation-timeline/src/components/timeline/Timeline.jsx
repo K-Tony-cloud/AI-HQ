@@ -1,8 +1,11 @@
 import { useRef, useEffect, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
+import { useFilter } from '../../context/FilterContext'
 import { useCurrentTime } from '../../hooks/useCurrentTime'
+import { useKeyboard } from '../../hooks/useKeyboard'
 import { EventCard } from '../events/EventCard'
 import { MiniMap } from './MiniMap'
+import { FilterBar } from '../ui/FilterBar'
 import { getEventState, getHourMarkers, DAY_START_HOUR, DAY_END_HOUR, parseTimeString } from '../../utils/timeUtils'
 import { getTypeConfig } from '../../utils/statusUtils'
 import clsx from 'clsx'
@@ -96,24 +99,57 @@ const NowLine = ({ ppm }) => {
 
 /* ── Main Timeline ───────────────────────────────────────────── */
 export const Timeline = () => {
-  const { events, densityMode, isEventExpanded } = useApp()
+  const { displayEvents, densityMode, isEventExpanded, refetch } = useApp()
+  const { searchQuery, typeFilter, statusFilter, priorityFilter, hasActiveFilters, clearFilters } = useFilter()
   const { timeStr } = useCurrentTime(10000)
-  const containerRef = useRef(null)
-  const activeRef    = useRef(null)
+  const containerRef   = useRef(null)
+  const activeRef      = useRef(null)
+  const searchInputRef = useRef(null)
 
   const ppm   = useMemo(() => PPM[densityMode] ?? PPM.normal, [densityMode])
   const hours = useMemo(() => getHourMarkers(), [])
 
+  /* ── Keyboard shortcuts ───────────────────────────────────── */
+  useKeyboard({
+    onSearch:  () => searchInputRef.current?.focus(),
+    onRefresh: () => refetch(),
+    onClear:   () => clearFilters(),
+  })
+
+  /* ── Mobile focus-search event ────────────────────────────── */
+  useEffect(() => {
+    const handler = () => searchInputRef.current?.focus()
+    window.addEventListener('focus-search', handler)
+    return () => window.removeEventListener('focus-search', handler)
+  }, [])
+
   const sortedEvents = useMemo(
-    () => [...events].sort((a, b) => a.planned_time.localeCompare(b.planned_time)),
-    [events],
+    () => [...displayEvents].sort((a, b) => a.planned_time.localeCompare(b.planned_time)),
+    [displayEvents],
   )
+
+  /* ── Filter ───────────────────────────────────────────────── */
+  const filteredEvents = useMemo(() => {
+    if (!hasActiveFilters) return sortedEvents
+    return sortedEvents.filter(ev => {
+      if (typeFilter     && ev.type     !== typeFilter)     return false
+      if (priorityFilter && ev.priority !== priorityFilter) return false
+      if (statusFilter   && ev.status   !== statusFilter)   return false
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        const match = [ev.title, ev.location, ev.reporter, ev.id]
+          .some(v => v && String(v).toLowerCase().includes(q))
+        if (!match) return false
+      }
+      return true
+    })
+  }, [sortedEvents, searchQuery, typeFilter, statusFilter, priorityFilter, hasActiveFilters])
 
   const eventStates = useMemo(() => {
     const map = new Map()
-    sortedEvents.forEach(ev => map.set(ev.id, getEventState(ev, timeStr)))
+    filteredEvents.forEach(ev => map.set(ev.id, getEventState(ev, timeStr)))
     return map
-  }, [sortedEvents, timeStr])
+  }, [filteredEvents, timeStr])
 
   // Estimated rendered heights per card state (used to push siblings down)
   const COMPACT_H  = densityMode === 'compact' ? 28 : 33
@@ -128,13 +164,13 @@ export const Timeline = () => {
 
   // Compute y for each event; accumulate extra pixels when a card overflows its natural gap
   let cumulativeExtra = 0
-  const eventsWithY = sortedEvents.map((event, i) => {
+  const eventsWithY = filteredEvents.map((event, i) => {
     const baseY = toPx(event.planned_time, ppm)
     const y     = baseY + cumulativeExtra
     const state = eventStates.get(event.id)
 
-    if (i < sortedEvents.length - 1) {
-      const naturalGap = toPx(sortedEvents[i + 1].planned_time, ppm) - baseY
+    if (i < filteredEvents.length - 1) {
+      const naturalGap = toPx(filteredEvents[i + 1].planned_time, ppm) - baseY
       cumulativeExtra += Math.max(0, getCardH(event, state) - naturalGap)
     }
 
@@ -152,77 +188,94 @@ export const Timeline = () => {
   }, [densityMode])
 
   return (
-    <div className="flex gap-3 h-full min-h-0">
-      {/* ── Scrollable timeline canvas ── */}
-      <div
-        ref={containerRef}
-        className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
-        style={{ scrollbarWidth: 'thin' }}
-      >
+    <div className="flex flex-col h-full min-h-0">
+      {/* ── Filter bar ── */}
+      <FilterBar
+        searchRef={searchInputRef}
+        totalCount={sortedEvents.length}
+        filteredCount={filteredEvents.length}
+      />
+
+      <div className="flex gap-3 flex-1 min-h-0">
+        {/* ── Scrollable timeline canvas ── */}
         <div
-          className="relative"
-          style={{ height: `${totalH + 72}px`, paddingTop: '18px', paddingBottom: '28px' }}
+          ref={containerRef}
+          className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
+          style={{ scrollbarWidth: 'thin' }}
         >
-          {/* Spine */}
-          <div
-            className="absolute top-0 bottom-0 w-px pointer-events-none"
-            style={{
-              left: '64px',
-              background: 'linear-gradient(to bottom, transparent 0%, #e2e8f0 3%, #e2e8f0 97%, transparent 100%)',
-            }}
-          />
-
-          {/* Spine accent glow near NOW */}
-          <div
-            className="absolute w-px pointer-events-none transition-top duration-[5s]"
-            style={{
-              left: '64px',
-              top: `${Math.max(0, nowPx(ppm) - 50)}px`,
-              height: '100px',
-              background: 'linear-gradient(to bottom, transparent, rgba(14,165,233,0.2), transparent)',
-            }}
-          />
-
-          {/* Hour markers */}
-          {hours.map(m => <HourMarker key={m.time} time={m.time} label={m.label} ppm={ppm} />)}
-
-          {/* NOW line */}
-          <NowLine ppm={ppm} />
-
-          {/* Event rows */}
-          {eventsWithY.map(({ event, y, state }) => {
-            const isActive = state === 'active'
-
-            return (
+          {/* Empty state when filters active and nothing matches */}
+          {hasActiveFilters && filteredEvents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-ops-text-muted">
+              <p className="text-sm font-medium">ไม่พบเหตุการณ์ที่ตรงกับตัวกรอง</p>
+              <p className="text-xs mt-1">ลองปรับตัวกรองหรือล้างการค้นหา</p>
+            </div>
+          ) : (
+            <div
+              className="relative"
+              style={{ height: `${totalH + 72}px`, paddingTop: '18px', paddingBottom: '28px' }}
+            >
+              {/* Spine */}
               <div
-                key={event.id}
-                id={`event-${event.id}`}
-                ref={isActive ? activeRef : null}
-                className="absolute"
+                className="absolute top-0 bottom-0 w-px pointer-events-none"
                 style={{
-                  top: `${y}px`,
-                  left: '68px',
-                  right: '2px',
-                  zIndex: isActive ? 10 : 1,
+                  left: '64px',
+                  background: 'linear-gradient(to bottom, transparent 0%, #e2e8f0 3%, #e2e8f0 97%, transparent 100%)',
                 }}
-              >
-                <TimelineNode event={event} state={state} ppm={ppm} />
-                <div className="ml-10">
-                  <EventCard event={event} state={state} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+              />
 
-      {/* ── Mini-map ── */}
-      <div className="hidden md:flex flex-col w-14 flex-shrink-0">
-        <div
-          className="sticky top-0 bg-white border border-ops-border rounded-xl p-2.5 shadow-card"
-          style={{ height: 'calc(100vh - 148px)' }}
-        >
-          <MiniMap events={sortedEvents} containerRef={containerRef} ppm={ppm} />
+              {/* Spine accent glow near NOW */}
+              <div
+                className="absolute w-px pointer-events-none transition-top duration-[5s]"
+                style={{
+                  left: '64px',
+                  top: `${Math.max(0, nowPx(ppm) - 50)}px`,
+                  height: '100px',
+                  background: 'linear-gradient(to bottom, transparent, rgba(14,165,233,0.2), transparent)',
+                }}
+              />
+
+              {/* Hour markers */}
+              {hours.map(m => <HourMarker key={m.time} time={m.time} label={m.label} ppm={ppm} />)}
+
+              {/* NOW line */}
+              <NowLine ppm={ppm} />
+
+              {/* Event rows */}
+              {eventsWithY.map(({ event, y, state }) => {
+                const isActive = state === 'active'
+
+                return (
+                  <div
+                    key={event.id}
+                    id={`event-${event.id}`}
+                    ref={isActive ? activeRef : null}
+                    className="absolute"
+                    style={{
+                      top: `${y}px`,
+                      left: '68px',
+                      right: '2px',
+                      zIndex: isActive ? 10 : 1,
+                    }}
+                  >
+                    <TimelineNode event={event} state={state} ppm={ppm} />
+                    <div className="ml-10">
+                      <EventCard event={event} state={state} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Mini-map ── */}
+        <div className="hidden md:flex flex-col w-14 flex-shrink-0">
+          <div
+            className="sticky top-0 bg-white border border-ops-border rounded-xl p-2.5 shadow-card"
+            style={{ height: 'calc(100vh - 148px)' }}
+          >
+            <MiniMap events={sortedEvents} containerRef={containerRef} ppm={ppm} />
+          </div>
         </div>
       </div>
     </div>

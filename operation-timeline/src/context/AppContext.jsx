@@ -10,6 +10,7 @@ import {
 import { createPoller } from '../services/realtime'
 import { useToast } from './ToastContext'
 import { useNetworkStatus } from '../hooks/useNetworkStatus'
+import { useNotifications } from '../hooks/useNotifications'
 
 const AppContext = createContext(null)
 
@@ -31,9 +32,14 @@ export const AppProvider = ({ children }) => {
   const [expandedEvents, setExpandedEvents] = useState(new Set(['EVT-013']))
   const [selectedEvent,  setSelectedEvent]  = useState(null)
   const [densityMode,    setDensityMode]    = useState('normal')
+  const [editingEventId, setEditingEventId] = useState(null)
+  const [playbackIndex,  setPlaybackIndex]  = useState(-1)
 
   /* ── Toast ────────────────────────────────────────────────── */
   const { addToast } = useToast()
+
+  /* ── Notifications ────────────────────────────────────────── */
+  const { notify, requestPermission } = useNotifications()
 
   /* ── Network status ───────────────────────────────────────── */
   const isOnline = useNetworkStatus()
@@ -81,6 +87,15 @@ export const AppProvider = ({ children }) => {
     const unsub  = poller.subscribe(({ data, error: pollErr }) => {
       if (data) {
         setEvents(prev => {
+          // Hash-skip: avoid re-render if data is identical
+          const prevHash = prevEventsRef.current
+            ? prevEventsRef.current.map(e => `${e.id}:${e.updated_at}:${e.status}`).join(',')
+            : null
+          const newHash = data.map(e => `${e.id}:${e.updated_at}:${e.status}`).join(',')
+          if (prevHash === newHash && !isInitialLoad.current) {
+            return prev
+          }
+
           // Change detection — only after initial load
           if (!isInitialLoad.current && prevEventsRef.current) {
             const prevMap = new Map(prevEventsRef.current.map(e => [e.id, e]))
@@ -89,10 +104,21 @@ export const AppProvider = ({ children }) => {
               if (old && old.status !== ev.status) {
                 const type = ev.status === 'completed' ? 'success' : 'info'
                 addToast(`${ev.id}: เปลี่ยนสถานะเป็น ${ev.status}`, type)
+                const isUrgent = ev.type === 'emergency' || ev.priority === 'critical'
+                notify(
+                  `${ev.id}: ${ev.title}`,
+                  `สถานะเปลี่ยนเป็น ${ev.status}`,
+                  isUrgent,
+                )
               }
             })
           }
-          isInitialLoad.current = false
+
+          if (isInitialLoad.current) {
+            isInitialLoad.current = false
+            requestPermission()
+          }
+
           prevEventsRef.current = data
           return data
         })
@@ -103,7 +129,7 @@ export const AppProvider = ({ children }) => {
     poller.start()
     pollerRef.current = poller
     return () => { poller.stop(); unsub() }
-  }, [addToast])
+  }, [addToast, notify, requestPermission])
 
   /* ── Keep isOnlineRef and eventsRef in sync ──────────────── */
   useEffect(() => { isOnlineRef.current = isOnline }, [isOnline])
@@ -202,9 +228,15 @@ export const AppProvider = ({ children }) => {
     [expandedEvents],
   )
 
+  /* ── Computed: displayEvents (live or playback snapshot) ─────── */
+  const displayEvents = playbackIndex >= 0
+    ? (snapshotsRef.current[playbackIndex]?.events ?? events)
+    : events
+
   return (
     <AppContext.Provider value={{
       events,
+      displayEvents,
       operationMeta,
       isLoading,
       error,
@@ -221,6 +253,8 @@ export const AppProvider = ({ children }) => {
       densityMode, setDensityMode,
       isMockMode: IS_MOCK,
       getSnapshots: () => snapshotsRef.current,
+      editingEventId, setEditingEventId,
+      playbackIndex,  setPlaybackIndex,
     }}>
       {children}
     </AppContext.Provider>

@@ -1,11 +1,13 @@
 import { AppProvider, useApp } from './context/AppContext'
 import { ToastProvider } from './context/ToastContext'
+import { FilterProvider } from './context/FilterContext'
 import { ToastContainer } from './components/ui/Toast'
 import { Header } from './components/layout/Header'
 import { OfflineBanner } from './components/ui/OfflineBanner'
 import { Sidebar } from './components/layout/Sidebar'
 import { MobileBar as MobileBottomBar } from './components/layout/MobileBar'
 import { Timeline } from './components/timeline/Timeline'
+import { PlaybackBar } from './components/admin/PlaybackBar'
 import { LoadingSpinner } from './components/ui/LoadingSpinner'
 import { ErrorBanner } from './components/ui/ErrorBanner'
 import { useCurrentTime } from './hooks/useCurrentTime'
@@ -121,6 +123,7 @@ const AppContent = () => {
         )}
       </main>
 
+      <PlaybackBar />
       <Footer />
       <MobileBottomBar />
     </div>
@@ -130,10 +133,12 @@ const AppContent = () => {
 export default function App() {
   return (
     <ToastProvider>
-      <AppProvider>
-        <AppContent />
-        <ToastContainer />
-      </AppProvider>
+      <FilterProvider>
+        <AppProvider>
+          <AppContent />
+          <ToastContainer />
+        </AppProvider>
+      </FilterProvider>
     </ToastProvider>
   )
 }

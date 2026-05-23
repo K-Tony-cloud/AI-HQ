@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { testConnection, POLL_INTERVAL } from '../../services/eventService'
 import { useNetworkStatus } from '../../hooks/useNetworkStatus'
+import { useTimeSince } from '../../hooks/useTimeSince'
 import clsx from 'clsx'
 
 const STATUS = { idle: 'idle', testing: 'testing', ok: 'ok', fail: 'fail' }
@@ -11,10 +12,14 @@ const POLL_SECS = Math.round(POLL_INTERVAL / 1000)
 export const ConnectionPanel = () => {
   const { isMockMode, lastSyncAt, isSyncing, refetch } = useApp()
   const isOnline = useNetworkStatus()
+  const timeSince = useTimeSince(lastSyncAt)
   const [status,    setStatus]    = useState(STATUS.idle)
   const [result,    setResult]    = useState(null)
   const [open,      setOpen]      = useState(false)
   const [countdown, setCountdown] = useState(POLL_SECS)
+
+  const isOverdue = lastSyncAt && !isSyncing &&
+    (Date.now() - lastSyncAt.getTime()) > POLL_INTERVAL * 2.2
 
   /* ── Polling countdown ────────────────────────────────────── */
   const lastSyncRef = useRef(lastSyncAt)
@@ -166,8 +171,11 @@ export const ConnectionPanel = () => {
             {lastSyncAt && (
               <div className="mb-3">
                 <p className="text-[10px] text-ops-text-muted">
-                  ซิงก์ล่าสุด: {lastSyncAt.toLocaleTimeString('th-TH')}
+                  ซิงก์ล่าสุด: {timeSince}
                 </p>
+                {isOverdue && (
+                  <p className="text-[10px] text-ops-danger font-semibold mt-0.5">⚠ ซิงก์ช้ากว่าปกติ</p>
+                )}
                 {!isMockMode && (
                   <>
                     <p className="text-[10px] text-ops-text-muted mt-0.5">

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
+import { useFilter } from '../../context/FilterContext'
 import { AddEventModal } from '../admin/AddEventModal'
 import clsx from 'clsx'
 
 export const MobileBar = () => {
   const { isAdminMode, isMockMode, isSyncing, refetch } = useApp()
+  const { hasActiveFilters } = useFilter()
   const [showAdd, setShowAdd] = useState(false)
 
   return (
@@ -42,6 +44,19 @@ export const MobileBar = () => {
           >
             <span className="text-base leading-none">＋</span>
             <span className="text-[10px] font-medium">เพิ่มเหตุการณ์</span>
+          </button>
+
+          {/* Search */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('focus-search'))}
+            className="relative flex flex-col items-center gap-0.5 px-4 py-1 rounded-lg text-ops-text-secondary hover:text-ops-accent transition-colors"
+            aria-label="ค้นหา"
+          >
+            {hasActiveFilters && (
+              <span className="absolute top-0 right-2 w-1.5 h-1.5 rounded-full bg-ops-accent" />
+            )}
+            <span className="text-base leading-none">🔍</span>
+            <span className="text-[10px] font-medium">ค้นหา</span>
           </button>
 
           {/* Mode badge */}

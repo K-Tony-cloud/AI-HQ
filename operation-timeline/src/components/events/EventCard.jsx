@@ -10,6 +10,9 @@ import clsx from 'clsx'
 /* ── Helpers ─────────────────────────────────────────────────── */
 const toMin = t => parseInt(t.split(':')[0]) * 60 + parseInt(t.split(':')[1])
 
+const isUrgent = (event, state) =>
+  state !== 'past' && (event.priority === 'critical' || event.type === 'emergency')
+
 const DelayBadge = ({ planned, actual }) => {
   if (!actual || planned === actual) return null
   const diff = toMin(actual) - toMin(planned)
@@ -37,8 +40,11 @@ const TimeStamp = ({ planned, actual, state }) => (
 
 /* ── COMPACT — past / future ─────────────────────────────────── */
 export const EventCardCompact = memo(function EventCardCompact({ event, state, onClick, dense }) {
+  const { editingEventId } = useApp()
   const typeConfig = getTypeConfig(event.type)
-  const isPast = state === 'past'
+  const isPast    = state === 'past'
+  const urgent    = isUrgent(event, state)
+  const isEditing = editingEventId === event.id
 
   return (
     <button
@@ -49,10 +55,15 @@ export const EventCardCompact = memo(function EventCardCompact({ event, state, o
         typeConfig.cardClass,
         isPast
           ? 'opacity-45 hover:opacity-80 border-transparent hover:border-ops-border/40 hover:bg-white'
-          : 'border-transparent hover:border-ops-border hover:bg-white hover:shadow-card',
+          : urgent
+            ? 'border-ops-danger/20 hover:border-ops-border hover:bg-white hover:shadow-card'
+            : 'border-transparent hover:border-ops-border hover:bg-white hover:shadow-card',
       )}
     >
       <TimeStamp planned={event.planned_time} actual={event.actual_time} state={state} />
+      {urgent && (
+        <span className="w-1 h-1 rounded-full bg-ops-danger flex-shrink-0 animate-pulse" />
+      )}
       <span className={clsx('flex-shrink-0 leading-none', dense ? 'text-sm' : 'text-base')}>
         {typeConfig.icon}
       </span>
@@ -63,6 +74,11 @@ export const EventCardCompact = memo(function EventCardCompact({ event, state, o
       )}>
         {event.title}
       </span>
+      {isEditing && (
+        <span className="text-[9px] font-medium text-ops-warning bg-ops-warning-light border border-ops-warning/30 px-1.5 py-0.5 rounded flex-shrink-0">
+          แก้ไขอยู่
+        </span>
+      )}
       <StatusBadge status={event.status} size="xs" showIcon={false} />
     </button>
   )
@@ -112,23 +128,28 @@ export const EventCardSemiExpanded = memo(function EventCardSemiExpanded({ event
 
 /* ── FULL EXPANDED — active or manually opened ───────────────── */
 export const EventCardExpanded = memo(function EventCardExpanded({ event, state, onCollapse, dense }) {
-  const { isAdminMode, densityMode } = useApp()
+  const { isAdminMode, densityMode, editingEventId } = useApp()
   const [showEdit, setShowEdit] = useState(false)
-  const typeConfig = getTypeConfig(event.type)
-  const isActive = state === 'active'
+  const typeConfig  = getTypeConfig(event.type)
+  const isActive    = state === 'active'
   const isEmergency = event.type === 'emergency'
+  const urgent      = isUrgent(event, state)
+  const isEditing   = editingEventId === event.id
 
   return (
     <>
-    <div className={clsx(
-      'rounded-xl border overflow-hidden transition-all duration-300 animate-expand relative',
-      dense ? 'p-3' : 'p-4',
-      isActive
-        ? 'bg-sky-50 border-sky-300 shadow-card-active'
-        : isEmergency
-          ? 'bg-red-50/70 border-red-200 shadow-card'
-          : `${typeConfig.cardClass} border-ops-border shadow-card`,
-    )}>
+    <div
+      className={clsx(
+        'rounded-xl border overflow-hidden transition-all duration-300 animate-expand relative',
+        dense ? 'p-3' : 'p-4',
+        isActive
+          ? 'bg-sky-50 border-sky-300 shadow-card-active'
+          : isEmergency
+            ? 'bg-red-50/70 border-red-200 shadow-card'
+            : `${typeConfig.cardClass} border-ops-border shadow-card`,
+      )}
+      style={urgent && !isActive ? { boxShadow: 'inset 3px 0 0 #dc2626' } : undefined}
+    >
 
       {/* Active left accent bar */}
       {isActive && (
@@ -158,6 +179,16 @@ export const EventCardExpanded = memo(function EventCardExpanded({ event, state,
               <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-ops-accent bg-sky-100 border border-ops-accent/30 px-2 py-0.5 rounded-full shadow-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-ops-accent animate-blink" />
                 กำลังดำเนินการ
+              </span>
+            )}
+            {urgent && (
+              <span className="text-[9px] font-bold text-ops-danger bg-ops-danger-light border border-ops-danger/30 px-1.5 py-0.5 rounded tracking-widest animate-pulse">
+                {event.type === 'emergency' ? 'ฉุกเฉิน' : 'วิกฤต'}
+              </span>
+            )}
+            {isEditing && (
+              <span className="text-[9px] font-medium text-ops-warning bg-ops-warning-light border border-ops-warning/30 px-1.5 py-0.5 rounded flex-shrink-0">
+                แก้ไขอยู่
               </span>
             )}
           </div>
