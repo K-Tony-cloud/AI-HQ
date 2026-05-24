@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.streamlit/secrets.toml
+data/raw/*.csv
+data/raw/*.xlsx
+data/processed/
+*.egg-info/
+.DS_Store
