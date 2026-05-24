@@ -14,9 +14,16 @@ LOTTERY_TYPES = {
 }
 
 SAMPLE_COLUMNS = {
-    "lao_national": ["date", "draw_no", "first_prize", "second_prize", "third_prize", "special_prize"],
-    "vietlao": ["date", "result_2d", "result_3d"],
-    "stock": ["date", "session", "result_2d", "result_3d"],
+    "lao_national": ["date", "six_digit", "last_3", "last_2"],
+    "vietlao":      ["date", "result_2d", "result_3d"],
+    "stock":        ["date", "session", "result_2d", "result_3d"],
+}
+
+# Default analysis column per lottery type
+DEFAULT_COL = {
+    "lao_national": "last_2",
+    "vietlao":      "result_2d",
+    "stock":        "result_2d",
 }
 
 
@@ -55,13 +62,12 @@ def generate_sample_data(lottery_type: str = "lao_national", n: int = 100) -> pd
     dates = pd.date_range(end=datetime.today(), periods=n, freq="W")
 
     if lottery_type == "lao_national":
+        six = [f"{x:06d}" for x in rng.integers(100000, 999999, n)]
         return pd.DataFrame({
-            "date": dates,
-            "draw_no": range(1, n + 1),
-            "first_prize": rng.integers(100000, 999999, n),
-            "second_prize": rng.integers(10000, 99999, n),
-            "third_prize": rng.integers(1000, 9999, n),
-            "special_prize": rng.integers(1000, 9999, n),
+            "date":      dates,
+            "six_digit": six,
+            "last_3":    [s[-3:] for s in six],
+            "last_2":    [s[-2:] for s in six],
         })
     elif lottery_type == "vietlao":
         return pd.DataFrame({
@@ -83,6 +89,12 @@ def generate_sample_data(lottery_type: str = "lao_national", n: int = 100) -> pd
         return pd.DataFrame(rows)
 
     raise ValueError(f"Unknown lottery type: {lottery_type}")
+
+
+def load_real_data() -> pd.DataFrame | None:
+    """Load scraped Lao National results from cache, or None if not yet fetched."""
+    from src.scraper import load_cached
+    return load_cached()
 
 
 def extract_digits(series: pd.Series, n_digits: int = 2) -> pd.Series:

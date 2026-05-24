@@ -3,13 +3,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
-from src.data_loader import load_uploaded_file, generate_sample_data, LOTTERY_TYPES
+from src.data_loader import load_uploaded_file, generate_sample_data, LOTTERY_TYPES, DEFAULT_COL, load_real_data
 from src.predictor import predict_next_rf, predict_next_lr, predict_markov, ensemble_predict
 from src.ui_components import inject_css, metric_row, lottery_balls, section_label
+from src import scraper as _scraper
 
 st.set_page_config(page_title="Prediction", page_icon="🤖", layout="wide")
 inject_css()
@@ -18,25 +18,40 @@ st.markdown('<h2 style="margin-bottom:.2rem;">🤖 Number Prediction</h2>', unsa
 st.caption("Predictions are statistical patterns only — lottery draws are random. For entertainment.")
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
+_has_real = _scraper.cache_path().exists()
+
 with st.sidebar:
     st.header("Data Source")
     lottery_type = st.selectbox("Lottery type", list(LOTTERY_TYPES.keys()), format_func=lambda k: LOTTERY_TYPES[k])
-    use_sample   = st.checkbox("Use sample data", value=True)
-    uploaded     = None
-    if not use_sample:
+
+    src_options = ["Sample data", "Upload file"]
+    if _has_real and lottery_type == "lao_national":
+        src_options.insert(0, "Real scraped data")
+    source = st.radio("Source", src_options)
+
+    uploaded = None
+    if source == "Upload file":
         uploaded = st.file_uploader("Upload CSV / Excel", type=["csv", "xlsx", "xls"])
+
     st.markdown("---")
     st.header("Settings")
-    target_col = st.text_input("Column to predict", value="result_2d")
-    lookback   = st.slider("Lookback window", 3, 20, 5)
-    top_n      = st.slider("Top N suggestions", 3, 15, 7)
+    default_col = DEFAULT_COL.get(lottery_type, "last_2")
+    target_col  = st.text_input("Column to predict", value=default_col)
+    lookback    = st.slider("Lookback window", 3, 20, 5)
+    top_n       = st.slider("Top N suggestions", 3, 15, 7)
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 df = None
-if use_sample:
+if source == "Real scraped data":
+    df = load_real_data()
+    if df is not None:
+        st.success(f"Loaded **{len(df):,}** real draws from cache.")
+    else:
+        st.error("Cache empty — go to Data Manager and fetch results first.")
+elif source == "Sample data":
     df = generate_sample_data(lottery_type, n=300)
-    st.info("Using sample data — upload yours in Data Manager for real predictions.")
-elif uploaded:
+    st.info("Using sample data — fetch real data in Data Manager for accurate predictions.")
+elif source == "Upload file" and uploaded:
     try:
         df = load_uploaded_file(uploaded)
         st.success(f"Loaded {len(df):,} rows from **{uploaded.name}**")
@@ -44,7 +59,7 @@ elif uploaded:
         st.error(str(e))
 
 if df is None:
-    st.warning("Upload a file or enable sample data.")
+    st.warning("Select a data source to begin.")
     st.stop()
 
 if target_col not in df.columns:
@@ -56,34 +71,27 @@ series = df[target_col].dropna()
 
 # ── Ensemble ──────────────────────────────────────────────────────────────────
 section_label("Ensemble Prediction")
-with st.spinner("Running models…"):
+with st.spinner("Running models..."):
     ens_df = ensemble_predict(series, lookback=lookback, top_n=top_n)
 
 lottery_balls(ens_df["number"].tolist(), ens_df["score"].tolist())
 
-# Score bar chart
 fig = go.Figure(go.Bar(
     x=ens_df["number"], y=ens_df["score"],
-    marker=dict(
-        color=ens_df["score"],
-        colorscale="Reds",
-        showscale=False,
-        line_width=0,
-    ),
+    marker=dict(color=ens_df["score"], colorscale="Reds", showscale=False, line_width=0),
 ))
 fig.update_layout(
     height=280, plot_bgcolor="#161B22", paper_bgcolor="#0D1117",
-    font_color="#F0F6FC",
-    xaxis_title="Number", yaxis_title="Ensemble score",
+    font_color="#F0F6FC", xaxis_title="Number", yaxis_title="Ensemble score",
     margin=dict(t=10, b=40),
 )
 st.plotly_chart(fig, use_container_width=True)
 
 metric_row([
-    ("🥇", ens_df.iloc[0]["number"],          "top pick"),
-    ("📈", f"{ens_df.iloc[0]['score']:.1f}%",  "top score"),
-    ("🎯", f"{len(ens_df)}",                   "candidates"),
-    ("🔁", str(lookback),                      "lookback window"),
+    ("🥇", ens_df.iloc[0]["number"],         "top pick"),
+    ("📈", f"{ens_df.iloc[0]['score']:.1f}%", "top score"),
+    ("🎯", f"{len(ens_df)}",                  "candidates"),
+    ("🔁", str(lookback),                     "lookback window"),
 ])
 
 # ── Individual models ─────────────────────────────────────────────────────────
@@ -109,16 +117,13 @@ def _model_view(preds: list[dict]) -> None:
 
 
 with tab_rf:
-    rf = predict_next_rf(series, lookback=lookback, top_n=top_n)
-    _model_view(rf)
+    _model_view(predict_next_rf(series, lookback=lookback, top_n=top_n))
 
 with tab_lr:
-    lr = predict_next_lr(series, lookback=lookback, top_n=top_n)
-    _model_view(lr)
+    _model_view(predict_next_lr(series, lookback=lookback, top_n=top_n))
 
 with tab_mk:
-    mk = predict_markov(series, top_n=top_n)
-    _model_view(mk)
+    _model_view(predict_markov(series, top_n=top_n))
 
 with tab_compare:
     section_label("Side-by-side comparison")
@@ -136,10 +141,12 @@ with tab_compare:
         .sort_values("Ensemble", ascending=False)
         .reset_index(drop=True)
     )
-    st.dataframe(merged.style.background_gradient(subset=["Ensemble", "RF %", "LR %", "MK %"],
-                                                   cmap="Reds"), use_container_width=True)
+    st.dataframe(merged.style.background_gradient(
+        subset=["Ensemble", "RF %", "LR %", "MK %"], cmap="Reds"),
+        use_container_width=True,
+    )
 
 # ── Recent draws ──────────────────────────────────────────────────────────────
 section_label("Recent Draws")
 cols = [target_col] + (["date"] if "date" in df.columns else [])
-st.dataframe(df[cols].tail(20).reset_index(drop=True), use_container_width=True)
+st.dataframe(df[cols].head(20).reset_index(drop=True), use_container_width=True)

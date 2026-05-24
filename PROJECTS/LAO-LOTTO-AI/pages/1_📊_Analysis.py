@@ -8,12 +8,13 @@ import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
 
-from src.data_loader import load_uploaded_file, generate_sample_data, LOTTERY_TYPES
+from src.data_loader import load_uploaded_file, generate_sample_data, LOTTERY_TYPES, DEFAULT_COL, load_real_data
 from src.analyzer import (
     frequency_table, hot_cold, gap_analysis,
     overdue_numbers, consecutive_pairs, rolling_frequency,
 )
 from src.ui_components import inject_css, metric_row, lottery_balls, section_label
+from src import scraper as _scraper
 
 st.set_page_config(page_title="Analysis", page_icon="📊", layout="wide")
 inject_css()
@@ -21,24 +22,39 @@ inject_css()
 st.markdown('<h2 style="margin-bottom:.2rem;">📊 Lottery Number Analysis</h2>', unsafe_allow_html=True)
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
+_has_real = _scraper.cache_path().exists()
+
 with st.sidebar:
     st.header("Data Source")
     lottery_type = st.selectbox("Lottery type", list(LOTTERY_TYPES.keys()), format_func=lambda k: LOTTERY_TYPES[k])
-    use_sample   = st.checkbox("Use sample data", value=True)
-    uploaded     = None
-    if not use_sample:
+
+    src_options = ["Sample data", "Upload file"]
+    if _has_real and lottery_type == "lao_national":
+        src_options.insert(0, "Real scraped data")
+    source = st.radio("Source", src_options)
+
+    uploaded = None
+    if source == "Upload file":
         uploaded = st.file_uploader("Upload CSV / Excel", type=["csv", "xlsx", "xls"])
+
     st.markdown("---")
     st.header("Settings")
-    target_col = st.text_input("Column to analyse", value="result_2d")
-    top_n      = st.slider("Top N numbers", 5, 30, 10)
+    default_col = DEFAULT_COL.get(lottery_type, "last_2")
+    target_col  = st.text_input("Column to analyse", value=default_col)
+    top_n       = st.slider("Top N numbers", 5, 30, 10)
 
 # ── Load ─────────────────────────────────────────────────────────────────────
 df = None
-if use_sample:
+if source == "Real scraped data":
+    df = load_real_data()
+    if df is not None:
+        st.success(f"Loaded **{len(df):,}** real draws from cache.")
+    else:
+        st.error("Cache empty — go to Data Manager and fetch results first.")
+elif source == "Sample data":
     df = generate_sample_data(lottery_type, n=300)
-    st.info("Showing sample data — upload your own in Data Manager for real analysis.")
-elif uploaded:
+    st.info("Showing sample data — fetch real data in Data Manager for accurate analysis.")
+elif source == "Upload file" and uploaded:
     try:
         df = load_uploaded_file(uploaded)
         st.success(f"Loaded {len(df):,} rows from **{uploaded.name}**")
@@ -46,7 +62,7 @@ elif uploaded:
         st.error(str(e))
 
 if df is None:
-    st.warning("Upload a file or enable sample data.")
+    st.warning("Select a data source to begin.")
     st.stop()
 
 if target_col not in df.columns:
