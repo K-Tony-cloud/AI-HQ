@@ -83,6 +83,10 @@ function doGet(e) {
           },
         })
       }
+      case 'forceReset': {
+        forceReset()
+        return ok({ reset: true, timestamp: new Date().toISOString() })
+      }
       default:
         return err('Unknown action: ' + action, 404)
     }
