@@ -58,7 +58,7 @@ export const Modal = ({ onClose, children, maxWidth = 'max-w-lg' }) => {
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6">
       {/* Full-screen backdrop — catches all pointer events behind the panel */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px] animate-fade-in"
         onClick={onClose}
         aria-hidden="true"
       />

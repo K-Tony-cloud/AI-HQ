@@ -1,6 +1,6 @@
 import { useRef, useEffect, memo } from 'react'
 import { useApp } from '../../context/AppContext'
-import { useModal } from '../../context/ModalContext'
+import { useModalActions } from '../../context/ModalContext'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TypeIcon } from '../ui/TypeIcon'
 import { EventLogs } from './EventLogs'
@@ -26,7 +26,7 @@ const DelayBadge = ({ planned, actual }) => {
 export const EventCard = memo(
   function EventCard({ event, state }) {
     const { toggleEventExpand, isEventExpanded, densityMode, isAdminMode, editingEventId } = useApp()
-    const { openModal } = useModal()
+    const { openModal } = useModalActions()
     const cardRef        = useRef(null)
     const prevExpRef     = useRef(false)
 

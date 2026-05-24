@@ -1,12 +1,12 @@
 import { useApp } from '../../context/AppContext'
 import { useFilter } from '../../context/FilterContext'
-import { useModal } from '../../context/ModalContext'
+import { useModalActions } from '../../context/ModalContext'
 import clsx from 'clsx'
 
 export const MobileBar = () => {
   const { isAdminMode, isMockMode, isSyncing, refetch } = useApp()
   const { hasActiveFilters } = useFilter()
-  const { openModal } = useModal()
+  const { openModal } = useModalActions()
 
   return (
     <>

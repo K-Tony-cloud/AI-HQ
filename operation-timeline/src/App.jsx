@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { ToastProvider } from './context/ToastContext'
 import { FilterProvider } from './context/FilterContext'
-import { ModalProvider, useModal } from './context/ModalContext'
+import { ModalProvider, useModalState } from './context/ModalContext'
 import { ToastContainer } from './components/ui/Toast'
 import { ModalHost } from './components/ui/ModalHost'
 import { Header } from './components/layout/Header'
@@ -95,7 +95,7 @@ const Footer = () => {
 /* ── Root ────────────────────────────────────────────────────── */
 const AppContent = () => {
   const { isLoading, error, refetch } = useApp()
-  const { activeModal } = useModal()
+  const { activeModal } = useModalState()
   const shellRef = useRef(null)
 
   // Apply `inert` to the app shell whenever a modal is open.

@@ -1,9 +1,9 @@
 import { useApp } from '../../context/AppContext'
-import { useModal } from '../../context/ModalContext'
+import { useModalActions } from '../../context/ModalContext'
 
 export const LoginButton = () => {
   const { isAdminMode, setIsAdminMode } = useApp()
-  const { openModal } = useModal()
+  const { openModal } = useModalActions()
 
   if (isAdminMode) {
     return (

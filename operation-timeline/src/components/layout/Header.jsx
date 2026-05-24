@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
-import { useModal } from '../../context/ModalContext'
+import { useModalActions } from '../../context/ModalContext'
 import { LoginButton } from '../admin/LoginButton'
 import { ConnectionPanel } from '../admin/ConnectionPanel'
 import { exportEventsCSV } from '../../services/exportService'
@@ -56,7 +56,7 @@ const DensityToggle = () => {
 /* ── Operation selector dropdown ─────────────────────────────── */
 const OperationSelector = ({ isAdmin }) => {
   const { operations, currentOperationId, operationMeta, switchOperation, archiveOperation } = useApp()
-  const { openModal } = useModal()
+  const { openModal } = useModalActions()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -182,7 +182,7 @@ const OperationSelector = ({ isAdmin }) => {
 /* ── Main Header ─────────────────────────────────────────────── */
 export const Header = () => {
   const { operationMeta, isAdminMode, events } = useApp()
-  const { openModal } = useModal()
+  const { openModal } = useModalActions()
 
   return (
     <>

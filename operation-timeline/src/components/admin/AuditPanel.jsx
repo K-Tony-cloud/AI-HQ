@@ -57,7 +57,7 @@ export const AuditPanel = ({ onClose }) => {
     <div className="fixed inset-0 z-[200]">
       {/* Full-screen backdrop */}
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+        className="absolute inset-0 bg-black/40 backdrop-blur-[1px] animate-fade-in"
         onClick={onClose}
         aria-hidden="true"
       />
