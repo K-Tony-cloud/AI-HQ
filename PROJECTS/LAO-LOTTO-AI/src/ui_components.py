@@ -1,3 +1,5 @@
+"""Shared UI components and CSS for LAO-LOTTO-AI."""
+
 import streamlit as st
 
 _BALL_GRADIENTS = [
@@ -10,74 +12,149 @@ _BALL_GRADIENTS = [
     "radial-gradient(circle at 35% 35%, #4DB6AC, #00695C)",
 ]
 
-_CSS = """
+CSS = """
 <style>
-/* ─── Metric cards ─────────────────────────── */
-.lao-metric-row { display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
+/* ─── Reset / base ────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ─── Metric cards ────────────────────────────── */
+.lao-metric-row {
+  display: flex; gap: .8rem; margin-bottom: 1rem; flex-wrap: wrap;
+}
 .lao-metric {
-  flex:1; min-width:140px;
-  background:#161B22; border:1px solid #30363D; border-radius:14px;
-  padding:1.2rem 1rem; text-align:center;
+  flex: 1; min-width: 130px;
+  background: #161B22; border: 1px solid #30363D; border-radius: 14px;
+  padding: 1rem .9rem; text-align: center;
+  transition: border-color .2s;
 }
-.lao-metric .m-icon  { font-size:1.6rem; }
-.lao-metric .m-val   { font-size:1.9rem; font-weight:800; color:#E63946; margin:4px 0 2px; line-height:1; }
-.lao-metric .m-label { font-size:0.72rem; color:#8B949E; text-transform:uppercase; letter-spacing:.06em; }
+.lao-metric:hover { border-color: #E63946; }
+.lao-metric .m-icon  { font-size: 1.5rem; line-height: 1; }
+.lao-metric .m-val   {
+  font-size: 1.75rem; font-weight: 800; color: #E63946;
+  margin: .25rem 0 .15rem; line-height: 1;
+}
+.lao-metric .m-label {
+  font-size: .68rem; color: #8B949E;
+  text-transform: uppercase; letter-spacing: .07em;
+}
 
-/* ─── Lottery balls ─────────────────────────── */
-.ball-row { display:flex; flex-wrap:wrap; gap:14px; justify-content:center; padding:1.4rem 0; }
-.ball-item { display:flex; flex-direction:column; align-items:center; gap:5px; }
+/* ─── Lottery balls ──────────────────────────── */
+.ball-row {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  justify-content: center; padding: 1.2rem 0;
+}
+.ball-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .lao-ball {
-  width:66px; height:66px; border-radius:50%;
-  display:flex; align-items:center; justify-content:center;
-  color:#fff; font-weight:800; font-size:1.35rem;
+  width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 800; font-size: 1.3rem;
   box-shadow: 0 6px 18px rgba(0,0,0,.45), inset 0 -4px 8px rgba(0,0,0,.3);
-  user-select:none;
+  user-select: none;
 }
-.lao-ball.top { box-shadow:0 0 0 3px #FFD700, 0 6px 18px rgba(0,0,0,.45); }
-.ball-pct { font-size:.65rem; color:#8B949E; }
+.lao-ball.top {
+  box-shadow: 0 0 0 3px #FFD700, 0 6px 18px rgba(0,0,0,.45);
+  transform: scale(1.1);
+}
+.ball-pct { font-size: .62rem; color: #8B949E; font-weight: 500; }
 
-/* ─── Section label ─────────────────────────── */
+/* ─── Section label ──────────────────────────── */
 .sec-label {
-  font-size:1rem; font-weight:600; color:#F0F6FC;
-  border-left:3px solid #E63946; padding-left:.65rem;
-  margin:1.4rem 0 .7rem;
+  font-size: 1rem; font-weight: 600; color: #F0F6FC;
+  border-left: 3px solid #E63946; padding-left: .65rem;
+  margin: 1.3rem 0 .65rem;
 }
 
-/* ─── Nav cards ─────────────────────────────── */
-.nav-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:1rem; }
+/* ─── Latest draw card ───────────────────────── */
+.latest-card {
+  background: linear-gradient(135deg, #1a0a0a 0%, #2d0f0f 100%);
+  border: 1px solid #E63946;
+  border-radius: 16px; padding: 1.5rem 1.8rem;
+  text-align: center; margin-bottom: 1rem;
+}
+.latest-card .lc-label { color: #8B949E; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+.latest-card .lc-date  { color: #F0F6FC; font-size: 1rem; margin: .2rem 0 .8rem; }
+.latest-card .lc-six   {
+  font-size: 2.8rem; font-weight: 900; letter-spacing: .15em;
+  background: linear-gradient(90deg, #E63946, #FFD700);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.latest-card .lc-sub   { color: #8B949E; font-size: .9rem; margin-top: .5rem; }
+
+/* ─── Stale banner ───────────────────────────── */
+.stale-banner {
+  background: #2d1f00; border: 1px solid #F5A623;
+  border-radius: 10px; padding: .7rem 1rem;
+  color: #F5A623; font-size: .85rem; margin-bottom: 1rem;
+  display: flex; align-items: center; gap: .6rem;
+}
+
+/* ─── Nav cards ──────────────────────────────── */
+.nav-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: .9rem;
+}
 .nav-card {
-  background:#161B22; border:1px solid #30363D; border-radius:12px;
-  padding:1.3rem 1.2rem;
+  background: #161B22; border: 1px solid #30363D; border-radius: 12px;
+  padding: 1.2rem 1.1rem; transition: border-color .2s;
 }
-.nav-card .nc-icon { font-size:2rem; }
-.nav-card h4 { margin:.4rem 0 .3rem; color:#F0F6FC; font-size:1rem; }
-.nav-card p  { margin:0; color:#8B949E; font-size:.82rem; line-height:1.4; }
+.nav-card:hover { border-color: #E63946; }
+.nav-card .nc-icon { font-size: 1.8rem; }
+.nav-card h4 { margin: .35rem 0 .25rem; color: #F0F6FC; font-size: .95rem; }
+.nav-card p  { margin: 0; color: #8B949E; font-size: .8rem; line-height: 1.4; }
 
-/* ─── Overrides ─────────────────────────────── */
-div[data-testid="stSidebar"] { background:#0D1117 !important; }
-div[data-testid="stSidebar"] hr { border-color:#30363D; }
-.stTabs [data-baseweb="tab-list"] { gap:.5rem; }
+/* ─── Tab overrides ──────────────────────────── */
+.stTabs [data-baseweb="tab-list"] { gap: .4rem; }
 .stTabs [data-baseweb="tab"] {
-  background:#161B22 !important; border-radius:8px !important;
-  border:1px solid #30363D !important; color:#8B949E !important;
+  background: #161B22 !important; border-radius: 8px !important;
+  border: 1px solid #30363D !important; color: #8B949E !important;
+  padding: .4rem .9rem !important;
 }
 .stTabs [aria-selected="true"] {
-  background:#E63946 !important; color:#fff !important;
-  border-color:#E63946 !important;
+  background: #E63946 !important; color: #fff !important;
+  border-color: #E63946 !important;
+}
+
+/* ─── Sidebar ────────────────────────────────── */
+div[data-testid="stSidebar"] { background: #0D1117 !important; }
+div[data-testid="stSidebar"] hr { border-color: #30363D; }
+
+/* ─── Mobile ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .lao-metric-row { gap: .5rem; }
+  .lao-metric     { min-width: 100px; padding: .8rem .6rem; }
+  .lao-metric .m-val { font-size: 1.4rem; }
+  .lao-ball       { width: 52px; height: 52px; font-size: 1.05rem; }
+  .ball-row       { gap: 8px; }
+  .latest-card .lc-six { font-size: 2rem; }
+  .nav-grid { grid-template-columns: 1fr 1fr; }
 }
 </style>
 """
 
+_CHART_STYLE = dict(
+    plot_bgcolor="#161B22",
+    paper_bgcolor="#0D1117",
+    font_color="#F0F6FC",
+    margin=dict(t=30, b=40, l=40, r=20),
+)
+
 
 def inject_css() -> None:
-    st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(CSS, unsafe_allow_html=True)
+
+
+def chart_style(**kwargs) -> dict:
+    return {**_CHART_STYLE, **kwargs}
 
 
 def metric_row(metrics: list[tuple[str, str, str]]) -> None:
-    """metrics: list of (icon, value, label)"""
+    """metrics: [(icon, value, label), ...]"""
     cards = "".join(
-        f'<div class="lao-metric"><div class="m-icon">{ic}</div>'
-        f'<div class="m-val">{val}</div><div class="m-label">{lbl}</div></div>'
+        f'<div class="lao-metric">'
+        f'<div class="m-icon">{ic}</div>'
+        f'<div class="m-val">{val}</div>'
+        f'<div class="m-label">{lbl}</div>'
+        f'</div>'
         for ic, val, lbl in metrics
     )
     st.markdown(f'<div class="lao-metric-row">{cards}</div>', unsafe_allow_html=True)
@@ -100,12 +177,36 @@ def lottery_balls(numbers: list[str], scores: list[float] | None = None) -> None
     )
 
 
+def latest_draw_card(six_digit: str, draw_date: str, last_3: str, last_2: str) -> None:
+    st.markdown(
+        f"""
+        <div class="latest-card">
+          <div class="lc-label">Latest Draw</div>
+          <div class="lc-date">{draw_date}</div>
+          <div class="lc-six">{six_digit}</div>
+          <div class="lc-sub">Last 3 digits: <strong>{last_3}</strong>
+            &nbsp;·&nbsp; Last 2 digits: <strong>{last_2}</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def stale_banner(last_scraped: str) -> None:
+    st.markdown(
+        f'<div class="stale-banner">⚠ Data may be outdated — '
+        f'last scraped {last_scraped}. '
+        f'Go to <strong>⚙ Settings</strong> to refresh.</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def section_label(text: str) -> None:
     st.markdown(f'<div class="sec-label">{text}</div>', unsafe_allow_html=True)
 
 
 def nav_cards(cards: list[tuple[str, str, str]]) -> None:
-    """cards: list of (icon, title, description)"""
+    """cards: [(icon, title, description), ...]"""
     items = "".join(
         f'<div class="nav-card"><div class="nc-icon">{ic}</div>'
         f'<h4>{title}</h4><p>{desc}</p></div>'
