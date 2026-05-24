@@ -1,7 +1,8 @@
+import { useEffect, useRef } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { ToastProvider } from './context/ToastContext'
 import { FilterProvider } from './context/FilterContext'
-import { ModalProvider } from './context/ModalContext'
+import { ModalProvider, useModal } from './context/ModalContext'
 import { ToastContainer } from './components/ui/Toast'
 import { ModalHost } from './components/ui/ModalHost'
 import { Header } from './components/layout/Header'
@@ -94,9 +95,27 @@ const Footer = () => {
 /* ── Root ────────────────────────────────────────────────────── */
 const AppContent = () => {
   const { isLoading, error, refetch } = useApp()
+  const { activeModal } = useModal()
+  const shellRef = useRef(null)
+
+  // Apply `inert` to the app shell whenever a modal is open.
+  // `inert` is a browser-native attribute that blocks ALL pointer events,
+  // keyboard events, and focus on the shell DOM subtree — with zero CSS tricks.
+  // The modal renders in #modal-root (outside this subtree) so it stays interactive.
+  useEffect(() => {
+    const el = shellRef.current
+    if (!el) return
+    if (activeModal) {
+      el.setAttribute('inert', '')
+      el.setAttribute('aria-hidden', 'true')
+    } else {
+      el.removeAttribute('inert')
+      el.removeAttribute('aria-hidden')
+    }
+  }, [activeModal])
 
   return (
-    <div className="flex flex-col h-screen bg-ops-bg overflow-hidden">
+    <div ref={shellRef} className="flex flex-col h-screen bg-ops-bg overflow-hidden">
       <Header />
       <OfflineBanner />
       <MobileProgressBar />

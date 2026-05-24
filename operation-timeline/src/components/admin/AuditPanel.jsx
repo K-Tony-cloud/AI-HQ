@@ -51,11 +51,13 @@ export const AuditPanel = ({ onClose }) => {
 
   const filtered = typeFilter === 'all' ? logs : logs.filter(l => l.type === typeFilter)
 
+  const modalRoot = document.getElementById('modal-root') ?? document.body
+
   return createPortal(
     <div className="fixed inset-0 z-[200]">
-      {/* Backdrop — blocks all clicks on the timeline */}
+      {/* Full-screen backdrop */}
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-[1px] animate-fade-in"
+        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -152,6 +154,6 @@ export const AuditPanel = ({ onClose }) => {
         </div>
       </div>
     </div>,
-    document.body,
+    modalRoot,
   )
 }

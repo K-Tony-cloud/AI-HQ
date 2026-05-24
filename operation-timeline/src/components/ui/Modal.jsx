@@ -11,17 +11,20 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
+const getModalRoot = () =>
+  document.getElementById('modal-root') ?? document.body
+
 export const Modal = ({ onClose, children, maxWidth = 'max-w-lg' }) => {
   const panelRef = useRef(null)
 
   // Lock body scroll
   useEffect(() => {
-    const original = document.body.style.overflow
+    const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = original }
+    return () => { document.body.style.overflow = prev }
   }, [])
 
-  // ESC key — capture phase so it fires even if inner elements stop propagation
+  // ESC — capture phase so inner elements can't swallow it
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handler, true)
@@ -30,11 +33,10 @@ export const Modal = ({ onClose, children, maxWidth = 'max-w-lg' }) => {
 
   // Focus first focusable element on mount
   useEffect(() => {
-    const el = panelRef.current?.querySelector(FOCUSABLE)
-    el?.focus()
+    panelRef.current?.querySelector(FOCUSABLE)?.focus()
   }, [])
 
-  // Trap Tab/Shift+Tab inside the panel
+  // Trap Tab / Shift-Tab inside the panel
   useEffect(() => {
     const handler = (e) => {
       if (e.key !== 'Tab' || !panelRef.current) return
@@ -54,9 +56,9 @@ export const Modal = ({ onClose, children, maxWidth = 'max-w-lg' }) => {
 
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6">
-      {/* Backdrop — pointer-events block everything behind the modal */}
+      {/* Full-screen backdrop — catches all pointer events behind the panel */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px] animate-fade-in"
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -76,11 +78,10 @@ export const Modal = ({ onClose, children, maxWidth = 'max-w-lg' }) => {
         {children}
       </div>
     </div>,
-    document.body,
+    getModalRoot(),
   )
 }
 
-/** Standardised close button used by all modals */
 export const ModalClose = ({ onClose }) => (
   <button
     type="button"
