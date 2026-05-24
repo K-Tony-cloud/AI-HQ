@@ -13,6 +13,8 @@ import pandas as pd
 def frequency(series: pd.Series) -> pd.DataFrame:
     """Return DataFrame: number | count | pct — sorted by count desc."""
     counts = Counter(series.astype(str))
+    if not counts:
+        return pd.DataFrame(columns=["number", "count", "pct"])
     total  = sum(counts.values()) or 1
     df = pd.DataFrame([
         {"number": k, "count": v, "pct": round(v / total * 100, 2)}
