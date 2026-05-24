@@ -1,13 +1,12 @@
-import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useFilter } from '../../context/FilterContext'
-import { AddEventModal } from '../admin/AddEventModal'
+import { useModal } from '../../context/ModalContext'
 import clsx from 'clsx'
 
 export const MobileBar = () => {
   const { isAdminMode, isMockMode, isSyncing, refetch } = useApp()
   const { hasActiveFilters } = useFilter()
-  const [showAdd, setShowAdd] = useState(false)
+  const { openModal } = useModal()
 
   return (
     <>
@@ -32,7 +31,7 @@ export const MobileBar = () => {
 
           {/* Add event */}
           <button
-            onClick={() => isAdminMode && setShowAdd(true)}
+            onClick={() => isAdminMode && openModal('addEvent')}
             disabled={!isAdminMode}
             className={clsx(
               'flex flex-col items-center gap-0.5 px-4 py-1 rounded-lg transition-colors',
@@ -76,7 +75,6 @@ export const MobileBar = () => {
         </div>
       </div>
 
-      {showAdd && <AddEventModal onClose={() => setShowAdd(false)} />}
     </>
   )
 }

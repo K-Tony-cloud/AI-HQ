@@ -1,10 +1,9 @@
-import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
-import { PinLoginModal } from './PinLoginModal'
+import { useModal } from '../../context/ModalContext'
 
 export const LoginButton = () => {
   const { isAdminMode, setIsAdminMode } = useApp()
-  const [showPin, setShowPin] = useState(false)
+  const { openModal } = useModal()
 
   if (isAdminMode) {
     return (
@@ -24,24 +23,12 @@ export const LoginButton = () => {
   }
 
   return (
-    <>
-      <button
-        onClick={() => setShowPin(true)}
-        className="flex items-center gap-2 text-[11px] font-medium text-ops-text-secondary hover:text-ops-text-primary border border-ops-border hover:border-ops-border-focus bg-white hover:bg-ops-accent-light px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm"
-      >
-        <span>🔐</span>
-        <span>เข้าสู่ระบบ</span>
-      </button>
-
-      {showPin && (
-        <PinLoginModal
-          onSuccess={() => {
-            setIsAdminMode(true)
-            setShowPin(false)
-          }}
-          onClose={() => setShowPin(false)}
-        />
-      )}
-    </>
+    <button
+      onClick={() => openModal('pinLogin', { onSuccess: () => setIsAdminMode(true) })}
+      className="flex items-center gap-2 text-[11px] font-medium text-ops-text-secondary hover:text-ops-text-primary border border-ops-border hover:border-ops-border-focus bg-white hover:bg-ops-accent-light px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm"
+    >
+      <span>🔐</span>
+      <span>เข้าสู่ระบบ</span>
+    </button>
   )
 }

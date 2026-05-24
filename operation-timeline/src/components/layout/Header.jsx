@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
+import { useModal } from '../../context/ModalContext'
 import { LoginButton } from '../admin/LoginButton'
-import { AddEventModal } from '../admin/AddEventModal'
-import { AuditPanel } from '../admin/AuditPanel'
 import { ConnectionPanel } from '../admin/ConnectionPanel'
-import { CreateOperationModal } from '../admin/CreateOperationModal'
 import { exportEventsCSV } from '../../services/exportService'
 import clsx from 'clsx'
 
@@ -58,9 +56,8 @@ const DensityToggle = () => {
 /* ── Operation selector dropdown ─────────────────────────────── */
 const OperationSelector = ({ isAdmin }) => {
   const { operations, currentOperationId, operationMeta, switchOperation, archiveOperation } = useApp()
+  const { openModal } = useModal()
   const [open, setOpen] = useState(false)
-  const [showCreate, setShowCreate]   = useState(false)
-  const [cloneSourceId, setCloneSourceId] = useState(null)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -144,7 +141,7 @@ const OperationSelector = ({ isAdmin }) => {
                 {isAdmin && (
                   <div className="hidden group-hover/row:flex items-center gap-1 flex-shrink-0">
                     <button
-                      onClick={e => { e.stopPropagation(); setCloneSourceId(op.id); setOpen(false) }}
+                      onClick={e => { e.stopPropagation(); openModal('createOperation', { cloneSourceId: op.id }); setOpen(false) }}
                       title="สำเนา"
                       className="text-[10px] text-ops-text-muted hover:text-ops-accent px-1.5 py-1 rounded hover:bg-ops-accent-light transition-colors"
                     >
@@ -167,7 +164,7 @@ const OperationSelector = ({ isAdmin }) => {
           {isAdmin && (
             <div className="p-2 border-t border-ops-border">
               <button
-                onClick={() => { setShowCreate(true); setOpen(false) }}
+                onClick={() => { openModal('createOperation'); setOpen(false) }}
                 className="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold text-ops-accent hover:bg-ops-accent-light transition-colors flex items-center gap-2"
               >
                 <span className="text-sm">+</span>
@@ -178,8 +175,6 @@ const OperationSelector = ({ isAdmin }) => {
         </div>
       )}
 
-      {showCreate   && <CreateOperationModal onClose={() => setShowCreate(false)} />}
-      {cloneSourceId && <CreateOperationModal cloneSourceId={cloneSourceId} onClose={() => setCloneSourceId(null)} />}
     </div>
   )
 }
@@ -187,8 +182,7 @@ const OperationSelector = ({ isAdmin }) => {
 /* ── Main Header ─────────────────────────────────────────────── */
 export const Header = () => {
   const { operationMeta, isAdminMode, events } = useApp()
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [showAudit,    setShowAudit]    = useState(false)
+  const { openModal } = useModal()
 
   return (
     <>
@@ -219,7 +213,7 @@ export const Header = () => {
             <div className="hidden sm:block w-px h-6 bg-ops-border" />
             {isAdminMode && (
               <button
-                onClick={() => setShowAddModal(true)}
+                onClick={() => openModal('addEvent')}
                 className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-ops-accent bg-ops-accent-light border border-ops-border-focus hover:bg-sky-100 px-3 py-1.5 rounded-lg transition-all"
               >
                 <span className="text-sm leading-none">+</span>
@@ -228,7 +222,7 @@ export const Header = () => {
             )}
             {isAdminMode && (
               <button
-                onClick={() => setShowAudit(true)}
+                onClick={() => openModal('audit')}
                 className="text-[11px] font-semibold text-ops-text-secondary border border-ops-border hover:bg-ops-bg px-2.5 py-1.5 rounded-lg transition-all"
               >
                 📋 ประวัติ
@@ -253,7 +247,7 @@ export const Header = () => {
               ⚠ โหมดผู้ดูแลระบบ — แก้ไขข้อมูลแบบเรียลไทม์
             </span>
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => openModal('addEvent')}
               className="sm:hidden text-xs font-semibold text-ops-accent bg-white border border-ops-border rounded px-2 py-0.5"
             >
               + เพิ่ม
@@ -262,8 +256,6 @@ export const Header = () => {
         )}
       </header>
 
-      {showAddModal && <AddEventModal onClose={() => setShowAddModal(false)} />}
-      {showAudit    && <AuditPanel onClose={() => setShowAudit(false)} />}
     </>
   )
 }

@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect, memo } from 'react'
+import { useRef, useEffect, memo } from 'react'
 import { useApp } from '../../context/AppContext'
+import { useModal } from '../../context/ModalContext'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TypeIcon } from '../ui/TypeIcon'
 import { EventLogs } from './EventLogs'
-import { EditEventModal } from '../admin/EditEventModal'
 import { getTypeConfig } from '../../utils/statusUtils'
 import clsx from 'clsx'
 
@@ -26,7 +26,7 @@ const DelayBadge = ({ planned, actual }) => {
 export const EventCard = memo(
   function EventCard({ event, state }) {
     const { toggleEventExpand, isEventExpanded, densityMode, isAdminMode, editingEventId } = useApp()
-    const [showEdit, setShowEdit] = useState(false)
+    const { openModal } = useModal()
     const cardRef        = useRef(null)
     const prevExpRef     = useRef(false)
 
@@ -240,7 +240,7 @@ export const EventCard = memo(
                     <span className="font-mono text-[10px] text-ops-text-disabled">{event.id}</span>
                     {isAdminMode && (
                       <button
-                        onClick={e => { e.stopPropagation(); setShowEdit(true) }}
+                        onClick={e => { e.stopPropagation(); openModal('editEvent', { event }) }}
                         className="text-[10px] font-semibold text-ops-warning bg-ops-warning-light border border-ops-warning/25 hover:bg-amber-100 px-2 py-0.5 rounded-md transition-all"
                       >
                         แก้ไข
@@ -253,8 +253,6 @@ export const EventCard = memo(
             </div>
           </div>
         </div>
-
-        {showEdit && <EditEventModal event={event} onClose={() => setShowEdit(false)} />}
       </>
     )
   },

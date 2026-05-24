@@ -1,7 +1,9 @@
 import { AppProvider, useApp } from './context/AppContext'
 import { ToastProvider } from './context/ToastContext'
 import { FilterProvider } from './context/FilterContext'
+import { ModalProvider } from './context/ModalContext'
 import { ToastContainer } from './components/ui/Toast'
+import { ModalHost } from './components/ui/ModalHost'
 import { Header } from './components/layout/Header'
 import { OfflineBanner } from './components/ui/OfflineBanner'
 import { Sidebar } from './components/layout/Sidebar'
@@ -126,6 +128,7 @@ const AppContent = () => {
       <PlaybackBar />
       <Footer />
       <MobileBottomBar />
+      <ModalHost />
     </div>
   )
 }
@@ -134,10 +137,12 @@ export default function App() {
   return (
     <ToastProvider>
       <FilterProvider>
-        <AppProvider>
-          <AppContent />
-          <ToastContainer />
-        </AppProvider>
+        <ModalProvider>
+          <AppProvider>
+            <AppContent />
+            <ToastContainer />
+          </AppProvider>
+        </ModalProvider>
       </FilterProvider>
     </ToastProvider>
   )
