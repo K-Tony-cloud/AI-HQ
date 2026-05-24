@@ -15,6 +15,7 @@
  *   ?action=getMeta
  *   ?action=getLogs&eventId=EVT-xxx
  *   ?action=getAllLogs[&limit=N]
+ *   ?action=getAttachments&eventId=EVT-xxx
  *   ?action=ping
  *
  * POST endpoints (body JSON):
@@ -23,8 +24,9 @@
  *   {action:'cloneOperation',  sourceId:'OP-xxx', data:{...}}
  *   {action:'addEvent',        data:{...}}
  *   {action:'updateEvent',     id:'EVT-xxx', data:{...}}
- *   {action:'addLog',          data:{...}}
- *   {action:'importOperation', data:{operation:{...}, events:[...]}}
+ *   {action:'addLog',              data:{...}}
+ *   {action:'importOperation',    data:{operation:{...}, events:[...]}}
+ *   {action:'uploadAttachment',   data:{operationId, eventId, fileName, fileData, mimeType, uploadedBy}}
  */
 
 function ok(payload) {
@@ -71,6 +73,11 @@ function doGet(e) {
       case 'getAllLogs': {
         const limit = e.parameter.limit ? parseInt(e.parameter.limit) : 50
         return ok(getAllLogs(limit))
+      }
+      case 'getAttachments': {
+        const eventId = e.parameter.eventId
+        if (!eventId) return err('eventId required')
+        return ok(getAttachmentsByEventId(eventId))
       }
       case 'ping': {
         return ok({
@@ -132,6 +139,9 @@ function doPost(e) {
           ? bulkCreateEvents(op.id, op.date, events)
           : []
         return ok({ operation: op, events: created, count: created.length })
+      }
+      case 'uploadAttachment': {
+        return ok(createAttachment(payload.data || {}))
       }
       default:
         return err('Unknown action: ' + action, 404)

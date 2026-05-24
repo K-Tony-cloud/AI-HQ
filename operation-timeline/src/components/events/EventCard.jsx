@@ -4,6 +4,7 @@ import { useModalActions } from '../../context/ModalContext'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TypeIcon } from '../ui/TypeIcon'
 import { EventLogs } from './EventLogs'
+import { EventAttachments } from './EventAttachments'
 import { getTypeConfig } from '../../utils/statusUtils'
 import clsx from 'clsx'
 
@@ -230,6 +231,11 @@ export const EventCard = memo(
 
                 {/* Logs */}
                 {densityMode !== 'compact' && <EventLogs eventId={event.id} />}
+
+                {/* Attachments */}
+                {isExpanded && densityMode !== 'compact' && (
+                  <EventAttachments event={event} isAdmin={isAdminMode} />
+                )}
 
                 {/* Footer */}
                 <div className="flex items-center justify-between pt-2 mt-2 border-t border-ops-border/50">

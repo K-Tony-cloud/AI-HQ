@@ -99,6 +99,29 @@ export const fetchAllLogs = (limit = 50) =>
     ? Promise.resolve(Object.values(MOCK_LOGS).flat().slice(0, limit))
     : sheets.getAllLogs(limit)
 
+/* ── Attachments ─────────────────────────────────────────────── */
+
+export const fetchAttachments = async (eventId) => {
+  if (USE_MOCK) return []
+  return sheets.getAttachments(eventId)
+}
+
+export const uploadAttachment = async (data) => {
+  if (USE_MOCK) {
+    return {
+      attachment_id: `ATT-${Date.now()}`,
+      event_id:      data.eventId,
+      operation_id:  data.operationId || '',
+      file_name:     data.fileName,
+      file_url:      '',
+      file_type:     data.mimeType || 'image/jpeg',
+      uploaded_by:   'ADMIN',
+      uploaded_at:   new Date().toISOString(),
+    }
+  }
+  return sheets.uploadAttachment(data)
+}
+
 /* ── Import operation from CSV ───────────────────────────────── */
 
 export const importOperationFromCSV = async (operationData, events) => {

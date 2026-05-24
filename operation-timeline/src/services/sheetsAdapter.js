@@ -97,3 +97,11 @@ export const addLog = (data) =>
 
 export const getAllLogs = (limit = 50) =>
   sheetsGet('getAllLogs', { limit })
+
+/* ── Attachments ──────────────────────────────────────────────── */
+
+export const getAttachments = (eventId) =>
+  sheetsGet('getAttachments', { eventId })
+
+export const uploadAttachment = (data) =>
+  sheetsPost('uploadAttachment', { data })
