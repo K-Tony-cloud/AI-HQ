@@ -10,9 +10,9 @@ import { getEventState, getHourMarkers, DAY_START_HOUR, DAY_END_HOUR, parseTimeS
 import { getTypeConfig } from '../../utils/statusUtils'
 import clsx from 'clsx'
 
-// px per minute for each density mode
 const PPM = { compact: 2.0, normal: 3.5 }
 const DAY_MINS = (DAY_END_HOUR - DAY_START_HOUR) * 60
+const VPAD = 18  // visual top padding shared by both background elements and flow content
 
 const toPx  = (timeStr, ppm) => (parseTimeString(timeStr) - DAY_START_HOUR * 60) * ppm
 const nowPx = (ppm) => {
@@ -24,7 +24,7 @@ const nowPx = (ppm) => {
 const HourMarker = ({ time, label, ppm }) => (
   <div
     className="absolute left-0 right-0 flex items-center pointer-events-none select-none"
-    style={{ top: `${toPx(time, ppm)}px` }}
+    style={{ top: `${toPx(time, ppm) + VPAD}px` }}
   >
     <span className="font-mono text-[10px] text-ops-text-disabled w-12 text-right pr-2 flex-shrink-0 tabular-nums">
       {label}
@@ -35,16 +35,14 @@ const HourMarker = ({ time, label, ppm }) => (
 
 /* ── Timeline dot ────────────────────────────────────────────── */
 const TimelineNode = ({ event, state, ppm }) => {
-  const cfg    = getTypeConfig(event.type)
+  const cfg      = getTypeConfig(event.type)
   const isActive = state === 'active'
   const isPast   = state === 'past'
   const nodeTop  = ppm <= 2.0 ? 9 : 14
 
   return (
     <div className="absolute flex items-center z-10" style={{ left: '50px', top: `${nodeTop}px` }}>
-      {/* Connector */}
       <div className={clsx('h-px w-4', isActive ? 'bg-sky-300' : 'bg-ops-border')} />
-      {/* Dot */}
       <div className="relative">
         <div
           className={clsx(
@@ -52,9 +50,9 @@ const TimelineNode = ({ event, state, ppm }) => {
             isActive ? 'w-3.5 h-3.5' : isPast ? 'w-2 h-2' : 'w-2.5 h-2.5',
           )}
           style={{
-            borderColor: isActive ? cfg.nodeColor : isPast ? '#e2e8f0' : `${cfg.nodeColor}80`,
+            borderColor:     isActive ? cfg.nodeColor : isPast ? '#e2e8f0' : `${cfg.nodeColor}80`,
             backgroundColor: isActive ? `${cfg.nodeColor}20` : isPast ? '#f4f7fb' : '#ffffff',
-            boxShadow: isActive ? `0 0 6px ${cfg.nodeColor}60` : undefined,
+            boxShadow:       isActive ? `0 0 6px ${cfg.nodeColor}60` : undefined,
           }}
         />
         {isActive && (
@@ -70,9 +68,9 @@ const TimelineNode = ({ event, state, ppm }) => {
 
 /* ── NOW indicator line ──────────────────────────────────────── */
 const NowLine = ({ ppm }) => {
-  const py   = nowPx(ppm)
-  const total = DAY_MINS * ppm
-  if (py <= 4 || py >= total - 4) return null
+  const py    = nowPx(ppm) + VPAD
+  const total = DAY_MINS * ppm + VPAD
+  if (py <= VPAD + 4 || py >= total - 4) return null
 
   const n  = new Date()
   const hh = String(n.getHours()).padStart(2, '0')
@@ -81,14 +79,12 @@ const NowLine = ({ ppm }) => {
   return (
     <div className="absolute left-0 right-0 z-20 pointer-events-none" style={{ top: `${py}px` }}>
       <div className="now-line-animated h-[1.5px] bg-ops-now relative">
-        {/* Label pill */}
         <div className="absolute left-12 -top-[14px] flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-ops-now animate-blink shadow-now flex-shrink-0" />
           <span className="font-mono text-[11px] font-bold text-ops-now bg-white/95 px-2 py-0.5 rounded-full border border-ops-now/30 shadow-sm tabular-nums">
             ขณะนี้ {hh}:{mm}
           </span>
         </div>
-        {/* Right arrowhead */}
         <div className="absolute right-1 top-[-3px] w-0 h-0
           border-t-[4px] border-b-[4px] border-l-[6px]
           border-t-transparent border-b-transparent border-l-ops-now/70" />
@@ -99,7 +95,7 @@ const NowLine = ({ ppm }) => {
 
 /* ── Main Timeline ───────────────────────────────────────────── */
 export const Timeline = () => {
-  const { displayEvents, densityMode, isEventExpanded, refetch } = useApp()
+  const { displayEvents, densityMode, expandedEventId, refetch } = useApp()
   const { searchQuery, typeFilter, statusFilter, priorityFilter, hasActiveFilters, clearFilters } = useFilter()
   const { timeStr } = useCurrentTime(10000)
   const containerRef   = useRef(null)
@@ -151,35 +147,31 @@ export const Timeline = () => {
     return map
   }, [filteredEvents, timeStr])
 
-  // Estimated rendered heights per card state (used to push siblings down)
-  const COMPACT_H  = densityMode === 'compact' ? 28 : 33
-  const SEMI_H     = 72
-  const EXPANDED_H = densityMode === 'compact' ? 195 : 310
+  // Compact card height estimate — used to compute spacing between events
+  const COMPACT_H = densityMode === 'compact' ? 28 : 33
+  const MIN_GAP   = 4
 
-  const getCardH = (event, state) => {
-    if (state === 'active' || isEventExpanded(event.id)) return EXPANDED_H
-    if (state === 'upcoming-near' && densityMode !== 'compact') return SEMI_H
-    return COMPACT_H
-  }
-
-  // Compute y for each event; accumulate extra pixels when a card overflows its natural gap
-  let cumulativeExtra = 0
-  const eventsWithY = filteredEvents.map((event, i) => {
-    const baseY = toPx(event.planned_time, ppm)
-    const y     = baseY + cumulativeExtra
+  // Compute flow margin-top for each event row.
+  // First event: margin from the top of the flow column.
+  // Subsequent: gap between the end of the previous compact card and this card's time position.
+  // When the previous card expands, the browser's flow layout naturally pushes this card down.
+  const eventsWithMargin = useMemo(() => filteredEvents.map((event, i) => {
     const state = eventStates.get(event.id)
-
-    if (i < filteredEvents.length - 1) {
-      const naturalGap = toPx(filteredEvents[i + 1].planned_time, ppm) - baseY
-      cumulativeExtra += Math.max(0, getCardH(event, state) - naturalGap)
+    let marginTop
+    if (i === 0) {
+      marginTop = toPx(event.planned_time, ppm)
+    } else {
+      const prev    = filteredEvents[i - 1]
+      const timeGap = toPx(event.planned_time, ppm) - toPx(prev.planned_time, ppm)
+      marginTop     = Math.max(MIN_GAP, timeGap - COMPACT_H)
     }
+    return { event, marginTop, state }
+  }), [filteredEvents, eventStates, ppm, COMPACT_H])
 
-    return { event, y, state }
-  })
+  // Background canvas height: covers the full day + padding
+  const baseH = DAY_MINS * ppm
 
-  const totalH = DAY_MINS * ppm + cumulativeExtra
-
-  // Scroll to active event when density changes or on mount
+  // Scroll to active event on mount / density change
   useEffect(() => {
     if (!activeRef.current || !containerRef.current) return
     const container = containerRef.current
@@ -203,7 +195,6 @@ export const Timeline = () => {
           className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
           style={{ scrollbarWidth: 'thin' }}
         >
-          {/* Empty state when filters active and nothing matches */}
           {hasActiveFilters && filteredEvents.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-ops-text-muted">
               <p className="text-sm font-medium">ไม่พบเหตุการณ์ที่ตรงกับตัวกรอง</p>
@@ -212,58 +203,57 @@ export const Timeline = () => {
           ) : (
             <div
               className="relative"
-              style={{ height: `${totalH + 72}px`, paddingTop: '18px', paddingBottom: '28px' }}
+              style={{ minHeight: `${baseH + VPAD + 60}px`, paddingBottom: '28px' }}
             >
-              {/* Spine */}
-              <div
-                className="absolute top-0 bottom-0 w-px pointer-events-none"
-                style={{
-                  left: '64px',
-                  background: 'linear-gradient(to bottom, transparent 0%, #e2e8f0 3%, #e2e8f0 97%, transparent 100%)',
-                }}
-              />
+              {/* ── Background layer: spine + hour markers + NOW line ── */}
+              <div className="absolute inset-0 pointer-events-none">
+                {/* Spine */}
+                <div
+                  className="absolute top-0 bottom-0 w-px"
+                  style={{
+                    left: '64px',
+                    background: 'linear-gradient(to bottom, transparent 0%, #e2e8f0 3%, #e2e8f0 97%, transparent 100%)',
+                  }}
+                />
 
-              {/* Spine accent glow near NOW */}
-              <div
-                className="absolute w-px pointer-events-none transition-top duration-[5s]"
-                style={{
-                  left: '64px',
-                  top: `${Math.max(0, nowPx(ppm) - 50)}px`,
-                  height: '100px',
-                  background: 'linear-gradient(to bottom, transparent, rgba(14,165,233,0.2), transparent)',
-                }}
-              />
+                {/* Spine accent glow near NOW */}
+                <div
+                  className="absolute w-px transition-top duration-[5s]"
+                  style={{
+                    left:       '64px',
+                    top:        `${Math.max(0, nowPx(ppm) - 50) + VPAD}px`,
+                    height:     '100px',
+                    background: 'linear-gradient(to bottom, transparent, rgba(14,165,233,0.2), transparent)',
+                  }}
+                />
 
-              {/* Hour markers */}
-              {hours.map(m => <HourMarker key={m.time} time={m.time} label={m.label} ppm={ppm} />)}
+                {/* Hour markers */}
+                {hours.map(m => <HourMarker key={m.time} time={m.time} label={m.label} ppm={ppm} />)}
 
-              {/* NOW line */}
-              <NowLine ppm={ppm} />
+                {/* NOW line */}
+                <NowLine ppm={ppm} />
+              </div>
 
-              {/* Event rows */}
-              {eventsWithY.map(({ event, y, state }) => {
-                const isActive = state === 'active'
-
-                return (
-                  <div
-                    key={event.id}
-                    id={`event-${event.id}`}
-                    ref={isActive ? activeRef : null}
-                    className="absolute"
-                    style={{
-                      top: `${y}px`,
-                      left: '68px',
-                      right: '2px',
-                      zIndex: isActive ? 10 : 1,
-                    }}
-                  >
-                    <TimelineNode event={event} state={state} ppm={ppm} />
-                    <div className="ml-10">
-                      <EventCard event={event} state={state} />
+              {/* ── Flow events column ── */}
+              {/* paddingTop: VPAD keeps events aligned with the hour markers in the background layer */}
+              <div style={{ paddingLeft: '68px', paddingRight: '2px', paddingTop: `${VPAD}px` }}>
+                {eventsWithMargin.map(({ event, marginTop, state }) => {
+                  const isActive = state === 'active'
+                  return (
+                    <div
+                      key={event.id}
+                      id={`event-${event.id}`}
+                      ref={isActive ? activeRef : null}
+                      style={{ marginTop: `${marginTop}px`, position: 'relative' }}
+                    >
+                      <TimelineNode event={event} state={state} ppm={ppm} />
+                      <div className="ml-10">
+                        <EventCard event={event} state={state} />
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>

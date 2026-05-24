@@ -49,9 +49,9 @@ export const AppProvider = ({ children }) => {
   const [lastSyncAt, setLastSyncAt] = useState(IS_MOCK ? new Date() : null)
 
   /* ── UI state ─────────────────────────────────────────────────── */
-  const [isAdminMode,    setIsAdminMode]    = useState(false)
-  const [expandedEvents, setExpandedEvents] = useState(new Set(['EVT-013']))
-  const [selectedEvent,  setSelectedEvent]  = useState(null)
+  const [isAdminMode,     setIsAdminMode]    = useState(false)
+  const [expandedEventId, setExpandedEventId] = useState(null)
+  const [selectedEvent,   setSelectedEvent]  = useState(null)
   const [densityMode,    setDensityMode]    = useState('normal')
   const [editingEventId, setEditingEventId] = useState(null)
   const [playbackIndex,  setPlaybackIndex]  = useState(-1)
@@ -274,19 +274,14 @@ export const AppProvider = ({ children }) => {
     }
   }, [addToast])
 
-  /* ── Expand/collapse ──────────────────────────────────────────── */
+  /* ── Expand/collapse — one at a time ─────────────────────────── */
   const toggleEventExpand = useCallback((eventId) => {
-    setExpandedEvents(prev => {
-      const next = new Set(prev)
-      if (next.has(eventId)) next.delete(eventId)
-      else next.add(eventId)
-      return next
-    })
+    setExpandedEventId(prev => prev === eventId ? null : eventId)
   }, [])
 
   const isEventExpanded = useCallback(
-    (eventId) => expandedEvents.has(eventId),
-    [expandedEvents],
+    (eventId) => eventId === expandedEventId,
+    [expandedEventId],
   )
 
   /* ── Computed: displayEvents ──────────────────────────────────── */
@@ -315,7 +310,7 @@ export const AppProvider = ({ children }) => {
       refetch:     () => loadAll(false),
       /* ui */
       isAdminMode, setIsAdminMode,
-      expandedEvents,
+      expandedEventId,
       toggleEventExpand,
       isEventExpanded,
       selectedEvent, setSelectedEvent,
