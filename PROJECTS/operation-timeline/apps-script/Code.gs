@@ -91,6 +91,16 @@ function doGet(e) {
           },
         })
       }
+      case 'testDrive': {
+        try {
+          const folderId = PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID')
+          if (!folderId) return ok({ driveOk: false, reason: 'DRIVE_FOLDER_ID not set' })
+          const folder = DriveApp.getFolderById(folderId)
+          return ok({ driveOk: true, folderName: folder.getName() })
+        } catch (ex) {
+          return ok({ driveOk: false, reason: ex.message })
+        }
+      }
       case 'forceReset': {
         forceReset()
         return ok({ reset: true, timestamp: new Date().toISOString() })

@@ -119,7 +119,12 @@ export const uploadAttachment = async (data) => {
       uploaded_at:   new Date().toISOString(),
     }
   }
-  return sheets.uploadAttachment(data)
+  return sheets.uploadFile(data)
+}
+
+export const checkDriveAccess = async () => {
+  if (USE_MOCK) return { driveOk: true }
+  return sheets.testDriveAccess()
 }
 
 /* ── Import operation from CSV ───────────────────────────────── */

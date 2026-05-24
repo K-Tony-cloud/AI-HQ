@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { fetchAttachments, uploadAttachment } from '../../services/eventService'
+import { fetchAttachments, uploadAttachment, checkDriveAccess } from '../../services/eventService'
 import { useApp } from '../../context/AppContext'
 import { useToast } from '../../context/ToastContext'
 
@@ -65,9 +65,10 @@ export const EventAttachments = ({ event, isAdmin }) => {
   const { operationMeta } = useApp()
   const { addToast }      = useToast()
 
-  const [attachments, setAttachments] = useState([])
-  const [isLoading,   setIsLoading]   = useState(true)
-  const [uploadPhase, setUploadPhase] = useState(null)  // null | 'compressing' | 'uploading'
+  const [attachments,  setAttachments]  = useState([])
+  const [isLoading,    setIsLoading]    = useState(true)
+  const [uploadPhase,  setUploadPhase]  = useState(null)   // null | 'compressing' | 'uploading'
+  const [driveWarning, setDriveWarning] = useState(null)   // null | string
 
   const fileInputRef = useRef(null)
 
@@ -80,6 +81,18 @@ export const EventAttachments = ({ event, isAdmin }) => {
       .finally(() => { if (!cancelled) setIsLoading(false) })
     return () => { cancelled = true }
   }, [event.id])
+
+  // Check Drive access once when admin panel opens
+  useEffect(() => {
+    if (!isAdmin) return
+    checkDriveAccess().then(result => {
+      if (!result.driveOk) {
+        setDriveWarning(result.reason === 'network'
+          ? 'ไม่สามารถเชื่อมต่อ Apps Script — ตรวจสอบ URL หรือการ deploy'
+          : `Drive ยังไม่ได้รับสิทธิ์ — กรุณา re-deploy ใน Apps Script Editor เพื่ออนุมัติสิทธิ์ Drive (${result.reason})`)
+      }
+    })
+  }, [isAdmin])
 
   const handleFile = useCallback(async (e) => {
     const file = e.target.files[0]
@@ -179,6 +192,13 @@ export const EventAttachments = ({ event, isAdmin }) => {
             )
           })}
         </div>
+      )}
+
+      {/* Drive access warning — admin only */}
+      {isAdmin && driveWarning && (
+        <p className="text-[10px] text-ops-danger bg-ops-danger-light border border-ops-danger/25 rounded-lg px-2.5 py-1.5 mb-2 leading-snug">
+          ⚠ {driveWarning}
+        </p>
       )}
 
       {/* Attach button — admin only */}

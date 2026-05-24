@@ -105,3 +105,33 @@ export const getAttachments = (eventId) =>
 
 export const uploadAttachment = (data) =>
   sheetsPost('uploadAttachment', { data })
+
+// No-retry upload with 60 s timeout — avoids re-sending large payloads on transient errors
+export async function uploadFile(data) {
+  assertUrl()
+  const controller = new AbortController()
+  const tid = setTimeout(() => controller.abort(), 60_000)
+  try {
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'uploadAttachment', data }),
+      signal: controller.signal,
+    })
+    const json = await res.json()
+    if (!json.ok) throw new Error(json.error || 'Upload failed')
+    return json.data
+  } catch (ex) {
+    if (ex.name === 'AbortError') throw new Error('Upload timeout — ไฟล์ใหญ่เกินไปหรือการเชื่อมต่อช้า')
+    throw ex
+  } finally {
+    clearTimeout(tid)
+  }
+}
+
+export async function testDriveAccess() {
+  try {
+    return await sheetsGet('testDrive')
+  } catch {
+    return { driveOk: false, reason: 'network' }
+  }
+}

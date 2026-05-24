@@ -22,17 +22,33 @@ function getOrCreateSubfolder(parent, name) {
 }
 
 function buildOperationFolderName(operationId, operationTitle, operationDate) {
+  if (!operationId) throw new Error('operationId is required for folder naming')
   const safeName = (operationTitle || '')
     .replace(/[^\w\s-]/g, '')
     .replace(/\s+/g, '_')
+    .trim()
     .slice(0, 40)
-  const safeDate = (operationDate || '').replace(/[^\d-]/g, '')
-  return [operationId, safeName, safeDate].filter(Boolean).join('_')
+  const safeDate = (operationDate || '').replace(/[^\d-]/g, '').slice(0, 10)
+  const name = [operationId, safeName, safeDate].filter(Boolean).join('_')
+  if (!name) throw new Error('Could not build a valid folder name for operation: ' + operationId)
+  return name
+}
+
+/* ── Diagnostic: run from editor to verify folder setup ──────── */
+function diagFolders() {
+  const folderId = PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID')
+  Logger.log('DRIVE_FOLDER_ID from properties: ' + folderId)
+  if (!folderId) { Logger.log('ERROR: DRIVE_FOLDER_ID not set'); return }
+  const root = DriveApp.getFolderById(folderId)
+  Logger.log('Root folder name: ' + root.getName() + ' | id: ' + root.getId())
+  const it = root.getFolders()
+  Logger.log('Subfolders inside root:')
+  while (it.hasNext()) { const f = it.next(); Logger.log('  ' + f.getName() + ' | ' + f.getId()) }
 }
 
 /* ── Upload base64-encoded file to Drive ─────────────────────── */
 function uploadFileToDrive(operationId, operationTitle, operationDate, fileName, base64Data, mimeType) {
-  const root      = getDriveRoot()
+  const root       = getDriveRoot()
   const folderName = buildOperationFolderName(operationId, operationTitle, operationDate)
   const opFolder   = getOrCreateSubfolder(root, folderName)
   const bytes      = Utilities.base64Decode(base64Data)
@@ -55,11 +71,12 @@ function createAttachment(data) {
       eventId, fileName, fileData, mimeType, uploadedBy,
     } = data
 
-    if (!eventId)  throw new Error('eventId is required')
-    if (!fileData) throw new Error('fileData is required')
+    if (!operationId) throw new Error('operationId is required')
+    if (!eventId)     throw new Error('eventId is required')
+    if (!fileData)    throw new Error('fileData is required')
 
     const uploaded = uploadFileToDrive(
-      operationId    || 'general',
+      operationId,
       operationTitle || '',
       operationDate  || '',
       fileName       || 'attachment',

@@ -105,6 +105,53 @@ function updateRowById(sheetName, id, updates) {
   return false
 }
 
+/* ── Schema repair helpers (run from editor, not web app) ─────── */
+
+// Call from the editor: fixes missing/shifted headers in event_attachments and event_logs
+// without deleting existing data.
+function fixAttachments() {
+  _ensureSheetHeaders('event_attachments')
+  Logger.log('Done. Check the event_attachments sheet.')
+}
+
+function diagSheets() {
+  ['event_logs', 'event_attachments'].forEach(name => {
+    const sheet = getSpreadsheet().getSheetByName(name)
+    if (!sheet) { Logger.log(name + ': SHEET MISSING'); return }
+    const rows = sheet.getDataRange().getValues()
+    Logger.log(name + ' row count: ' + rows.length)
+    if (rows.length > 0) Logger.log(name + ' header row: ' + JSON.stringify(rows[0]))
+    if (rows.length > 1) Logger.log(name + ' data row 1: ' + JSON.stringify(rows[1]))
+  })
+}
+
+function _ensureSheetHeaders(sheetName) {
+  const expected = HEADERS[sheetName]
+  const sheet    = getOrCreateSheet(sheetName)
+  const lastRow  = sheet.getLastRow()
+
+  if (lastRow === 0) {
+    sheet.appendRow(expected)
+    sheet.getRange(1, 1, 1, expected.length).setFontWeight('bold').setBackground('#f0f4ff')
+    Logger.log(sheetName + ': was empty, headers added')
+    return
+  }
+
+  const firstRowVals = sheet.getRange(1, 1, 1, Math.max(expected.length, sheet.getLastColumn())).getValues()[0]
+  if (firstRowVals[0] === expected[0]) {
+    Logger.log(sheetName + ': headers OK → ' + firstRowVals.join(', '))
+    return
+  }
+
+  // Header row is missing — insert at row 1, shift data down
+  sheet.insertRowBefore(1)
+  sheet.getRange(1, 1, 1, expected.length)
+    .setValues([expected])
+    .setFontWeight('bold')
+    .setBackground('#f0f4ff')
+  Logger.log(sheetName + ': missing headers, inserted. First data row now at row 2.')
+}
+
 /* ── Schema init ──────────────────────────────────────────────── */
 
 function initSchema() {
