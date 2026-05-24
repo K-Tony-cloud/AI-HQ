@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Modal } from '../ui/Modal'
 import clsx from 'clsx'
 
 const CORRECT_PIN = import.meta.env.VITE_ADMIN_PIN || '1234'
@@ -55,11 +56,9 @@ export const PinLoginModal = ({ onSuccess, onClose }) => {
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-xs bg-ops-card border border-ops-border rounded-2xl shadow-2xl overflow-hidden animate-slide-down">
-        <div className="h-px bg-gradient-to-r from-transparent via-ops-accent/40 to-transparent" />
-        <div className="p-6">
+    <Modal onClose={onClose} maxWidth="max-w-xs">
+      <div className="h-px bg-gradient-to-r from-transparent via-ops-accent/40 to-transparent flex-shrink-0" />
+      <div className="p-6">
           {/* Title */}
           <div className="text-center mb-5">
             <h2 className="font-bold text-ops-text-primary text-base">ยืนยันตัวตนผู้ดูแล</h2>
@@ -146,8 +145,7 @@ export const PinLoginModal = ({ onSuccess, onClose }) => {
           >
             ยกเลิก
           </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   )
 }
