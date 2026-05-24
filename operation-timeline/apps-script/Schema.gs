@@ -1,20 +1,22 @@
 /**
  * Schema.gs — Sheet initialization, column definitions, and read helpers
- *
- * Run resetAll() to fully reset and re-seed the spreadsheet from scratch.
- * Run initSchema() alone to create headers without touching data.
  */
 
 const SHEET_NAMES = {
-  EVENTS:    'events',
-  LOGS:      'event_logs',
-  META:      'operation_meta',
-  USERS:     'users',
+  OPERATIONS: 'operations',
+  EVENTS:     'events',
+  LOGS:       'event_logs',
+  META:       'operation_meta',
+  USERS:      'users',
 }
 
 const HEADERS = {
+  operations: [
+    'id', 'title', 'date', 'classification', 'commander',
+    'start_time', 'end_time', 'venue', 'status', 'created_at', 'updated_at',
+  ],
   events: [
-    'id', 'date', 'planned_time', 'actual_time', 'end_time',
+    'id', 'operation_id', 'date', 'planned_time', 'actual_time', 'end_time',
     'title', 'status', 'type', 'detail', 'reporter',
     'location', 'duration', 'priority', 'created_at', 'updated_at',
   ],
@@ -54,11 +56,9 @@ function formatValue(value) {
 
   const y = value.getFullYear()
   if (y <= 1900) {
-    // Time-only value: Sheets stores as 1899-12-30 epoch
     return String(value.getHours()).padStart(2, '0') + ':' +
            String(value.getMinutes()).padStart(2, '0')
   }
-  // Regular date: use LOCAL parts to avoid UTC midnight shift
   const mm = String(value.getMonth() + 1).padStart(2, '0')
   const dd = String(value.getDate()).padStart(2, '0')
   return `${y}-${mm}-${dd}`
@@ -102,10 +102,6 @@ function updateRowById(sheetName, id, updates) {
 
 /* ── Schema init ──────────────────────────────────────────────── */
 
-/**
- * Creates each sheet and writes the header row if the sheet is empty.
- * Safe to re-run — only writes headers to completely empty sheets.
- */
 function initSchema() {
   Object.entries(HEADERS).forEach(([name, headers]) => {
     const sheet = getOrCreateSheet(name)
@@ -119,14 +115,12 @@ function initSchema() {
   Logger.log('Schema initialized')
 }
 
-/**
- * Wipes ALL rows (including headers) from every sheet,
- * re-creates headers via initSchema, then re-seeds all data.
- * USE WITH CAUTION — destroys all existing data.
- */
 function resetAll() {
   Logger.log('Starting full reset...')
-  const sheetList = [SHEET_NAMES.EVENTS, SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS]
+  const sheetList = [
+    SHEET_NAMES.OPERATIONS, SHEET_NAMES.EVENTS,
+    SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS,
+  ]
   sheetList.forEach(name => {
     const sheet = getOrCreateSheet(name)
     const last  = sheet.getLastRow()
@@ -135,17 +129,16 @@ function resetAll() {
   })
   initSchema()
   seedAll()
-  Logger.log('Reset complete — all sheets initialized and seeded.')
+  Logger.log('Reset complete.')
 }
 
-/**
- * Alternative to resetAll() — uses sheet.clear() instead of deleteRows.
- * Use this if resetAll() silently fails (e.g. frozen rows, protected ranges).
- */
 function forceReset() {
   Logger.log('Starting force reset...')
-  const ss        = getSpreadsheet()
-  const sheetList = [SHEET_NAMES.EVENTS, SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS]
+  const ss = getSpreadsheet()
+  const sheetList = [
+    SHEET_NAMES.OPERATIONS, SHEET_NAMES.EVENTS,
+    SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS,
+  ]
   sheetList.forEach(name => {
     const sheet = ss.getSheetByName(name) || ss.insertSheet(name)
     sheet.clear()

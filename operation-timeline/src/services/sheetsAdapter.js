@@ -1,8 +1,5 @@
 /**
  * sheetsAdapter.js — Google Apps Script Web App adapter
- *
- * Configured via environment variables:
- *   VITE_SHEETS_URL  — deployed Apps Script URL (ends with /exec)
  */
 
 const SCRIPT_URL = import.meta.env.VITE_SHEETS_URL || ''
@@ -20,14 +17,10 @@ async function fetchWithRetry(url, opts = {}, maxAttempts = 3) {
     if (delays[attempt] > 0) await sleep(delays[attempt])
     try {
       const res = await fetch(url, opts)
-      // 4xx: throw immediately, no retry
-      if (res.status >= 400 && res.status < 500) {
-        throw new Error(`HTTP ${res.status}`)
-      }
+      if (res.status >= 400 && res.status < 500) throw new Error(`HTTP ${res.status}`)
       return res
     } catch (err) {
       lastError = err
-      // If it's a 4xx thrown above, don't retry
       if (err.message && /^HTTP 4/.test(err.message)) throw err
     }
   }
@@ -56,14 +49,31 @@ async function sheetsPost(action, payload = {}) {
   return json.data
 }
 
-/* ── Health check ────────────────────────────────────────────── */
+/* ── Health check ─────────────────────────────────────────────── */
 
 export const ping = () => sheetsGet('ping')
 
-/* ── Events ──────────────────────────────────────────────────── */
+/* ── Operations ───────────────────────────────────────────────── */
 
-export const getEvents = (date) =>
-  sheetsGet('getEvents', date ? { date } : {})
+export const getOperations = () =>
+  sheetsGet('getOperations')
+
+export const getOperation = (id) =>
+  sheetsGet('getOperation', { id })
+
+export const addOperation = (data) =>
+  sheetsPost('addOperation', { data })
+
+export const patchOperation = (id, data) =>
+  sheetsPost('updateOperation', { id, data })
+
+export const cloneOperation = (sourceId, newData) =>
+  sheetsPost('cloneOperation', { sourceId, data: newData })
+
+/* ── Events ───────────────────────────────────────────────────── */
+
+export const getEvents = (operationId) =>
+  sheetsGet('getEvents', operationId ? { operationId } : {})
 
 export const getMeta = () =>
   sheetsGet('getMeta')
@@ -74,7 +84,7 @@ export const addEvent = (data) =>
 export const patchEvent = (id, data) =>
   sheetsPost('updateEvent', { id, data })
 
-/* ── Logs ────────────────────────────────────────────────────── */
+/* ── Logs ─────────────────────────────────────────────────────── */
 
 export const getLogs = (eventId) =>
   sheetsGet('getLogs', { eventId })

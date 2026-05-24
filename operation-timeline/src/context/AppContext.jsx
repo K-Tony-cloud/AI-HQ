@@ -1,9 +1,12 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
-import { MOCK_EVENTS, OPERATION_META } from '../mock/events'
+import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { MOCK_OPERATIONS, MOCK_EVENTS, getEventsForOperation } from '../mock/events'
 import {
-  fetchEvents, fetchMeta,
-  createEvent as apiCreateEvent,
-  patchEvent  as apiPatchEvent,
+  fetchEvents, fetchOperations,
+  createEvent    as apiCreateEvent,
+  patchEvent     as apiPatchEvent,
+  createOperation as apiCreateOperation,
+  patchOperation  as apiPatchOperation,
+  duplicateOperation as apiDuplicateOperation,
   createLog,
   IS_MOCK, POLL_INTERVAL,
 } from '../services/eventService'
@@ -14,20 +17,38 @@ import { useNotifications } from '../hooks/useNotifications'
 
 const AppContext = createContext(null)
 
-export const AppProvider = ({ children }) => {
-  /* ── Data state ───────────────────────────────────────────────
-     Seed with mock data so Header/Sidebar always have valid props.
-     In mock mode: isLoading stays false — no async trip needed.
-     In live mode: isLoading = true until first fetch resolves.
-  ─────────────────────────────────────────────────────────────── */
-  const [events,        setEvents]        = useState(MOCK_EVENTS)
-  const [operationMeta, setOperationMeta] = useState(OPERATION_META)
-  const [isLoading,     setIsLoading]     = useState(!IS_MOCK)
-  const [error,         setError]         = useState(null)
-  const [isSyncing,     setIsSyncing]     = useState(false)
-  const [lastSyncAt,    setLastSyncAt]    = useState(IS_MOCK ? new Date() : null)
+const STORAGE_KEY = 'ops_current_operation_id'
 
-  /* ── UI state ─────────────────────────────────────────────── */
+function loadStoredOperationId(operations) {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored && operations.some(o => o.id === stored)) return stored
+  } catch (_) {}
+  return operations[0]?.id || null
+}
+
+export const AppProvider = ({ children }) => {
+  /* ── Operations ───────────────────────────────────────────────── */
+  const [operations,         setOperations]         = useState(MOCK_OPERATIONS)
+  const [currentOperationId, setCurrentOperationId] = useState(
+    () => loadStoredOperationId(MOCK_OPERATIONS)
+  )
+
+  const operationMeta = useMemo(
+    () => operations.find(o => o.id === currentOperationId) || operations[0] || null,
+    [operations, currentOperationId],
+  )
+
+  /* ── Events ───────────────────────────────────────────────────── */
+  const [events,     setEvents]     = useState(() =>
+    IS_MOCK ? getEventsForOperation(MOCK_OPERATIONS[0]?.id) : MOCK_EVENTS
+  )
+  const [isLoading,  setIsLoading]  = useState(!IS_MOCK)
+  const [error,      setError]      = useState(null)
+  const [isSyncing,  setIsSyncing]  = useState(false)
+  const [lastSyncAt, setLastSyncAt] = useState(IS_MOCK ? new Date() : null)
+
+  /* ── UI state ─────────────────────────────────────────────────── */
   const [isAdminMode,    setIsAdminMode]    = useState(false)
   const [expandedEvents, setExpandedEvents] = useState(new Set(['EVT-013']))
   const [selectedEvent,  setSelectedEvent]  = useState(null)
@@ -35,36 +56,38 @@ export const AppProvider = ({ children }) => {
   const [editingEventId, setEditingEventId] = useState(null)
   const [playbackIndex,  setPlaybackIndex]  = useState(-1)
 
-  /* ── Toast ────────────────────────────────────────────────── */
+  /* ── Contexts ─────────────────────────────────────────────────── */
   const { addToast } = useToast()
-
-  /* ── Notifications ────────────────────────────────────────── */
   const { notify, requestPermission } = useNotifications()
-
-  /* ── Network status ───────────────────────────────────────── */
   const isOnline = useNetworkStatus()
-  const isOnlineRef      = useRef(navigator.onLine)
-  const networkInitRef   = useRef(false)
 
-  /* ── Events ref (for optimistic rollback) ─────────────────── */
-  const eventsRef = useRef(MOCK_EVENTS)
-
-  /* ── Snapshot recorder ────────────────────────────────────── */
-  const snapshotsRef = useRef([])
-
-  /* ── Previous events ref for change detection ─────────────── */
+  /* ── Refs ─────────────────────────────────────────────────────── */
+  const isOnlineRef    = useRef(navigator.onLine)
+  const networkInitRef = useRef(false)
+  const eventsRef      = useRef(events)
+  const snapshotsRef   = useRef([])
   const prevEventsRef  = useRef(null)
   const isInitialLoad  = useRef(true)
+  const pollerRef      = useRef(null)
 
-  /* ── Fetch from backend ───────────────────────────────────── */
-  const loadAll = useCallback(async (silent = false) => {
+  /* ── Persist current operation to localStorage ────────────────── */
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, currentOperationId) } catch (_) {}
+  }, [currentOperationId])
+
+  /* ── Load all data ────────────────────────────────────────────── */
+  const loadAll = useCallback(async (silent = false, opId = null) => {
+    const targetId = opId || currentOperationId
     if (!silent) setIsLoading(true)
     else         setIsSyncing(true)
     setError(null)
     try {
-      const [evts, meta] = await Promise.all([fetchEvents(), fetchMeta()])
+      const [ops, evts] = await Promise.all([
+        fetchOperations(),
+        fetchEvents(targetId),
+      ])
+      setOperations(ops)
       setEvents(evts)
-      if (meta) setOperationMeta(meta)
       setLastSyncAt(new Date())
     } catch (ex) {
       setError(ex.message || 'โหลดข้อมูลไม่สำเร็จ')
@@ -72,31 +95,44 @@ export const AppProvider = ({ children }) => {
       setIsLoading(false)
       setIsSyncing(false)
     }
-  }, [])
+  }, [currentOperationId])
 
-  /* ── Initial load (live mode only) ───────────────────────── */
+  /* ── Initial load (live mode only) ───────────────────────────── */
   useEffect(() => {
     if (!IS_MOCK) loadAll()
-  }, [loadAll])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Realtime polling (live mode only) ────────────────────── */
-  const pollerRef = useRef(null)
+  /* ── Reload events when operation changes (live) ─────────────── */
+  useEffect(() => {
+    if (!IS_MOCK) {
+      isInitialLoad.current = true
+      prevEventsRef.current = null
+      loadAll(true, currentOperationId)
+      // Restart poller for new operation
+      if (pollerRef.current) {
+        pollerRef.current.stop()
+        pollerRef.current = null
+      }
+    } else {
+      // Mock: filter events client-side
+      setEvents(getEventsForOperation(currentOperationId))
+    }
+  }, [currentOperationId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Realtime polling (live mode only) ───────────────────────── */
   useEffect(() => {
     if (IS_MOCK) return
-    const poller = createPoller(() => fetchEvents(), POLL_INTERVAL)
+    const opId = currentOperationId
+    const poller = createPoller(() => fetchEvents(opId), POLL_INTERVAL)
     const unsub  = poller.subscribe(({ data, error: pollErr }) => {
       if (data) {
         setEvents(prev => {
-          // Hash-skip: avoid re-render if data is identical
           const prevHash = prevEventsRef.current
             ? prevEventsRef.current.map(e => `${e.id}:${e.updated_at}:${e.status}`).join(',')
             : null
           const newHash = data.map(e => `${e.id}:${e.updated_at}:${e.status}`).join(',')
-          if (prevHash === newHash && !isInitialLoad.current) {
-            return prev
-          }
+          if (prevHash === newHash && !isInitialLoad.current) return prev
 
-          // Change detection — only after initial load
           if (!isInitialLoad.current && prevEventsRef.current) {
             const prevMap = new Map(prevEventsRef.current.map(e => [e.id, e]))
             data.forEach(ev => {
@@ -104,12 +140,7 @@ export const AppProvider = ({ children }) => {
               if (old && old.status !== ev.status) {
                 const type = ev.status === 'completed' ? 'success' : 'info'
                 addToast(`${ev.id}: เปลี่ยนสถานะเป็น ${ev.status}`, type)
-                const isUrgent = ev.type === 'emergency' || ev.priority === 'critical'
-                notify(
-                  `${ev.id}: ${ev.title}`,
-                  `สถานะเปลี่ยนเป็น ${ev.status}`,
-                  isUrgent,
-                )
+                notify(`${ev.id}: ${ev.title}`, `สถานะเปลี่ยนเป็น ${ev.status}`, ev.type === 'emergency' || ev.priority === 'critical')
               }
             })
           }
@@ -129,28 +160,25 @@ export const AppProvider = ({ children }) => {
     poller.start()
     pollerRef.current = poller
     return () => { poller.stop(); unsub() }
-  }, [addToast, notify, requestPermission])
+  }, [currentOperationId, addToast, notify, requestPermission])
 
-  /* ── Keep isOnlineRef and eventsRef in sync ──────────────── */
+  /* ── Keep refs in sync ────────────────────────────────────────── */
   useEffect(() => { isOnlineRef.current = isOnline }, [isOnline])
   useEffect(() => { eventsRef.current = events }, [events])
 
-  /* ── Snapshot recorder (live only) ───────────────────────── */
+  /* ── Snapshot recorder (live only) ───────────────────────────── */
   useEffect(() => {
     if (IS_MOCK || events.length === 0) return
-    const snap = { ts: Date.now(), events: events }
+    const snap = { ts: Date.now(), events }
     snapshotsRef.current = [...snapshotsRef.current.slice(-119), snap]
   }, [events])
 
-  /* ── Pause/resume polling on network change ──────────────── */
+  /* ── Pause/resume polling on network change ──────────────────── */
   useEffect(() => {
     if (IS_MOCK || !pollerRef.current) return
     if (!networkInitRef.current) { networkInitRef.current = true; return }
     if (isOnline) {
-      if (!document.hidden) {
-        pollerRef.current.start()
-        pollerRef.current.refresh()
-      }
+      if (!document.hidden) { pollerRef.current.start(); pollerRef.current.refresh() }
       addToast('กลับมาออนไลน์แล้ว', 'success')
     } else {
       pollerRef.current.stop()
@@ -158,30 +186,65 @@ export const AppProvider = ({ children }) => {
     }
   }, [isOnline, addToast])
 
-  /* ── Pause/resume polling on tab visibility change ───────── */
+  /* ── Pause/resume polling on tab visibility ──────────────────── */
   useEffect(() => {
     if (IS_MOCK) return
     const handleVisibility = () => {
       if (!pollerRef.current) return
-      if (document.hidden) {
-        pollerRef.current.stop()
-      } else if (isOnlineRef.current) {
-        pollerRef.current.start()
-        pollerRef.current.refresh()
-      }
+      if (document.hidden) pollerRef.current.stop()
+      else if (isOnlineRef.current) { pollerRef.current.start(); pollerRef.current.refresh() }
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
   }, [])
 
-  /* ── Event CRUD ───────────────────────────────────────────── */
+  /* ── Operation CRUD ───────────────────────────────────────────── */
+  const addOperation = useCallback(async (data) => {
+    const newOp = await apiCreateOperation(data)
+    setOperations(prev => [newOp, ...prev])
+    setCurrentOperationId(newOp.id)
+    return newOp
+  }, [])
+
+  const updateOperation = useCallback(async (id, updates) => {
+    await apiPatchOperation(id, updates)
+    setOperations(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o))
+  }, [])
+
+  const archiveOperation = useCallback(async (id) => {
+    await apiPatchOperation(id, { status: 'ARCHIVED' })
+    setOperations(prev => prev.map(o => o.id === id ? { ...o, status: 'ARCHIVED' } : o))
+    if (currentOperationId === id) {
+      const next = operations.find(o => o.id !== id && o.status !== 'ARCHIVED')
+      if (next) setCurrentOperationId(next.id)
+    }
+  }, [currentOperationId, operations])
+
+  const cloneOperation = useCallback(async (sourceId, newData) => {
+    const cloned = await apiDuplicateOperation(sourceId, newData)
+    setOperations(prev => [cloned, ...prev])
+    setCurrentOperationId(cloned.id)
+    return cloned
+  }, [])
+
+  const switchOperation = useCallback((id) => {
+    setPlaybackIndex(-1)
+    snapshotsRef.current = []
+    setCurrentOperationId(id)
+  }, [])
+
+  /* ── Event CRUD ───────────────────────────────────────────────── */
   const addEvent = useCallback(async (eventData) => {
-    const newEvent = await apiCreateEvent(eventData)
+    const newEvent = await apiCreateEvent({
+      ...eventData,
+      operation_id: currentOperationId,
+      date:         operationMeta?.date || eventData.date,
+    })
     setEvents(prev =>
       [...prev, newEvent].sort((a, b) => a.planned_time.localeCompare(b.planned_time))
     )
     return newEvent
-  }, [])
+  }, [currentOperationId, operationMeta])
 
   const buildAuditMessage = (updates) => {
     if (updates.status) return `เปลี่ยนสถานะเป็น: ${updates.status}`
@@ -190,7 +253,6 @@ export const AppProvider = ({ children }) => {
 
   const updateEvent = useCallback(async (eventId, updates) => {
     const snapshot = eventsRef.current
-    // Optimistic update
     setEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...updates } : e))
     try {
       await apiPatchEvent(eventId, updates)
@@ -206,14 +268,13 @@ export const AppProvider = ({ children }) => {
         } catch (_) {}
       }
     } catch (err) {
-      // Rollback
       setEvents(snapshot)
       addToast('บันทึกไม่สำเร็จ — ข้อมูลถูกยกเลิก', 'error')
       throw err
     }
   }, [addToast])
 
-  /* ── Expand/collapse ──────────────────────────────────────── */
+  /* ── Expand/collapse ──────────────────────────────────────────── */
   const toggleEventExpand = useCallback((eventId) => {
     setExpandedEvents(prev => {
       const next = new Set(prev)
@@ -228,21 +289,31 @@ export const AppProvider = ({ children }) => {
     [expandedEvents],
   )
 
-  /* ── Computed: displayEvents (live or playback snapshot) ─────── */
+  /* ── Computed: displayEvents ──────────────────────────────────── */
   const displayEvents = playbackIndex >= 0
     ? (snapshotsRef.current[playbackIndex]?.events ?? events)
     : events
 
   return (
     <AppContext.Provider value={{
+      /* operations */
+      operations,
+      currentOperationId,
+      operationMeta,
+      switchOperation,
+      addOperation,
+      updateOperation,
+      archiveOperation,
+      cloneOperation,
+      /* events */
       events,
       displayEvents,
-      operationMeta,
       isLoading,
       error,
       isSyncing,
       lastSyncAt,
       refetch:     () => loadAll(false),
+      /* ui */
       isAdminMode, setIsAdminMode,
       expandedEvents,
       toggleEventExpand,

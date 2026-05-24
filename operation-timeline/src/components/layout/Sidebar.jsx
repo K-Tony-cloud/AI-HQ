@@ -70,9 +70,14 @@ export const Sidebar = () => {
         <p className="ops-label mb-3">ช่วงปฏิบัติการ</p>
         <div className="space-y-2.5">
           {[
-            { l: 'เริ่มต้น',  v: operationMeta.startTime },
-            { l: 'สิ้นสุด',   v: operationMeta.endTime },
-            { l: 'ระยะเวลา',  v: '11 ชั่วโมง' },
+            { l: 'เริ่มต้น',  v: operationMeta?.start_time },
+            { l: 'สิ้นสุด',   v: operationMeta?.end_time },
+            { l: 'ระยะเวลา',  v: (() => {
+              const [sh, sm] = (operationMeta?.start_time || '09:00').split(':').map(Number)
+              const [eh, em] = (operationMeta?.end_time   || '20:00').split(':').map(Number)
+              const diff = (eh * 60 + em) - (sh * 60 + sm)
+              return diff > 0 ? `${Math.floor(diff / 60)} ชั่วโมง ${diff % 60 ? `${diff % 60} นาที` : ''}`.trim() : '-'
+            })() },
           ].map(({ l, v }) => (
             <div key={l} className="flex items-center justify-between">
               <span className="ops-label">{l}</span>

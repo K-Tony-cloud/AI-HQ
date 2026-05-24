@@ -27,7 +27,7 @@ const Field = ({ label, children }) => (
 )
 
 export const AddEventModal = ({ onClose }) => {
-  const { addEvent } = useApp()
+  const { addEvent, operationMeta, currentOperationId } = useApp()
   const [form, setForm] = useState({
     planned_time: '',
     title: '',
@@ -44,11 +44,12 @@ export const AddEventModal = ({ onClose }) => {
     e.preventDefault()
     addEvent({
       ...form,
-      date: '2026-05-22',
-      actual_time: null,
-      end_time: null,
-      status: 'upcoming',
-      duration: 30,
+      operation_id: currentOperationId,
+      date:         operationMeta?.date || '',
+      actual_time:  null,
+      end_time:     null,
+      status:       'upcoming',
+      duration:     30,
     })
     onClose()
   }

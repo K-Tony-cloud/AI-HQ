@@ -8,21 +8,23 @@
  * Set Script Properties before deploying:
  *   SPREADSHEET_ID = <your spreadsheet id>
  *
- * Endpoints:
- *   GET  ?action=getEvents[&date=YYYY-MM-DD]
- *   GET  ?action=getMeta
- *   GET  ?action=getLogs&eventId=EVT-xxx
- *   GET  ?action=getAllLogs[&limit=N]
- *   POST {action:'addEvent',    data:{...}}
- *   POST {action:'updateEvent', id:'EVT-xxx', data:{...}}
- *   POST {action:'addLog',      data:{...}}
+ * GET endpoints:
+ *   ?action=getOperations
+ *   ?action=getOperation&id=OP-xxx
+ *   ?action=getEvents[&operationId=OP-xxx][&date=YYYY-MM-DD]
+ *   ?action=getMeta
+ *   ?action=getLogs&eventId=EVT-xxx
+ *   ?action=getAllLogs[&limit=N]
+ *   ?action=ping
+ *
+ * POST endpoints (body JSON):
+ *   {action:'addOperation',    data:{...}}
+ *   {action:'updateOperation', id:'OP-xxx', data:{...}}
+ *   {action:'cloneOperation',  sourceId:'OP-xxx', data:{...}}
+ *   {action:'addEvent',        data:{...}}
+ *   {action:'updateEvent',     id:'EVT-xxx', data:{...}}
+ *   {action:'addLog',          data:{...}}
  */
-
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'GET, POST',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
 
 function ok(payload) {
   return ContentService
@@ -41,10 +43,20 @@ function doGet(e) {
   try {
     const action = e.parameter.action
     switch (action) {
+      case 'getOperations': {
+        return ok(getAllOperations())
+      }
+      case 'getOperation': {
+        const id = e.parameter.id
+        if (!id) return err('id required')
+        return ok(getOperationById(id))
+      }
       case 'getEvents': {
-        const date   = e.parameter.date
-        const events = date ? getEventsByDate(date) : getAllEvents()
-        return ok(events)
+        const operationId = e.parameter.operationId
+        const date        = e.parameter.date
+        if (operationId) return ok(getEventsByOperationId(operationId))
+        if (date)        return ok(getEventsByDate(date))
+        return ok(getAllEvents())
       }
       case 'getMeta': {
         const rows = readSheet(SHEET_NAMES.META)
@@ -65,8 +77,9 @@ function doGet(e) {
           timestamp: new Date().toISOString(),
           mode:      'live',
           sheets: {
-            events:    readSheet(SHEET_NAMES.EVENTS).length,
-            logs:      readSheet(SHEET_NAMES.LOGS).length,
+            operations: readSheet(SHEET_NAMES.OPERATIONS).length,
+            events:     readSheet(SHEET_NAMES.EVENTS).length,
+            logs:       readSheet(SHEET_NAMES.LOGS).length,
           },
         })
       }
@@ -85,18 +98,26 @@ function doPost(e) {
     const action  = payload.action
 
     switch (action) {
+      case 'addOperation': {
+        return ok(createOperation(payload.data || {}))
+      }
+      case 'updateOperation': {
+        if (!payload.id) return err('id required')
+        return ok(updateOperation(payload.id, payload.data || {}))
+      }
+      case 'cloneOperation': {
+        if (!payload.sourceId) return err('sourceId required')
+        return ok(cloneOperation(payload.sourceId, payload.data || {}))
+      }
       case 'addEvent': {
-        const event = createEvent(payload.data || {})
-        return ok(event)
+        return ok(createEvent(payload.data || {}))
       }
       case 'updateEvent': {
         if (!payload.id) return err('id required')
-        const result = updateEvent(payload.id, payload.data || {})
-        return ok(result)
+        return ok(updateEvent(payload.id, payload.data || {}))
       }
       case 'addLog': {
-        const log = createLog(payload.data || {})
-        return ok(log)
+        return ok(createLog(payload.data || {}))
       }
       default:
         return err('Unknown action: ' + action, 404)

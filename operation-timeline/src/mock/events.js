@@ -1,18 +1,32 @@
-export const OPERATION_META = {
-  id: 'OP-2026-0522',
-  name: 'Operation Royal Passage',
-  date: '2026-05-22',
-  classification: 'RESTRICTED',
-  commander: 'COL. WICHAI SUWAN',
-  startTime: '09:00',
-  endTime: '20:00',
-  venue: 'Bangkok Metropolitan Area',
-  status: 'ACTIVE',
-}
+export const MOCK_OPERATIONS = [
+  {
+    id:             'OP-2026-0522',
+    title:          'Operation Royal Passage',
+    date:           '2026-05-22',
+    classification: 'RESTRICTED',
+    commander:      'COL. WICHAI SUWAN',
+    start_time:     '09:00',
+    end_time:       '20:00',
+    venue:          'Bangkok Metropolitan Area',
+    status:         'ACTIVE',
+  },
+  {
+    id:             'OP-2026-0524',
+    title:          'Operation Northern Survey',
+    date:           '2026-05-24',
+    classification: 'CONFIDENTIAL',
+    commander:      'COL. WICHAI SUWAN',
+    start_time:     '08:00',
+    end_time:       '18:00',
+    venue:          'Chiang Mai Province',
+    status:         'ACTIVE',
+  },
+]
 
 export const MOCK_EVENTS = [
   {
     id: 'EVT-001',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '09:00',
     actual_time: '09:02',
@@ -28,6 +42,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-002',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '09:30',
     actual_time: '09:28',
@@ -43,6 +58,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-003',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '10:00',
     actual_time: '10:05',
@@ -58,6 +74,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-004',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '10:30',
     actual_time: '10:33',
@@ -73,6 +90,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-005',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '10:45',
     actual_time: '10:44',
@@ -88,6 +106,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-006',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '11:00',
     actual_time: '11:07',
@@ -103,6 +122,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-007',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '11:00',
     actual_time: '11:05',
@@ -118,6 +138,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-008',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '12:30',
     actual_time: '12:38',
@@ -133,6 +154,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-009',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '13:00',
     actual_time: '13:02',
@@ -148,6 +170,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-010',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '14:00',
     actual_time: '13:58',
@@ -163,6 +186,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-011',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '14:00',
     actual_time: '14:16',
@@ -178,6 +202,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-012',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '14:30',
     actual_time: '14:38',
@@ -193,6 +218,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-013',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '15:00',
     actual_time: '15:08',
@@ -208,6 +234,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-014',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '16:00',
     actual_time: null,
@@ -223,6 +250,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-015',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '16:15',
     actual_time: null,
@@ -238,6 +266,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-016',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '16:30',
     actual_time: null,
@@ -253,6 +282,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-017',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '17:30',
     actual_time: null,
@@ -268,6 +298,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-018',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '18:00',
     actual_time: null,
@@ -283,6 +314,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-019',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '18:30',
     actual_time: null,
@@ -298,6 +330,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-020',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '19:00',
     actual_time: null,
@@ -313,6 +346,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-021',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '19:30',
     actual_time: null,
@@ -328,6 +362,7 @@ export const MOCK_EVENTS = [
   },
   {
     id: 'EVT-022',
+    operation_id: 'OP-2026-0522',
     date: '2026-05-22',
     planned_time: '20:00',
     actual_time: null,
@@ -341,6 +376,42 @@ export const MOCK_EVENTS = [
     duration: 30,
     priority: 'normal',
   },
+  // OP-2026-0524 sample events
+  {
+    id: 'EVT-101',
+    operation_id: 'OP-2026-0524',
+    date: '2026-05-24',
+    planned_time: '08:00',
+    actual_time: null,
+    end_time: null,
+    title: 'Advance Team Deployment — Chiang Mai Airport',
+    status: 'upcoming',
+    type: 'security',
+    detail: 'Advance security team deployed to Chiang Mai International Airport. Perimeter assessment and stakeholder coordination.',
+    reporter: 'CPT. NATTAPOL',
+    location: 'Chiang Mai International Airport',
+    duration: 60,
+    priority: 'high',
+  },
+  {
+    id: 'EVT-102',
+    operation_id: 'OP-2026-0524',
+    date: '2026-05-24',
+    planned_time: '10:00',
+    actual_time: null,
+    end_time: null,
+    title: 'Site Survey — Northern Command Post',
+    status: 'upcoming',
+    type: 'briefing',
+    detail: 'Full site survey of Northern Regional Command Post. Facilities, communications, and logistics assessment.',
+    reporter: 'MAJ. PRASONG',
+    location: 'Northern Regional Command Post',
+    duration: 90,
+    priority: 'normal',
+  },
 ]
 
-export const getEventsForDate = (date) => MOCK_EVENTS.filter(e => e.date === date)
+export const OPERATION_META = MOCK_OPERATIONS[0]
+
+export const getEventsForOperation = (operationId) =>
+  MOCK_EVENTS.filter(e => e.operation_id === operationId)

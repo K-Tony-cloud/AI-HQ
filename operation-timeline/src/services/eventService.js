@@ -1,31 +1,66 @@
 /**
  * eventService.js — unified data access layer
  *
- * Reads VITE_API_MODE from environment:
- *   'mock' (default) — returns local mock data synchronously
- *   'live'           — calls Google Sheets via sheetsAdapter
- *
- * All exported functions are async to allow transparent switching.
+ * VITE_API_MODE=mock (default) → local mock data
+ * VITE_API_MODE=live           → Google Sheets via sheetsAdapter
  */
 
-import { MOCK_EVENTS, OPERATION_META } from '../mock/events'
+import { MOCK_OPERATIONS, MOCK_EVENTS, getEventsForOperation } from '../mock/events'
 import { getLogsForEvent as mockGetLogs, MOCK_LOGS } from '../mock/logs'
 import * as sheets from './sheetsAdapter'
 
 const USE_MOCK = import.meta.env.VITE_API_MODE !== 'live'
 
-/* ── Read ────────────────────────────────────────────────────── */
+/* ── Operations ──────────────────────────────────────────────── */
 
-export const fetchEvents = async (date) => {
+export const fetchOperations = async () => {
+  if (USE_MOCK) return MOCK_OPERATIONS
+  return sheets.getOperations()
+}
+
+export const fetchOperation = async (id) => {
+  if (USE_MOCK) return MOCK_OPERATIONS.find(o => o.id === id) || null
+  return sheets.getOperation(id)
+}
+
+export const createOperation = async (data) => {
+  const newOp = {
+    ...data,
+    id:         `OP-${Date.now()}`,
+    status:     data.status || 'ACTIVE',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  if (USE_MOCK) return newOp
+  return sheets.addOperation(newOp)
+}
+
+export const patchOperation = async (id, updates) => {
+  if (USE_MOCK) return { ok: true }
+  return sheets.patchOperation(id, updates)
+}
+
+export const duplicateOperation = async (sourceId, newData) => {
   if (USE_MOCK) {
-    if (date) return MOCK_EVENTS.filter(e => e.date === date)
+    const source = MOCK_OPERATIONS.find(o => o.id === sourceId)
+    if (!source) throw new Error('Source operation not found')
+    return { ...source, ...newData, id: `OP-${Date.now()}`, status: 'ACTIVE' }
+  }
+  return sheets.cloneOperation(sourceId, newData)
+}
+
+/* ── Events ──────────────────────────────────────────────────── */
+
+export const fetchEvents = async (operationId) => {
+  if (USE_MOCK) {
+    if (operationId) return getEventsForOperation(operationId)
     return MOCK_EVENTS
   }
-  return sheets.getEvents(date)
+  return sheets.getEvents(operationId)
 }
 
 export const fetchMeta = async () => {
-  if (USE_MOCK) return OPERATION_META
+  if (USE_MOCK) return MOCK_OPERATIONS[0]
   return sheets.getMeta()
 }
 
@@ -34,17 +69,16 @@ export const fetchLogs = async (eventId) => {
   return sheets.getLogs(eventId)
 }
 
-/* ── Write ───────────────────────────────────────────────────── */
+/* ── Event CRUD ──────────────────────────────────────────────── */
 
 export const createEvent = async (data) => {
   const newEvent = {
     ...data,
-    id:         `EVT-${Date.now()}`,
-    date:       data.date       || '2026-05-22',
-    actual_time: data.actual_time || null,
-    end_time:    data.end_time    || null,
-    status:     data.status     || 'upcoming',
-    duration:   data.duration   || 30,
+    id:          `EVT-${Date.now()}`,
+    actual_time:  data.actual_time  || null,
+    end_time:     data.end_time     || null,
+    status:      data.status      || 'upcoming',
+    duration:    data.duration    || 30,
   }
   if (USE_MOCK) return newEvent
   return sheets.addEvent(newEvent)

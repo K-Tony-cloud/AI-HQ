@@ -2,30 +2,20 @@
  * Events.gs — CRUD operations for the EVENTS table
  */
 
-/**
- * Returns all events sorted by planned_time.
- * @returns {Object[]}
- */
 function getAllEvents() {
   return readSheet(SHEET_NAMES.EVENTS).sort((a, b) =>
     String(a.planned_time).localeCompare(String(b.planned_time))
   )
 }
 
-/**
- * Returns events for a specific date.
- * @param {string} date  YYYY-MM-DD
- * @returns {Object[]}
- */
 function getEventsByDate(date) {
   return getAllEvents().filter(e => e.date === date)
 }
 
-/**
- * Creates a new event row.
- * @param {Object} data  Partial OperationEvent (id auto-generated if missing)
- * @returns {Object}     The created event with id, created_at, updated_at
- */
+function getEventsByOperationId(operationId) {
+  return getAllEvents().filter(e => e.operation_id === operationId)
+}
+
 function createEvent(data) {
   const lock = LockService.getScriptLock()
   lock.waitLock(5000)
@@ -33,6 +23,7 @@ function createEvent(data) {
     const now = new Date().toISOString()
     const event = {
       id:           data.id           || 'EVT-' + Date.now(),
+      operation_id: data.operation_id || '',
       date:         data.date         || '',
       planned_time: data.planned_time || '',
       actual_time:  data.actual_time  || '',
@@ -55,12 +46,6 @@ function createEvent(data) {
   }
 }
 
-/**
- * Updates an existing event by id.
- * @param {string} id
- * @param {Object} updates  Fields to update (partial)
- * @returns {{ ok: boolean }}
- */
 function updateEvent(id, updates) {
   const lock = LockService.getScriptLock()
   lock.waitLock(5000)
