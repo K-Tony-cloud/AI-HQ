@@ -70,6 +70,9 @@ export const patchOperation = (id, data) =>
 export const cloneOperation = (sourceId, newData) =>
   sheetsPost('cloneOperation', { sourceId, data: newData })
 
+export const importOperation = (operation, events) =>
+  sheetsPost('importOperation', { data: { operation, events } })
+
 /* ── Events ───────────────────────────────────────────────────── */
 
 export const getEvents = (operationId) =>

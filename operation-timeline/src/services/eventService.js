@@ -99,6 +99,22 @@ export const fetchAllLogs = (limit = 50) =>
     ? Promise.resolve(Object.values(MOCK_LOGS).flat().slice(0, limit))
     : sheets.getAllLogs(limit)
 
+/* ── Import operation from CSV ───────────────────────────────── */
+
+export const importOperationFromCSV = async (operationData, events) => {
+  const op = {
+    ...operationData,
+    id:         `OP-${Date.now()}`,
+    status:     operationData.status || 'ACTIVE',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  if (USE_MOCK) {
+    return { operation: op, events: events.map((e, i) => ({ ...e, id: `EVT-IMPORT-${i}`, operation_id: op.id })), count: events.length }
+  }
+  return sheets.importOperation(op, events)
+}
+
 /* ── Connection test ─────────────────────────────────────────── */
 
 export const testConnection = async () => {

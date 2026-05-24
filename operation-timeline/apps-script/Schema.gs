@@ -3,11 +3,12 @@
  */
 
 const SHEET_NAMES = {
-  OPERATIONS: 'operations',
-  EVENTS:     'events',
-  LOGS:       'event_logs',
-  META:       'operation_meta',
-  USERS:      'users',
+  OPERATIONS:  'operations',
+  EVENTS:      'events',
+  LOGS:        'event_logs',
+  ATTACHMENTS: 'event_attachments',
+  META:        'operation_meta',
+  USERS:       'users',
 }
 
 const HEADERS = {
@@ -21,7 +22,11 @@ const HEADERS = {
     'location', 'duration', 'priority', 'created_at', 'updated_at',
   ],
   event_logs: [
-    'id', 'event_id', 'time', 'message', 'user', 'type', 'created_at',
+    'id', 'operation_id', 'event_id', 'time', 'message', 'user', 'type', 'created_at',
+  ],
+  event_attachments: [
+    'attachment_id', 'operation_id', 'event_id', 'file_name',
+    'file_url', 'file_type', 'uploaded_by', 'uploaded_at',
   ],
   operation_meta: [
     'id', 'name', 'date', 'classification', 'commander',
@@ -119,7 +124,7 @@ function resetAll() {
   Logger.log('Starting full reset...')
   const sheetList = [
     SHEET_NAMES.OPERATIONS, SHEET_NAMES.EVENTS,
-    SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS,
+    SHEET_NAMES.LOGS, SHEET_NAMES.ATTACHMENTS, SHEET_NAMES.META, SHEET_NAMES.USERS,
   ]
   sheetList.forEach(name => {
     const sheet = getOrCreateSheet(name)
@@ -137,7 +142,7 @@ function forceReset() {
   const ss = getSpreadsheet()
   const sheetList = [
     SHEET_NAMES.OPERATIONS, SHEET_NAMES.EVENTS,
-    SHEET_NAMES.LOGS, SHEET_NAMES.META, SHEET_NAMES.USERS,
+    SHEET_NAMES.LOGS, SHEET_NAMES.ATTACHMENTS, SHEET_NAMES.META, SHEET_NAMES.USERS,
   ]
   sheetList.forEach(name => {
     const sheet = ss.getSheetByName(name) || ss.insertSheet(name)

@@ -2,6 +2,7 @@ import { useModal } from '../../context/ModalContext'
 import { EditEventModal } from '../admin/EditEventModal'
 import { AddEventModal } from '../admin/AddEventModal'
 import { CreateOperationModal } from '../admin/CreateOperationModal'
+import { ImportOperationModal } from '../admin/ImportOperationModal'
 import { AuditPanel } from '../admin/AuditPanel'
 import { PinLoginModal } from '../admin/PinLoginModal'
 
@@ -20,6 +21,9 @@ export const ModalHost = () => {
 
     case 'createOperation':
       return <CreateOperationModal cloneSourceId={props.cloneSourceId || null} onClose={closeModal} />
+
+    case 'importOperation':
+      return <ImportOperationModal onClose={closeModal} />
 
     case 'audit':
       return <AuditPanel onClose={closeModal} />

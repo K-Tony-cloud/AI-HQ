@@ -7,6 +7,7 @@ import {
   createOperation as apiCreateOperation,
   patchOperation  as apiPatchOperation,
   duplicateOperation as apiDuplicateOperation,
+  importOperationFromCSV as apiImportOperation,
   createLog,
   IS_MOCK, POLL_INTERVAL,
 } from '../services/eventService'
@@ -233,6 +234,13 @@ export const AppProvider = ({ children }) => {
     setCurrentOperationId(id)
   }, [])
 
+  const importOperation = useCallback(async (operationData, events) => {
+    const result = await apiImportOperation(operationData, events)
+    setOperations(prev => [result.operation, ...prev])
+    setCurrentOperationId(result.operation.id)
+    return result
+  }, [])
+
   /* ── Event CRUD ───────────────────────────────────────────────── */
   const addEvent = useCallback(async (eventData) => {
     const newEvent = await apiCreateEvent({
@@ -300,6 +308,7 @@ export const AppProvider = ({ children }) => {
       updateOperation,
       archiveOperation,
       cloneOperation,
+      importOperation,
       /* events */
       events,
       displayEvents,

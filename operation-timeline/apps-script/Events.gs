@@ -59,3 +59,46 @@ function updateEvent(id, updates) {
     lock.releaseLock()
   }
 }
+
+function bulkCreateEvents(operationId, defaultDate, eventsArray) {
+  const lock = LockService.getScriptLock()
+  lock.waitLock(10000)
+  try {
+    const sheet   = getOrCreateSheet(SHEET_NAMES.EVENTS)
+    const headers = HEADERS[SHEET_NAMES.EVENTS]
+    const now     = new Date().toISOString()
+    const created = []
+
+    const rows = eventsArray.map((data, i) => {
+      const event = {
+        id:           'EVT-' + Date.now() + '-' + i,
+        operation_id: operationId,
+        date:         data.date         || defaultDate || '',
+        planned_time: data.planned_time || '',
+        actual_time:  data.actual_time  || '',
+        end_time:     data.end_time     || '',
+        title:        data.title        || '',
+        status:       data.status       || 'upcoming',
+        type:         data.type         || 'briefing',
+        detail:       data.detail       || '',
+        reporter:     data.reporter     || '',
+        location:     data.location     || '',
+        duration:     data.duration     !== undefined ? data.duration : 30,
+        priority:     data.priority     || 'normal',
+        created_at:   now,
+        updated_at:   now,
+      }
+      created.push(event)
+      return headers.map(h => (event[h] !== undefined && event[h] !== null) ? event[h] : '')
+    })
+
+    if (rows.length > 0) {
+      const startRow = sheet.getLastRow() + 1
+      sheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows)
+    }
+
+    return created
+  } finally {
+    lock.releaseLock()
+  }
+}

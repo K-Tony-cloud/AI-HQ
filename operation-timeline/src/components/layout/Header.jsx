@@ -222,6 +222,14 @@ export const Header = () => {
             )}
             {isAdminMode && (
               <button
+                onClick={() => openModal('importOperation')}
+                className="hidden sm:flex text-[11px] font-semibold text-ops-text-secondary border border-ops-border hover:bg-ops-bg px-2.5 py-1.5 rounded-lg transition-all"
+              >
+                ↑ CSV
+              </button>
+            )}
+            {isAdminMode && (
+              <button
                 onClick={() => openModal('audit')}
                 className="text-[11px] font-semibold text-ops-text-secondary border border-ops-border hover:bg-ops-bg px-2.5 py-1.5 rounded-lg transition-all"
               >

@@ -24,6 +24,7 @@
  *   {action:'addEvent',        data:{...}}
  *   {action:'updateEvent',     id:'EVT-xxx', data:{...}}
  *   {action:'addLog',          data:{...}}
+ *   {action:'importOperation', data:{operation:{...}, events:[...]}}
  */
 
 function ok(payload) {
@@ -122,6 +123,15 @@ function doPost(e) {
       }
       case 'addLog': {
         return ok(createLog(payload.data || {}))
+      }
+      case 'importOperation': {
+        const { operation, events } = payload.data || {}
+        if (!operation) return err('data.operation required')
+        const op      = createOperation(operation)
+        const created = events && events.length > 0
+          ? bulkCreateEvents(op.id, op.date, events)
+          : []
+        return ok({ operation: op, events: created, count: created.length })
       }
       default:
         return err('Unknown action: ' + action, 404)
