@@ -1,7 +1,55 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchAttachments, uploadAttachment } from '../../services/eventService'
+import { useApp } from '../../context/AppContext'
 import { useToast } from '../../context/ToastContext'
 
+/* ── Constants ────────────────────────────────────────────────── */
+const MAX_IMAGE_BYTES     = 20 * 1024 * 1024   // 20 MB raw — reject before even trying
+const MAX_NONIMAGE_BYTES  =  5 * 1024 * 1024   //  5 MB for PDF / other
+const TARGET_MAX_PX       = 1600               // resize images to fit inside 1600×1600
+const JPEG_QUALITY        = 0.82
+
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf']
+
+/* ── Image compression via Canvas ────────────────────────────── */
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const scale = Math.min(1, TARGET_MAX_PX / Math.max(img.width, img.height))
+      const w = Math.round(img.width  * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width  = w
+      canvas.height = h
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+      canvas.toBlob(
+        blob => {
+          if (!blob) { reject(new Error('Image compression failed')); return }
+          const outName = file.name.replace(/\.[^.]+$/, '.jpg')
+          resolve(new File([blob], outName, { type: 'image/jpeg' }))
+        },
+        'image/jpeg',
+        JPEG_QUALITY,
+      )
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Cannot read image')) }
+    img.src = objectUrl
+  })
+}
+
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = (e) => resolve(e.target.result.split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+/* ── Helpers ──────────────────────────────────────────────────── */
 const isImageType = (mimeType) => mimeType?.startsWith('image/')
 
 const thumbUrl = (fileUrl) => {
@@ -9,19 +57,18 @@ const thumbUrl = (fileUrl) => {
   return m ? `https://drive.google.com/thumbnail?id=${m[1]}&sz=w300` : null
 }
 
-const readAsBase64 = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload  = (e) => resolve(e.target.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+const fmtBytes = (n) =>
+  n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`
 
+/* ── Component ────────────────────────────────────────────────── */
 export const EventAttachments = ({ event, isAdmin }) => {
-  const { addToast } = useToast()
+  const { operationMeta } = useApp()
+  const { addToast }      = useToast()
+
   const [attachments, setAttachments] = useState([])
   const [isLoading,   setIsLoading]   = useState(true)
-  const [isUploading, setIsUploading] = useState(false)
+  const [uploadPhase, setUploadPhase] = useState(null)  // null | 'compressing' | 'uploading'
+
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -39,25 +86,51 @@ export const EventAttachments = ({ event, isAdmin }) => {
     e.target.value = ''
     if (!file) return
 
-    setIsUploading(true)
+    // Type check
+    const isImage = isImageType(file.type)
+    if (!isImage && !ALLOWED_TYPES.includes(file.type)) {
+      addToast(`ไฟล์ประเภท "${file.type || 'ไม่รู้จัก'}" ไม่รองรับ — ใช้ภาพหรือ PDF เท่านั้น`, 'error')
+      return
+    }
+
+    // Size check (before compression)
+    const limit = isImage ? MAX_IMAGE_BYTES : MAX_NONIMAGE_BYTES
+    if (file.size > limit) {
+      addToast(`ไฟล์ใหญ่เกินไป (${fmtBytes(file.size)}) — สูงสุด ${fmtBytes(limit)}`, 'error')
+      return
+    }
+
     try {
-      const base64 = await readAsBase64(file)
+      let toUpload = file
+
+      // Compress images
+      if (isImage && file.type !== 'image/gif') {
+        setUploadPhase('compressing')
+        toUpload = await compressImage(file)
+      }
+
+      setUploadPhase('uploading')
+      const base64 = await readAsBase64(toUpload)
+
       const result = await uploadAttachment({
-        operationId: event.operation_id,
-        eventId:     event.id,
-        fileName:    file.name,
-        fileData:    base64,
-        mimeType:    file.type,
-        uploadedBy:  'ADMIN',
+        operationId:    event.operation_id,
+        operationTitle: operationMeta?.title || '',
+        operationDate:  operationMeta?.date  || '',
+        eventId:        event.id,
+        fileName:       toUpload.name,
+        fileData:       base64,
+        mimeType:       toUpload.type,
+        uploadedBy:     'ADMIN',
       })
+
       setAttachments(prev => [...prev, result])
       addToast('แนบไฟล์สำเร็จ', 'success')
     } catch (ex) {
-      addToast('แนบไฟล์ไม่สำเร็จ: ' + (ex.message || 'ลองใหม่'), 'error')
+      addToast('แนบไฟล์ไม่สำเร็จ: ' + (ex.message || 'ลองใหม่อีกครั้ง'), 'error')
     } finally {
-      setIsUploading(false)
+      setUploadPhase(null)
     }
-  }, [event, addToast])
+  }, [event, operationMeta, addToast])
 
   if (isLoading) {
     return (
@@ -120,10 +193,15 @@ export const EventAttachments = ({ event, isAdmin }) => {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
+            disabled={uploadPhase !== null}
             className="flex items-center gap-1.5 text-[10px] font-semibold text-ops-text-muted hover:text-ops-accent border border-dashed border-ops-border/60 hover:border-ops-accent/40 px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isUploading ? (
+            {uploadPhase === 'compressing' ? (
+              <>
+                <span className="w-3 h-3 border border-ops-accent/40 border-t-ops-accent rounded-full animate-spin flex-shrink-0" />
+                กำลังบีบอัดรูป...
+              </>
+            ) : uploadPhase === 'uploading' ? (
               <>
                 <span className="w-3 h-3 border border-ops-accent/40 border-t-ops-accent rounded-full animate-spin flex-shrink-0" />
                 กำลังอัปโหลด...

@@ -2,13 +2,18 @@
  * Attachments.gs — Google Drive upload + EVENT_ATTACHMENTS CRUD
  *
  * Required Script Property:
- *   DRIVE_FOLDER_ID = Google Drive folder ID for all op attachments
- *   (if not set, files are uploaded to the script owner's My Drive root)
+ *   DRIVE_FOLDER_ID = Google Drive folder ID for "Operation Timeline Uploads"
+ *
+ * Folder structure:
+ *   Operation Timeline Uploads/          ← DRIVE_FOLDER_ID points here
+ *   └── OP-XXX_OperationName_Date/       ← auto-created per operation
+ *       └── uploaded files...
  */
 
 function getDriveRoot() {
   const id = PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID')
-  return id ? DriveApp.getFolderById(id) : DriveApp.getRootFolder()
+  if (!id) throw new Error('DRIVE_FOLDER_ID script property is not set. Create a dedicated "Operation Timeline Uploads" folder in Drive and paste its ID into Script Properties.')
+  return DriveApp.getFolderById(id)
 }
 
 function getOrCreateSubfolder(parent, name) {
@@ -16,13 +21,23 @@ function getOrCreateSubfolder(parent, name) {
   return it.hasNext() ? it.next() : parent.createFolder(name)
 }
 
+function buildOperationFolderName(operationId, operationTitle, operationDate) {
+  const safeName = (operationTitle || '')
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 40)
+  const safeDate = (operationDate || '').replace(/[^\d-]/g, '')
+  return [operationId, safeName, safeDate].filter(Boolean).join('_')
+}
+
 /* ── Upload base64-encoded file to Drive ─────────────────────── */
-function uploadFileToDrive(operationId, fileName, base64Data, mimeType) {
-  const root     = getDriveRoot()
-  const opFolder = getOrCreateSubfolder(root, operationId || 'general')
-  const bytes    = Utilities.base64Decode(base64Data)
-  const blob     = Utilities.newBlob(bytes, mimeType, fileName)
-  const file     = opFolder.createFile(blob)
+function uploadFileToDrive(operationId, operationTitle, operationDate, fileName, base64Data, mimeType) {
+  const root      = getDriveRoot()
+  const folderName = buildOperationFolderName(operationId, operationTitle, operationDate)
+  const opFolder   = getOrCreateSubfolder(root, folderName)
+  const bytes      = Utilities.base64Decode(base64Data)
+  const blob       = Utilities.newBlob(bytes, mimeType, fileName)
+  const file       = opFolder.createFile(blob)
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW)
   return {
     fileId:  file.getId(),
@@ -35,11 +50,22 @@ function createAttachment(data) {
   const lock = LockService.getScriptLock()
   lock.waitLock(10000)
   try {
-    const { operationId, eventId, fileName, fileData, mimeType, uploadedBy } = data
+    const {
+      operationId, operationTitle, operationDate,
+      eventId, fileName, fileData, mimeType, uploadedBy,
+    } = data
+
     if (!eventId)  throw new Error('eventId is required')
     if (!fileData) throw new Error('fileData is required')
 
-    const uploaded = uploadFileToDrive(operationId, fileName || 'attachment', fileData, mimeType || 'application/octet-stream')
+    const uploaded = uploadFileToDrive(
+      operationId    || 'general',
+      operationTitle || '',
+      operationDate  || '',
+      fileName       || 'attachment',
+      fileData,
+      mimeType       || 'application/octet-stream',
+    )
 
     const record = {
       attachment_id: 'ATT-' + Date.now(),
