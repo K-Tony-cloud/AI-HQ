@@ -1,19 +1,24 @@
+"""
+ML prediction models for the Lao lottery dashboard.
+All models take a pd.Series of past results and return ranked predictions.
+"""
+
+import warnings
 import numpy as np
 import pandas as pd
 from collections import Counter
-from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-import warnings
+from sklearn.preprocessing import LabelEncoder
 
 warnings.filterwarnings("ignore")
 
 
-def _encode_sequence(series: pd.Series, lookback: int = 5):
-    vals = series.astype(str).tolist()
-    le = LabelEncoder()
+def _encode(series: pd.Series, lookback: int):
+    vals    = series.astype(str).tolist()
+    le      = LabelEncoder()
     encoded = le.fit_transform(vals)
-    X, y = [], []
+    X, y    = [], []
     for i in range(lookback, len(encoded)):
         X.append(encoded[i - lookback:i])
         y.append(encoded[i])
@@ -22,82 +27,72 @@ def _encode_sequence(series: pd.Series, lookback: int = 5):
 
 def predict_next_rf(series: pd.Series, lookback: int = 5, top_n: int = 5) -> list[dict]:
     if len(series) < lookback + 10:
-        return _fallback_frequency(series, top_n)
-
-    X, y, le = _encode_sequence(series, lookback)
+        return _fallback(series, top_n)
+    X, y, le = _encode(series, lookback)
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
     clf.fit(X, y)
-
-    last_window = le.transform(series.astype(str).tail(lookback).tolist())
-    proba = clf.predict_proba([last_window])[0]
-    top_idx = np.argsort(proba)[::-1][:top_n]
-
-    results = []
-    for idx in top_idx:
-        num = le.inverse_transform([idx])[0]
-        results.append({"number": num, "probability": round(float(proba[idx]) * 100, 2), "method": "Random Forest"})
-    return results
+    last = le.transform(series.astype(str).tail(lookback).tolist())
+    proba = clf.predict_proba([last])[0]
+    idx = np.argsort(proba)[::-1][:top_n]
+    return [{"number": str(le.inverse_transform([i])[0]), "probability": round(float(proba[i]) * 100, 2), "method": "Random Forest"} for i in idx]
 
 
 def predict_next_lr(series: pd.Series, lookback: int = 5, top_n: int = 5) -> list[dict]:
     if len(series) < lookback + 10:
-        return _fallback_frequency(series, top_n)
-
-    X, y, le = _encode_sequence(series, lookback)
+        return _fallback(series, top_n)
+    X, y, le = _encode(series, lookback)
     clf = LogisticRegression(max_iter=500, random_state=42)
     clf.fit(X, y)
-
-    last_window = le.transform(series.astype(str).tail(lookback).tolist())
-    proba = clf.predict_proba([last_window])[0]
-    top_idx = np.argsort(proba)[::-1][:top_n]
-
-    results = []
-    for idx in top_idx:
-        num = le.inverse_transform([idx])[0]
-        results.append({"number": num, "probability": round(float(proba[idx]) * 100, 2), "method": "Logistic Regression"})
-    return results
+    last = le.transform(series.astype(str).tail(lookback).tolist())
+    proba = clf.predict_proba([last])[0]
+    idx = np.argsort(proba)[::-1][:top_n]
+    return [{"number": str(le.inverse_transform([i])[0]), "probability": round(float(proba[i]) * 100, 2), "method": "Logistic Regression"} for i in idx]
 
 
 def predict_markov(series: pd.Series, top_n: int = 5) -> list[dict]:
     vals = series.astype(str).tolist()
-    transitions: dict[str, Counter] = {}
+    trans: dict[str, Counter] = {}
     for a, b in zip(vals, vals[1:]):
-        transitions.setdefault(a, Counter())[b] += 1
-
+        trans.setdefault(a, Counter())[b] += 1
     last = vals[-1]
-    if last not in transitions:
-        return _fallback_frequency(series, top_n)
-
-    counts = transitions[last]
-    total = sum(counts.values())
-    results = []
-    for num, cnt in counts.most_common(top_n):
-        results.append({"number": num, "probability": round(cnt / total * 100, 2), "method": "Markov Chain"})
-    return results[:top_n]
-
-
-def _fallback_frequency(series: pd.Series, top_n: int) -> list[dict]:
-    counts = Counter(series.astype(str))
-    total = sum(counts.values())
-    return [
-        {"number": num, "probability": round(cnt / total * 100, 2), "method": "Frequency (fallback)"}
-        for num, cnt in counts.most_common(top_n)
-    ]
+    if last not in trans:
+        return _fallback(series, top_n)
+    counts = trans[last]
+    total  = sum(counts.values())
+    return [{"number": n, "probability": round(c / total * 100, 2), "method": "Markov Chain"}
+            for n, c in counts.most_common(top_n)]
 
 
 def ensemble_predict(series: pd.Series, lookback: int = 5, top_n: int = 10) -> pd.DataFrame:
-    results: dict[str, float] = {}
-    weight = {"Random Forest": 0.4, "Logistic Regression": 0.3, "Markov Chain": 0.3}
+    w    = {"Random Forest": 0.4, "Logistic Regression": 0.3, "Markov Chain": 0.3}
+    agg: dict[str, float] = {}
+    for fn, method in [(predict_next_rf,"Random Forest"), (predict_next_lr,"Logistic Regression"), (predict_markov,"Markov Chain")]:
+        kw = {"top_n": 20} if method == "Markov Chain" else {"lookback": lookback, "top_n": 20}
+        for p in fn(series, **kw):
+            agg[p["number"]] = agg.get(p["number"], 0) + p["probability"] * w[method]
+    df = pd.DataFrame([{"number": k, "score": round(v, 2)} for k, v in agg.items()])
+    return df.sort_values("score", ascending=False).head(top_n).reset_index(drop=True)
 
-    for pred_fn, method in [
-        (predict_next_rf, "Random Forest"),
-        (predict_next_lr, "Logistic Regression"),
-        (predict_markov, "Markov Chain"),
-    ]:
-        preds = pred_fn(series, **({} if method == "Markov Chain" else {"lookback": lookback}), top_n=20)
-        for p in preds:
-            results[p["number"]] = results.get(p["number"], 0) + p["probability"] * weight[method]
 
-    df = pd.DataFrame([{"number": k, "score": round(v, 2)} for k, v in results.items()])
-    df.sort_values("score", ascending=False, inplace=True)
-    return df.head(top_n).reset_index(drop=True)
+def _fallback(series: pd.Series, top_n: int) -> list[dict]:
+    counts = Counter(series.astype(str))
+    total  = sum(counts.values()) or 1
+    return [{"number": n, "probability": round(c / total * 100, 2), "method": "Frequency"} for n, c in counts.most_common(top_n)]
+
+
+def predict_all_types(df: pd.DataFrame, lookback: int = 5, top_n: int = 5) -> dict[str, list[dict]]:
+    """
+    Run ensemble predictions for all 5 digit types.
+    Returns { digit_type: [ {number, probability}, ... ] }
+    """
+    from src.database import DIGIT_COL
+    results = {}
+    for dtype, col in DIGIT_COL.items():
+        if col not in df.columns:
+            continue
+        series = df[col].dropna()
+        if series.empty:
+            continue
+        ens = ensemble_predict(series, lookback=lookback, top_n=top_n)
+        results[dtype] = [{"number": r["number"], "probability": r["score"]} for _, r in ens.iterrows()]
+    return results
