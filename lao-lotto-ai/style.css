@@ -1,0 +1,307 @@
+/* ── Reset & Base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:     #0D1117;
+  --card:   #161B22;
+  --border: #30363D;
+  --red:    #E63946;
+  --gold:   #FFD700;
+  --blue:   #4A90D9;
+  --green:  #2ECC71;
+  --purple: #A78BFA;
+  --text:   #F0F6FC;
+  --muted:  #8B949E;
+  --sb-w:   240px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a { color: inherit; text-decoration: none; }
+hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+strong { color: var(--text); }
+
+/* ── Sidebar ──────────────────────────────────────────────────────────── */
+.sidebar {
+  position: fixed; left: 0; top: 0;
+  width: var(--sb-w); height: 100vh;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 1.4rem 1rem;
+  z-index: 200;
+  transition: transform .28s ease;
+}
+
+.sb-header { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+.sb-logo   { font-size: 1.8rem; }
+.sb-title  { font-size: 1rem; font-weight: 800; color: var(--text); }
+.sb-sub    { font-size: .68rem; color: var(--muted); margin-top: .1rem; }
+.sb-hr     { border-top: 1px solid var(--border); margin: .5rem 0 1rem; }
+
+.nav-item {
+  display: flex; align-items: center; gap: .65rem;
+  padding: .6rem .85rem;
+  border-radius: 8px;
+  font-size: .9rem; font-weight: 600; color: var(--muted);
+  cursor: pointer;
+  border: none; background: none; width: 100%; text-align: left;
+  transition: background .15s, color .15s;
+  margin-bottom: .2rem;
+}
+.nav-item:hover { background: var(--card); color: var(--text); }
+.nav-item.active { background: rgba(230,57,70,.15); color: var(--red); }
+.nav-item span   { font-size: 1.05rem; width: 1.4rem; text-align: center; }
+
+.sb-footer { margin-top: auto; padding-top: 1rem; font-size: .72rem; color: var(--muted); }
+
+/* ── Mobile header ────────────────────────────────────────────────────── */
+.mob-header {
+  display: none;
+  position: fixed; top: 0; left: 0; right: 0; height: 54px;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  align-items: center; padding: 0 1rem; gap: 1rem; z-index: 100;
+  font-weight: 700; font-size: .95rem;
+}
+.hamburger {
+  background: none; border: none; color: var(--text);
+  font-size: 1.3rem; cursor: pointer; padding: .3rem;
+}
+
+/* ── Overlay ──────────────────────────────────────────────────────────── */
+.overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.55); z-index: 150;
+}
+.overlay.active { display: block; }
+
+/* ── Main content ─────────────────────────────────────────────────────── */
+.main-content {
+  margin-left: var(--sb-w);
+  padding: 2rem 2.2rem;
+  min-height: 100vh;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+.sec { display: none; }
+.sec.active { display: block; }
+
+/* ── Preview banner ───────────────────────────────────────────────────── */
+.preview-banner {
+  background: #1a1a2e; border: 1px solid var(--blue);
+  border-radius: 10px; padding: .65rem 1rem;
+  color: var(--blue); font-size: .83rem;
+  margin-bottom: 1.2rem; display: flex; align-items: center; gap: .5rem;
+}
+.preview-badge {
+  background: rgba(74,144,217,.15); color: var(--blue);
+  border: 1px solid var(--blue); border-radius: 20px;
+  padding: .15rem .55rem; font-size: .65rem; font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Page header ──────────────────────────────────────────────────────── */
+.page-title {
+  font-size: 2rem; font-weight: 900; margin-bottom: .1rem;
+}
+.page-sub { color: var(--muted); font-size: .9rem; margin-bottom: .8rem; }
+
+/* ── Metric row (copied from Streamlit CSS) ───────────────────────────── */
+.lao-metric-row { display: flex; gap: .8rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.lao-metric {
+  flex: 1; min-width: 130px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 1rem .9rem; text-align: center; transition: border-color .2s;
+}
+.lao-metric:hover { border-color: var(--red); }
+.lao-metric .m-icon  { font-size: 1.5rem; line-height: 1; }
+.lao-metric .m-val   { font-size: 1.75rem; font-weight: 800; color: var(--red); margin: .25rem 0 .15rem; line-height: 1; }
+.lao-metric .m-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+
+/* ── Latest draw card ─────────────────────────────────────────────────── */
+.latest-card {
+  background: linear-gradient(135deg, #1a0a0a 0%, #2d0f0f 100%);
+  border: 1px solid var(--red); border-radius: 16px;
+  padding: 1.5rem 1.8rem; text-align: center; margin-bottom: 1rem;
+}
+.latest-card .lc-label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+.latest-card .lc-date  { color: var(--text); font-size: 1rem; margin: .2rem 0 .8rem; }
+.latest-card .lc-six   {
+  font-size: 2.8rem; font-weight: 900; letter-spacing: .15em;
+  background: linear-gradient(90deg, var(--red), var(--gold));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.latest-card .lc-sub   { color: var(--muted); font-size: .9rem; margin-top: .5rem; }
+
+/* ── Lottery balls ────────────────────────────────────────────────────── */
+.ball-row  { display: flex; flex-wrap: wrap; gap: 10px; padding: .8rem 0; }
+.ball-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.lao-ball  {
+  width: 58px; height: 58px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 800; font-size: 1.2rem;
+  box-shadow: 0 5px 15px rgba(0,0,0,.45), inset 0 -4px 8px rgba(0,0,0,.3);
+  user-select: none;
+}
+.lao-ball.top { box-shadow: 0 0 0 3px var(--gold), 0 5px 15px rgba(0,0,0,.45); transform: scale(1.12); }
+.ball-pct { font-size: .6rem; color: var(--muted); }
+
+.ball-0 { background: radial-gradient(circle at 35% 35%, #FF6B6B, #C0392B); }
+.ball-1 { background: radial-gradient(circle at 35% 35%, #F5A623, #D4830A); }
+.ball-2 { background: radial-gradient(circle at 35% 35%, #4A90D9, #1A5276); }
+.ball-3 { background: radial-gradient(circle at 35% 35%, #2ECC71, #1A7A43); }
+.ball-4 { background: radial-gradient(circle at 35% 35%, #A78BFA, #5B2C6F); }
+.ball-5 { background: radial-gradient(circle at 35% 35%, #F06292, #AD1457); }
+.ball-6 { background: radial-gradient(circle at 35% 35%, #4DB6AC, #00695C); }
+
+/* ── Prediction block ─────────────────────────────────────────────────── */
+.pred-block {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 16px;
+  padding: 1.2rem 1.4rem; margin-bottom: 1rem;
+}
+.pred-block .pb-title {
+  font-size: 1rem; font-weight: 700; color: var(--text);
+  border-left: 3px solid var(--red); padding-left: .6rem;
+  margin-bottom: 1rem;
+}
+.pred-row  { display: flex; flex-wrap: wrap; gap: 1rem; }
+.pred-type {
+  flex: 1; min-width: 150px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: .9rem 1rem;
+}
+.pred-type .pt-label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-bottom: .6rem; }
+.pred-item { display: flex; align-items: center; gap: .5rem; margin-bottom: .35rem; }
+.pred-item .pi-rank  { font-size: .65rem; color: var(--muted); width: 14px; }
+.pred-item .pi-num   { font-size: 1.1rem; font-weight: 800; color: var(--text); min-width: 44px; }
+.pred-item .pi-bar-wrap { flex: 1; background: var(--border); border-radius: 4px; height: 6px; }
+.pred-item .pi-bar   { background: linear-gradient(90deg, var(--red), var(--gold)); height: 6px; border-radius: 4px; transition: width .5s ease; }
+.pred-item .pi-pct   { font-size: .65rem; color: var(--muted); width: 38px; text-align: right; }
+
+/* ── Section label ────────────────────────────────────────────────────── */
+.sec-label {
+  font-size: 1rem; font-weight: 600; color: var(--text);
+  border-left: 3px solid var(--red); padding-left: .65rem;
+  margin: 1.2rem 0 .65rem;
+}
+
+/* ── Nav cards ────────────────────────────────────────────────────────── */
+.nav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px,1fr)); gap: .9rem; }
+.nav-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.2rem 1.1rem; transition: border-color .2s; cursor: default;
+}
+.nav-card:hover { border-color: var(--red); }
+.nav-card .nc-icon { font-size: 1.8rem; }
+.nav-card h4 { margin: .35rem 0 .25rem; color: var(--text); font-size: .95rem; }
+.nav-card p  { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.4; }
+
+/* ── Home grid ────────────────────────────────────────────────────────── */
+.home-grid {
+  display: grid; grid-template-columns: 3fr 2fr; gap: 2rem;
+  align-items: start;
+}
+
+/* ── Hot/cold grid ────────────────────────────────────────────────────── */
+.hot-cold-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Chart container ──────────────────────────────────────────────────── */
+.chart-wrap {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 1.2rem; margin-bottom: 1rem;
+}
+.chart-wrap h3 { font-size: .85rem; color: var(--muted); margin-bottom: 1rem; font-weight: 600; }
+.chart-container { position: relative; height: 260px; }
+
+/* ── Data table ───────────────────────────────────────────────────────── */
+.data-table {
+  width: 100%; border-collapse: collapse; font-size: .82rem;
+  background: var(--card); border-radius: 10px; overflow: hidden;
+}
+.data-table th {
+  background: var(--bg); color: var(--muted);
+  padding: .5rem .75rem; text-align: left;
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
+  border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: .5rem .75rem; border-bottom: 1px solid rgba(48,54,61,.5);
+  font-weight: 600;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: rgba(230,57,70,.05); }
+
+/* ── SET index card ───────────────────────────────────────────────────── */
+.set-card {
+  background: linear-gradient(135deg, #0a1a0a 0%, #0f2d12 100%);
+  border: 1px solid var(--green); border-radius: 16px;
+  padding: 1.5rem 1.8rem; text-align: center; margin-bottom: 1rem;
+}
+.set-card .lc-label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+.set-card .lc-date  { color: var(--text); font-size: 1rem; margin: .2rem 0 .8rem; }
+.set-card .set-val  {
+  font-size: 2.5rem; font-weight: 900; letter-spacing: .05em;
+  background: linear-gradient(90deg, var(--green), var(--gold));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.set-card .lc-sub   { color: var(--muted); font-size: .9rem; margin-top: .5rem; }
+
+/* ── Hanoi card ───────────────────────────────────────────────────────── */
+.hanoi-card {
+  background: linear-gradient(135deg, #0a0a1a 0%, #0f0f2d 100%);
+  border: 1px solid var(--purple); border-radius: 16px;
+  padding: 1.5rem 1.8rem; text-align: center; margin-bottom: 1rem;
+}
+.hanoi-card .lc-six {
+  font-size: 2.4rem; font-weight: 900; letter-spacing: .12em;
+  background: linear-gradient(90deg, var(--purple), var(--blue));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Stale banner ─────────────────────────────────────────────────────── */
+.stale-banner {
+  background: #2d1f00; border: 1px solid #F5A623; border-radius: 10px;
+  padding: .7rem 1rem; color: #F5A623; font-size: .85rem;
+  margin-bottom: 1rem; display: flex; align-items: center; gap: .6rem;
+}
+
+/* ── Mobile responsive ────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); box-shadow: 4px 0 20px rgba(0,0,0,.6); }
+
+  .mob-header { display: flex; }
+
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+    padding-top: 4.2rem;
+  }
+
+  .page-title  { font-size: 1.6rem; }
+  .lao-ball    { width: 46px; height: 46px; font-size: 1rem; }
+  .ball-row    { gap: 7px; }
+  .latest-card .lc-six { font-size: 2rem; }
+  .lao-metric  { min-width: 110px; padding: .7rem .6rem; }
+  .lao-metric .m-val { font-size: 1.4rem; }
+  .home-grid   { grid-template-columns: 1fr; }
+  .hot-cold-grid { grid-template-columns: 1fr; }
+  .pred-row    { flex-direction: column; }
+  .nav-grid    { grid-template-columns: 1fr 1fr; }
+  .chart-container { height: 220px; }
+}

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎰 หวยลาว AI — Preview</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎰</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Mobile overlay -->
+<div id="overlay" class="overlay"></div>
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+<aside id="sidebar" class="sidebar">
+  <div class="sb-header">
+    <div class="sb-logo">🎰</div>
+    <div>
+      <div class="sb-title">หวยลาว AI</div>
+      <div class="sb-sub">120 งวด · ก.ย. 68 – พ.ค. 69</div>
+    </div>
+  </div>
+  <hr class="sb-hr">
+  <nav>
+    <button class="nav-item active" data-section="home"><span>🏠</span>หน้าหลัก</button>
+    <button class="nav-item" data-section="analysis"><span>📊</span>วิเคราะห์</button>
+    <button class="nav-item" data-section="predict"><span>🎯</span>ทำนาย AI</button>
+    <button class="nav-item" data-section="hanoi"><span>🎲</span>ฮานอย</button>
+    <button class="nav-item" data-section="stock"><span>💹</span>หุ้นไทย</button>
+  </nav>
+  <div class="sb-footer">
+    <span class="preview-badge">Static Preview</span>
+    <p style="margin-top:.4rem;">Backend runs locally<br>Data: 22 May 2026</p>
+  </div>
+</aside>
+
+<!-- ── Mobile header ─────────────────────────────────────────────────────── -->
+<header class="mob-header">
+  <button class="hamburger" onclick="toggleSidebar()">☰</button>
+  <span>🎰 หวยลาว AI</span>
+  <span class="preview-badge">Preview</span>
+</header>
+
+<!-- ── Main content ──────────────────────────────────────────────────────── -->
+<main class="main-content">
+
+  <!-- ══════════════════ HOME ══════════════════════════════════════════════ -->
+  <section id="sec-home" class="sec active">
+
+    <div class="preview-banner">
+      ℹ️ <strong>Static UI Preview</strong> — ข้อมูลจาก SQLite local · Backend ไม่ได้ deploy · ดูเพื่อ UI/UX review เท่านั้น
+    </div>
+
+    <h1 class="page-title">🎰 หวยลาว AI</h1>
+    <p class="page-sub">วิเคราะห์สถิติและทำนายด้วย AI สำหรับหวยลาว</p>
+    <hr>
+
+    <!-- Latest draw -->
+    <div class="latest-card">
+      <div class="lc-label">ผลรางวัลล่าสุด</div>
+      <div class="lc-date">วันศุกร์ที่ 22 พฤษภาคม 2569</div>
+      <div class="lc-six">743763</div>
+      <div class="lc-sub">
+        4 ตัวท้าย: <strong>3763</strong> &nbsp;·&nbsp;
+        3 ตัวบน: <strong>743</strong> &nbsp;·&nbsp;
+        2 ตัวล่าง: <strong>63</strong>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="lao-metric-row">
+      <div class="lao-metric"><div class="m-icon">📅</div><div class="m-val">22 พ.ค.</div><div class="m-label">งวดล่าสุด</div></div>
+      <div class="lao-metric"><div class="m-icon">📋</div><div class="m-val">120</div><div class="m-label">งวดทั้งหมด</div></div>
+      <div class="lao-metric"><div class="m-icon">📅</div><div class="m-val">ก.ย. 68</div><div class="m-label">ข้อมูลตั้งแต่</div></div>
+      <div class="lao-metric"><div class="m-icon">🔥</div><div class="m-val">77</div><div class="m-label">เลขร้อน 2 ตัวล่าง</div></div>
+      <div class="lao-metric"><div class="m-icon">🧊</div><div class="m-val">29</div><div class="m-label">เลขเย็น 2 ตัวล่าง</div></div>
+    </div>
+    <hr>
+
+    <!-- Hot numbers preview -->
+    <div class="sec-label">🔥 เลขร้อน (2 ตัวล่าง)</div>
+    <div id="home-hot-balls" class="ball-row"></div>
+    <hr>
+
+    <!-- Prediction + recent draws -->
+    <div class="home-grid">
+      <div>
+        <div id="pred-block-home"></div>
+        <p style="color:#8B949E;font-size:.75rem;margin-top:.5rem;">
+          ทำนายโดย Ensemble AI (Random Forest + Logistic Regression + Markov Chain) — เพื่อความบันเทิงเท่านั้น
+        </p>
+      </div>
+      <div>
+        <div class="sec-label">10 งวดล่าสุด</div>
+        <div id="lao-recent-table"></div>
+      </div>
+    </div>
+    <hr>
+
+    <!-- Nav cards -->
+    <div class="sec-label">เมนู</div>
+    <div class="nav-grid">
+      <div class="nav-card" onclick="showSection('analysis')" style="cursor:pointer;">
+        <div class="nc-icon">📊</div>
+        <h4>วิเคราะห์</h4>
+        <p>ฮีตแมป, เลขร้อน/เย็น, ความถี่, ช่วงห่าง</p>
+      </div>
+      <div class="nav-card" onclick="showSection('predict')" style="cursor:pointer;">
+        <div class="nc-icon">🎯</div>
+        <h4>ทำนาย</h4>
+        <p>ผลทำนาย AI พร้อมรายละเอียดทุกโมเดล</p>
+      </div>
+      <div class="nav-card">
+        <div class="nc-icon">📈</div>
+        <h4>แนวโน้ม</h4>
+        <p>Rolling frequency, รายวัน, รายเดือน</p>
+      </div>
+      <div class="nav-card" onclick="showSection('hanoi')" style="cursor:pointer;">
+        <div class="nc-icon">🎲</div>
+        <h4>ฮานอย (VietLao)</h4>
+        <p>ผลและสถิติหวยฮานอยรายวัน</p>
+      </div>
+      <div class="nav-card" onclick="showSection('stock')" style="cursor:pointer;">
+        <div class="nc-icon">💹</div>
+        <h4>หุ้นไทย</h4>
+        <p>ดัชนี SET ย้อนหลังตั้งแต่ปี 1996</p>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ══════════════════ ANALYSIS ══════════════════════════════════════════ -->
+  <section id="sec-analysis" class="sec">
+
+    <h1 class="page-title">📊 วิเคราะห์</h1>
+    <p class="page-sub">ความถี่, เลขร้อน/เย็น, ช่วงห่าง — หวยลาว</p>
+    <hr>
+
+    <div class="hot-cold-grid">
+      <div>
+        <div class="sec-label">🔥 8 เลขร้อน — 2 ตัวล่าง</div>
+        <div id="analysis-hot-balls" class="ball-row"></div>
+      </div>
+      <div>
+        <div class="sec-label">🧊 8 เลขเย็น — 2 ตัวล่าง</div>
+        <div id="analysis-cold-balls" class="ball-row"></div>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <h3>ความถี่ 2 ตัวล่าง — Top 15</h3>
+      <div class="chart-container">
+        <canvas id="lao-freq-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Frequency table -->
+    <div class="sec-label">ตารางความถี่ (Top 15)</div>
+    <table class="data-table">
+      <thead><tr><th>เลข</th><th>จำนวนครั้ง</th><th>ความถี่ (%)</th></tr></thead>
+      <tbody>
+        <tr><td>77</td><td>5</td><td>4.17%</td></tr>
+        <tr><td>09</td><td>5</td><td>4.17%</td></tr>
+        <tr><td>79</td><td>5</td><td>4.17%</td></tr>
+        <tr><td>69</td><td>4</td><td>3.33%</td></tr>
+        <tr><td>26</td><td>4</td><td>3.33%</td></tr>
+        <tr><td>89</td><td>3</td><td>2.50%</td></tr>
+        <tr><td>52</td><td>3</td><td>2.50%</td></tr>
+        <tr><td>39</td><td>3</td><td>2.50%</td></tr>
+        <tr><td>85</td><td>3</td><td>2.50%</td></tr>
+        <tr><td>98</td><td>3</td><td>2.50%</td></tr>
+      </tbody>
+    </table>
+
+  </section>
+
+  <!-- ══════════════════ PREDICT ═══════════════════════════════════════════ -->
+  <section id="sec-predict" class="sec">
+
+    <h1 class="page-title">🎯 ทำนาย AI</h1>
+    <p class="page-sub">Ensemble: Random Forest × 0.4 + Logistic Regression × 0.3 + Markov Chain × 0.3</p>
+    <hr>
+
+    <div id="pred-full"></div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.2rem;margin-top:1rem;">
+      <div class="sec-label" style="margin-top:0;">ข้อมูลโมเดล</div>
+      <table class="data-table">
+        <thead><tr><th>โมเดล</th><th>น้ำหนัก</th><th>วิธีการ</th></tr></thead>
+        <tbody>
+          <tr><td>🌲 Random Forest</td><td>40%</td><td>สร้าง decision trees จากรูปแบบย้อนหลัง</td></tr>
+          <tr><td>📐 Logistic Regression</td><td>30%</td><td>วิเคราะห์ linear patterns ใน encoded sequence</td></tr>
+          <tr><td>🔗 Markov Chain</td><td>30%</td><td>ความน่าจะเป็นการเปลี่ยนแปลงระหว่างเลข</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:.75rem;margin-top:.8rem;">เพื่อความบันเทิงเท่านั้น ไม่ใช่คำแนะนำการพนัน</p>
+
+  </section>
+
+  <!-- ══════════════════ HANOI ══════════════════════════════════════════════ -->
+  <section id="sec-hanoi" class="sec">
+
+    <h1 class="page-title">🎲 หวยฮานอย (VietLao)</h1>
+    <p class="page-sub">ผลและสถิติหวยฮานอย — อัปเดตรายวัน · ข้อมูลจาก thaiorc.com</p>
+    <hr>
+
+    <!-- Latest draw -->
+    <div class="hanoi-card">
+      <div class="lc-label">ผลรางวัลฮานอยล่าสุด</div>
+      <div class="lc-date">วันอาทิตย์ที่ 24 พฤษภาคม 2569</div>
+      <div class="lc-six">20104</div>
+      <div class="lc-sub" style="-webkit-text-fill-color:var(--muted);color:var(--muted);">
+        3 ตัวล่าง: <strong style="color:var(--text);">104</strong> &nbsp;·&nbsp;
+        2 ตัวล่าง: <strong style="color:var(--text);">70</strong>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="lao-metric-row">
+      <div class="lao-metric"><div class="m-icon">📅</div><div class="m-val">24 พ.ค.</div><div class="m-label">งวดล่าสุด</div></div>
+      <div class="lao-metric"><div class="m-icon">📋</div><div class="m-val">120</div><div class="m-label">งวดทั้งหมด</div></div>
+      <div class="lao-metric"><div class="m-icon">🔥</div><div class="m-val">16</div><div class="m-label">เลขร้อน 2 ตัวล่าง</div></div>
+      <div class="lao-metric"><div class="m-icon">🧊</div><div class="m-val">32</div><div class="m-label">เลขเย็น 2 ตัวล่าง</div></div>
+    </div>
+
+    <div class="hot-cold-grid">
+      <div>
+        <div class="sec-label">🔥 8 เลขร้อน</div>
+        <div id="hanoi-hot-balls" class="ball-row"></div>
+      </div>
+      <div>
+        <div class="sec-label">🧊 8 เลขเย็น</div>
+        <div id="hanoi-cold-balls" class="ball-row"></div>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <h3>ความถี่ 2 ตัวล่าง — Hanoi Top 15</h3>
+      <div class="chart-container">
+        <canvas id="hanoi-freq-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="sec-label">10 งวดล่าสุด</div>
+    <div id="hanoi-recent-table"></div>
+
+  </section>
+
+  <!-- ══════════════════ STOCK ══════════════════════════════════════════════ -->
+  <section id="sec-stock" class="sec">
+
+    <h1 class="page-title">💹 หวยหุ้นไทย</h1>
+    <p class="page-sub">เลขจากดัชนี SET — ข้อมูล 7,181 วันตั้งแต่ปี 1996 ผ่าน Yahoo Finance</p>
+    <hr>
+
+    <div class="preview-banner" style="border-color:#2ECC71;color:#2ECC71;background:rgba(46,204,113,.05);">
+      📌 เลขคำนวณจาก 2 ตัวท้ายของดัชนี SET เช่น SET = <strong>1,553</strong> → เลข = <strong>53</strong>
+    </div>
+
+    <!-- SET card -->
+    <div class="set-card">
+      <div class="lc-label">ดัชนี SET ล่าสุด</div>
+      <div class="lc-date">วันอาทิตย์ที่ 25 พฤษภาคม 2569</div>
+      <div class="set-val">1,553.32</div>
+      <div class="lc-sub" style="-webkit-text-fill-color:var(--muted);color:var(--muted);">
+        ปิดบ่าย: <strong style="color:var(--text);">53</strong> &nbsp;·&nbsp;
+        2 ตัวบน: <strong style="color:var(--text);">15</strong>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="lao-metric-row">
+      <div class="lao-metric"><div class="m-icon">📅</div><div class="m-val">25 พ.ค.</div><div class="m-label">วันล่าสุด</div></div>
+      <div class="lao-metric"><div class="m-icon">📋</div><div class="m-val">14,362</div><div class="m-label">บันทึกทั้งหมด</div></div>
+      <div class="lao-metric"><div class="m-icon">📅</div><div class="m-val">ธ.ค. 2539</div><div class="m-label">ข้อมูลตั้งแต่</div></div>
+      <div class="lao-metric"><div class="m-icon">🔥</div><div class="m-val">91</div><div class="m-label">เลขร้อน ปิดบ่าย</div></div>
+      <div class="lao-metric"><div class="m-icon">🧊</div><div class="m-val">50</div><div class="m-label">เลขเย็น ปิดบ่าย</div></div>
+    </div>
+
+    <div class="hot-cold-grid">
+      <div>
+        <div class="sec-label">🔥 8 เลขร้อน (ปิดบ่าย)</div>
+        <div id="stock-hot-balls" class="ball-row"></div>
+      </div>
+      <div>
+        <div class="sec-label">🧊 8 เลขเย็น (ปิดบ่าย)</div>
+        <div id="stock-cold-balls" class="ball-row"></div>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <h3>ความถี่ 2 ตัวล่าง (ปิดบ่าย) — Top 12 จาก 7,181 วัน</h3>
+      <div class="chart-container">
+        <canvas id="stock-freq-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="sec-label">10 วันล่าสุด</div>
+    <div id="stock-recent-table"></div>
+
+  </section>
+
+</main><!-- end main-content -->
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
