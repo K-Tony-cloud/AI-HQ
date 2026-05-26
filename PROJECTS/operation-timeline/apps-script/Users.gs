@@ -150,6 +150,70 @@ function removeUser(id) {
   return false
 }
 
+/**
+ * seedAdminPin — run once from the Apps Script function dropdown to create
+ * the first super admin row and set their PIN.
+ *
+ * Safe to run multiple times:
+ *   - If USR-001 already exists, only the PIN hash is updated.
+ *   - PIN is always hashed through _hashPin() — never stored as plain text.
+ *   - Change the PIN later by calling setPin('USR-001', 'newpin') from the editor.
+ */
+function seedAdminPin() {
+  const SEED_ID    = 'USR-001'
+  const SEED_PIN   = '1234'       // ← change before running if desired
+  const SEED_NAME  = 'Super Admin'
+  const SEED_ROLE  = 'super_admin'
+  const SEED_SCOPE = '*'
+
+  const sheet   = getOrCreateSheet(SHEET_NAMES.USERS)
+  const data    = sheet.getDataRange().getValues()
+  const headers = data.length > 0 ? data[0] : []
+
+  // If sheet is empty, initialise headers first
+  if (headers.length === 0 || headers[0] !== 'id') {
+    initSchema()
+    Logger.log('Schema initialised.')
+  }
+
+  // Re-read after potential init
+  const fresh   = sheet.getDataRange().getValues()
+  const hdrs    = fresh[0]
+  const idIdx   = hdrs.indexOf('id')
+
+  // Check if USR-001 already exists
+  let existingRow = -1
+  for (let i = 1; i < fresh.length; i++) {
+    if (String(fresh[i][idIdx]) === SEED_ID) { existingRow = i; break }
+  }
+
+  if (existingRow === -1) {
+    // Create the row
+    const now = new Date().toISOString()
+    const user = {
+      id:              SEED_ID,
+      name:            SEED_NAME,
+      role:            SEED_ROLE,
+      pin_hash:        _hashPin(SEED_PIN),
+      operation_scope: SEED_SCOPE,
+      active:          'true',
+      token:           '',
+      token_created:   '',
+      created_at:      now,
+    }
+    appendRow(SHEET_NAMES.USERS, user)
+    Logger.log('Created super admin row: ' + SEED_ID)
+  } else {
+    // Row exists — only update pin_hash
+    const pinHashIdx = hdrs.indexOf('pin_hash')
+    sheet.getRange(existingRow + 1, pinHashIdx + 1).setValue(_hashPin(SEED_PIN))
+    Logger.log('Updated PIN for existing user: ' + SEED_ID)
+  }
+
+  Logger.log('Done. Login with PIN: ' + SEED_PIN)
+  Logger.log('Change PIN later: setPin("USR-001", "yourNewPin")')
+}
+
 // Run from GAS editor to set/reset a user's PIN by their id
 function setPin(userId, pin) {
   const sheet   = getOrCreateSheet(SHEET_NAMES.USERS)
