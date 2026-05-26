@@ -266,16 +266,18 @@ export const EventCard = memo(
                     )}
                     {isAdminMode && (
                       <button
-                        onClick={async (e) => {
+                        onClick={e => {
                           e.stopPropagation()
-                          if (!window.confirm('ลบเหตุการณ์นี้?')) return
-                          await deleteEvent(event.id)
+                          openModal('confirmDelete', {
+                            eventTitle: event.title,
+                            eventId:    event.id,
+                            onConfirm:  () => deleteEvent(event.id),
+                          })
                         }}
-                        className="p-1.5 rounded-lg text-ops-text-muted hover:text-ops-danger hover:bg-ops-danger-light transition-all"
-                        title="ลบเหตุการณ์"
-                        aria-label="ลบ"
+                        className="flex items-center gap-1 text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-2 py-0.5 rounded-md transition-all"
+                        aria-label="ลบเหตุการณ์"
                       >
-                        🗑
+                        🗑 ลบ
                       </button>
                     )}
                   </div>

@@ -202,7 +202,7 @@ function doPost(e) {
         const role = validateToken(payload.token)
         if (!role) return err('Access denied', 403)
         if (!payload.id) return err('id required')
-        return ok(deleteEvent(payload.id, role.email || 'admin'))
+        return ok(deleteEvent(payload.id, role.name || 'admin'))
       }
       case 'restoreEvent': {
         const user = validateToken(payload.token)

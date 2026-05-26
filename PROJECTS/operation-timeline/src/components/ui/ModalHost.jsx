@@ -7,6 +7,7 @@ import { AuditPanel } from '../admin/AuditPanel'
 import { GoogleLoginModal } from '../admin/GoogleLoginModal'
 import { DeletedEventsPanel } from '../admin/DeletedEventsPanel'
 import { UserManagementModal } from '../admin/UserManagementModal'
+import { ConfirmDeleteModal } from './ConfirmDeleteModal'
 
 export const ModalHost = () => {
   const { activeModal, closeModal } = useModal()
@@ -32,6 +33,16 @@ export const ModalHost = () => {
 
     case 'pinLogin':
       return <GoogleLoginModal onClose={closeModal} />
+
+    case 'confirmDelete':
+      return (
+        <ConfirmDeleteModal
+          eventTitle={props.eventTitle}
+          eventId={props.eventId}
+          onConfirm={props.onConfirm}
+          onClose={closeModal}
+        />
+      )
 
     case 'deletedEvents':
       return <DeletedEventsPanel onClose={closeModal} />

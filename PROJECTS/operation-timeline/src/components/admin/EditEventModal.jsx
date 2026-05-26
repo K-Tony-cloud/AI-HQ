@@ -49,6 +49,8 @@ export const EditEventModal = ({ event, onClose }) => {
   const { isSuperAdmin } = useAuth()
   const [isSubmitting,  setIsSubmitting]  = useState(false)
   const [showConflict,  setShowConflict]  = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [isDeleting,    setIsDeleting]    = useState(false)
   const [openedUpdatedAt] = useState(() => event.updated_at)
 
   const [form, setForm] = useState({
@@ -272,40 +274,82 @@ export const EditEventModal = ({ event, onClose }) => {
       </div>
 
       {/* Footer actions — fixed inside modal */}
-      <div className="flex-shrink-0 flex gap-3 px-6 py-4 border-t border-ops-border/40 bg-ops-bg/50">
-        {/* Delete button — left side of footer */}
-        <button
-          type="button"
-          onClick={async () => {
-            if (!window.confirm('ลบเหตุการณ์นี้?')) return
-            await deleteEvent(event.id)
-            onClose()
-          }}
-          className="py-2.5 px-4 rounded-xl border border-ops-danger/30 text-sm text-ops-danger hover:bg-ops-danger-light transition-all font-semibold"
-        >
-          ลบ
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={isSubmitting}
-          className="flex-1 py-2.5 rounded-xl border border-ops-border/50 text-sm text-ops-text-muted hover:text-ops-text-primary hover:bg-ops-surface transition-all font-semibold disabled:opacity-50"
-        >
-          ยกเลิก
-        </button>
-        <button
-          type="submit"
-          form="edit-event-form"
-          disabled={isSubmitting}
-          className="flex-1 py-2.5 rounded-xl bg-ops-warning/10 border border-ops-warning/40 text-sm text-ops-warning hover:bg-ops-warning/15 transition-all font-bold disabled:opacity-60 flex items-center justify-center gap-2"
-        >
-          {isSubmitting ? (
-            <>
-              <span className="w-3.5 h-3.5 border-2 border-ops-warning/40 border-t-ops-warning rounded-full animate-spin" />
-              กำลังบันทึก...
-            </>
-          ) : 'บันทึกการเปลี่ยนแปลง'}
-        </button>
+      <div className="flex-shrink-0 border-t border-ops-border/40 bg-ops-bg/50">
+
+        {/* Inline delete confirmation — replaces footer when armed */}
+        {confirmingDelete ? (
+          <div className="px-6 py-4 flex flex-col gap-3">
+            <p className="text-xs text-center text-ops-danger font-semibold">
+              ยืนยันการลบ "{event.title}"?
+            </p>
+            <p className="text-[11px] text-center text-ops-text-muted -mt-1">
+              เหตุการณ์จะถูกซ่อน แต่กู้คืนได้โดยผู้ดูแลระบบ
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-xl border border-ops-border/50 text-sm text-ops-text-muted hover:text-ops-text-primary hover:bg-ops-surface transition-all font-semibold disabled:opacity-40"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  setIsDeleting(true)
+                  try {
+                    await deleteEvent(event.id)
+                    onClose()
+                  } catch (_) {
+                    setIsDeleting(false)
+                    setConfirmingDelete(false)
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-ops-danger/10 border border-ops-danger/40 text-sm text-ops-danger hover:bg-ops-danger/18 transition-all font-bold disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {isDeleting
+                  ? <span className="w-3.5 h-3.5 border-2 border-ops-danger/40 border-t-ops-danger rounded-full animate-spin" />
+                  : '🗑'
+                }
+                {isDeleting ? 'กำลังลบ...' : 'ยืนยันการลบ'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-6 py-4 flex gap-3">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={isSubmitting}
+              className="flex items-center gap-1.5 py-2.5 px-4 rounded-xl border border-ops-danger/30 text-sm text-ops-danger hover:bg-ops-danger-light transition-all font-semibold disabled:opacity-40"
+            >
+              🗑 ลบเหตุการณ์
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="flex-1 py-2.5 rounded-xl border border-ops-border/50 text-sm text-ops-text-muted hover:text-ops-text-primary hover:bg-ops-surface transition-all font-semibold disabled:opacity-50"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              form="edit-event-form"
+              disabled={isSubmitting}
+              className="flex-1 py-2.5 rounded-xl bg-ops-warning/10 border border-ops-warning/40 text-sm text-ops-warning hover:bg-ops-warning/15 transition-all font-bold disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-ops-warning/40 border-t-ops-warning rounded-full animate-spin" />
+                  กำลังบันทึก...
+                </>
+              ) : 'บันทึกการเปลี่ยนแปลง'}
+            </button>
+          </div>
+        )}
       </div>
     </Modal>
   )
