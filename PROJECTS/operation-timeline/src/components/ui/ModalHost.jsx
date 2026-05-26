@@ -30,7 +30,7 @@ export const ModalHost = () => {
     case 'audit':
       return <AuditPanel onClose={closeModal} />
 
-    case 'googleLogin':
+    case 'pinLogin':
       return <GoogleLoginModal onClose={closeModal} />
 
     case 'deletedEvents':

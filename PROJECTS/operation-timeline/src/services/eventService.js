@@ -183,7 +183,7 @@ export const createUser = async (data) => {
   return sheets.addUser(data)
 }
 
-export const deactivateUser = async (email) => {
+export const deactivateUser = async (id) => {
   if (USE_MOCK) return { removed: true }
-  return sheets.removeUser(email)
+  return sheets.removeUser(id)
 }

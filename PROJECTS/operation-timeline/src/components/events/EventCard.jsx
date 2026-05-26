@@ -191,13 +191,11 @@ export const EventCard = memo(
                   {isOpAdmin && event.visibility && event.visibility !== 'public' && (
                     <span className={clsx(
                       'text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide uppercase',
-                      event.visibility === 'restricted'   && 'text-ops-danger bg-ops-danger-light border border-ops-danger/20',
-                      event.visibility === 'internal'     && 'text-ops-warning bg-ops-warning-light border border-ops-warning/20',
-                      event.visibility === 'needs_review' && 'text-ops-text-muted bg-ops-bg border border-ops-border',
+                      event.visibility === 'restricted' && 'text-ops-danger bg-ops-danger-light border border-ops-danger/20',
+                      event.visibility === 'internal'   && 'text-ops-warning bg-ops-warning-light border border-ops-warning/20',
                     )}>
-                      {event.visibility === 'restricted'   && 'จำกัด'}
-                      {event.visibility === 'internal'     && 'ภายใน'}
-                      {event.visibility === 'needs_review' && 'รอตรวจสอบ'}
+                      {event.visibility === 'restricted' && 'จำกัด'}
+                      {event.visibility === 'internal'   && 'ภายใน'}
                     </span>
                   )}
                 </div>

@@ -145,8 +145,8 @@ export async function testDriveAccess() {
 
 /* ── Auth ─────────────────────────────────────────────────────── */
 
-export const loginGoogle = (credential) =>
-  sheetsPost('loginGoogle', { credential })
+export const loginPin = (pin) =>
+  sheetsPost('loginPin', { pin })
 
 export const logoutUser = (token) =>
   sheetsPost('logout', { token })
@@ -170,5 +170,5 @@ export const listUsers = () =>
 export const addUser = (data) =>
   sheetsPost('addUser', { data })
 
-export const removeUser = (email) =>
-  sheetsPost('removeUser', { email })
+export const removeUser = (id) =>
+  sheetsPost('removeUser', { id })

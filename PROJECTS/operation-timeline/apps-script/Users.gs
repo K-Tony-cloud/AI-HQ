@@ -1,69 +1,62 @@
 /**
- * Users.gs — Authentication and user management
+ * Users.gs — PIN-based authentication and user management
  *
  * Auth flow:
- *   1. Frontend does Google OAuth → gets credential (JWT)
- *   2. POST {action:'loginGoogle', credential:'...'} → GAS verifies via tokeninfo API
- *   3. GAS looks up email in Users sheet → returns {role, token}
- *   4. Frontend sends token in all subsequent requests
- *   5. GAS validates token on each request
+ *   1. POST {action:'loginPin', pin:'1234'} → GAS hashes PIN, looks up user
+ *   2. Returns {ok, role, token, name, operation_scope}
+ *   3. Frontend stores token in sessionStorage
+ *   4. All subsequent requests include token param
+ *   5. GAS validates token on each write/restricted action
  *
  * Roles: op_admin | super_admin  (no token = public viewer)
  * Token expiry: 8 hours
+ * operation_scope: '*' = all operations, or comma-separated op IDs
  */
 
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000  // 8 hours
 
-function loginWithGoogle(credential) {
-  // Verify credential via Google tokeninfo endpoint
-  const url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential)
-  let info
-  try {
-    const res  = UrlFetchApp.fetch(url, { muteHttpExceptions: true })
-    const code = res.getResponseCode()
-    if (code !== 200) return { ok: false, error: 'Invalid credential' }
-    info = JSON.parse(res.getContentText())
-  } catch (ex) {
-    return { ok: false, error: 'Token verification failed: ' + ex.message }
-  }
+function _hashPin(pin) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(pin))
+  return bytes.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join('')
+}
 
-  const email = info.email
-  if (!email) return { ok: false, error: 'No email in token' }
+function loginWithPin(pin) {
+  if (!pin) return { ok: false, error: 'PIN required' }
+  const hash  = _hashPin(pin)
 
-  // Look up user in sheet
   const sheet = getOrCreateSheet(SHEET_NAMES.USERS)
   const data  = sheet.getDataRange().getValues()
   if (data.length < 2) return { ok: false, error: 'Access denied' }
 
-  const headers = data[0]
-  const emailIdx = headers.indexOf('email')
-  const activeIdx = headers.indexOf('active')
-  const roleIdx   = headers.indexOf('role')
-  const nameIdx   = headers.indexOf('name')
-  const tokenIdx  = headers.indexOf('token')
+  const headers         = data[0]
+  const pinHashIdx      = headers.indexOf('pin_hash')
+  const activeIdx       = headers.indexOf('active')
+  const roleIdx         = headers.indexOf('role')
+  const nameIdx         = headers.indexOf('name')
+  const scopeIdx        = headers.indexOf('operation_scope')
+  const tokenIdx        = headers.indexOf('token')
   const tokenCreatedIdx = headers.indexOf('token_created')
 
   let userRow = -1
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][emailIdx]).toLowerCase() === email.toLowerCase() &&
+    if (data[i][pinHashIdx] === hash &&
         String(data[i][activeIdx]).toLowerCase() === 'true') {
       userRow = i
       break
     }
   }
-  if (userRow === -1) return { ok: false, error: 'Access denied' }
+  if (userRow === -1) return { ok: false, error: 'PIN ไม่ถูกต้อง' }
 
-  const role = data[userRow][roleIdx] || 'op_admin'
-  const name = data[userRow][nameIdx] || info.name || email
-
-  // Generate session token
-  const token   = Utilities.getUuid()
-  const created = new Date().toISOString()
+  const role            = data[userRow][roleIdx]           || 'op_admin'
+  const name            = data[userRow][nameIdx]           || 'Admin'
+  const operation_scope = data[userRow][scopeIdx]          || '*'
+  const token           = Utilities.getUuid()
+  const created         = new Date().toISOString()
 
   sheet.getRange(userRow + 1, tokenIdx + 1).setValue(token)
   sheet.getRange(userRow + 1, tokenCreatedIdx + 1).setValue(created)
 
-  return { ok: true, role, token, name, email }
+  return { ok: true, role, token, name, operation_scope }
 }
 
 function validateToken(token) {
@@ -73,16 +66,18 @@ function validateToken(token) {
   if (!user) return null
   if (String(user.active).toLowerCase() !== 'true') return null
 
-  // Check expiry
   if (user.token_created) {
     const created = new Date(user.token_created).getTime()
     if (Date.now() - created > TOKEN_TTL_MS) {
-      // Expired — clear token
       _clearToken(token)
       return null
     }
   }
-  return { role: user.role || 'op_admin', email: user.email, name: user.name }
+  return {
+    role:            user.role            || 'op_admin',
+    name:            user.name            || '',
+    operation_scope: user.operation_scope || '*',
+  }
 }
 
 function logoutToken(token) {
@@ -94,7 +89,7 @@ function _clearToken(token) {
   const sheet   = getOrCreateSheet(SHEET_NAMES.USERS)
   const data    = sheet.getDataRange().getValues()
   const headers = data[0]
-  const tokenIdx = headers.indexOf('token')
+  const tokenIdx        = headers.indexOf('token')
   const tokenCreatedIdx = headers.indexOf('token_created')
   for (let i = 1; i < data.length; i++) {
     if (data[i][tokenIdx] === token) {
@@ -108,12 +103,12 @@ function _clearToken(token) {
 
 function listUsers() {
   return readSheet(SHEET_NAMES.USERS).map(u => ({
-    id:      u.id,
-    name:    u.name,
-    email:   u.email,
-    role:    u.role,
-    active:  u.active,
-    created_at: u.created_at,
+    id:              u.id,
+    name:            u.name,
+    role:            u.role,
+    operation_scope: u.operation_scope,
+    active:          u.active,
+    created_at:      u.created_at,
   }))
 }
 
@@ -123,30 +118,31 @@ function addUser(data) {
   try {
     const now = new Date().toISOString()
     const user = {
-      id:            'USR-' + Date.now(),
-      name:          data.name  || '',
-      role:          data.role  || 'op_admin',
-      email:         (data.email || '').toLowerCase(),
-      active:        'true',
-      token:         '',
-      token_created: '',
-      created_at:    now,
+      id:              'USR-' + Date.now(),
+      name:            data.name            || '',
+      role:            data.role            || 'op_admin',
+      pin_hash:        data.pin ? _hashPin(data.pin) : '',
+      operation_scope: data.operation_scope || '*',
+      active:          'true',
+      token:           '',
+      token_created:   '',
+      created_at:      now,
     }
     appendRow(SHEET_NAMES.USERS, user)
-    return user
+    return { id: user.id, name: user.name, role: user.role, operation_scope: user.operation_scope, active: user.active, created_at: user.created_at }
   } finally {
     lock.releaseLock()
   }
 }
 
-function removeUser(email) {
+function removeUser(id) {
   const sheet   = getOrCreateSheet(SHEET_NAMES.USERS)
   const data    = sheet.getDataRange().getValues()
   const headers = data[0]
-  const emailIdx  = headers.indexOf('email')
+  const idIdx     = headers.indexOf('id')
   const activeIdx = headers.indexOf('active')
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][emailIdx]).toLowerCase() === email.toLowerCase()) {
+    if (String(data[i][idIdx]) === String(id)) {
       sheet.getRange(i + 1, activeIdx + 1).setValue('false')
       return true
     }
@@ -154,9 +150,27 @@ function removeUser(email) {
   return false
 }
 
+// Run from GAS editor to set/reset a user's PIN by their id
+function setPin(userId, pin) {
+  const sheet   = getOrCreateSheet(SHEET_NAMES.USERS)
+  const data    = sheet.getDataRange().getValues()
+  const headers = data[0]
+  const idIdx      = headers.indexOf('id')
+  const pinHashIdx = headers.indexOf('pin_hash')
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idIdx]) === String(userId)) {
+      sheet.getRange(i + 1, pinHashIdx + 1).setValue(_hashPin(pin))
+      Logger.log('PIN updated for user: ' + userId)
+      return
+    }
+  }
+  Logger.log('User not found: ' + userId)
+}
+
 // Returns allowed visibility levels for a given role
+// null / '' = legacy events with no visibility set → default to public
 function visibilityForRole(role) {
-  if (role === 'super_admin') return ['public', 'internal', 'restricted', 'needs_review', null, '']
-  if (role === 'op_admin')    return ['public', 'internal', null, '']
-  return ['public', null, '']  // public viewer — null/empty = legacy events shown as public
+  if (role === 'super_admin') return ['public', 'internal', 'restricted', null, '']
+  if (role === 'op_admin')   return ['public', 'internal', null, '']
+  return ['public', null, '']
 }

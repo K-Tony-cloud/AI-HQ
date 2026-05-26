@@ -154,14 +154,6 @@ const AppContent = () => {
 }
 
 export default function App() {
-  useEffect(() => {
-    const s = document.createElement('script')
-    s.src = 'https://accounts.google.com/gsi/client'
-    s.async = true
-    document.head.appendChild(s)
-    return () => { document.head.removeChild(s) }
-  }, [])
-
   return (
     <AuthProvider>
       <ToastProvider>

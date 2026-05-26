@@ -13,7 +13,7 @@ const inputCls = 'w-full bg-ops-surface border border-ops-border/50 rounded-lg p
 export const UserManagementModal = ({ onClose }) => {
   const [users,   setUsers]   = useState([])
   const [loading, setLoading] = useState(true)
-  const [form,    setForm]    = useState({ name: '', email: '', role: 'op_admin' })
+  const [form,    setForm]    = useState({ name: '', pin: '', role: 'op_admin', operation_scope: '*' })
   const [adding,  setAdding]  = useState(false)
 
   const load = useCallback(() => {
@@ -25,19 +25,20 @@ export const UserManagementModal = ({ onClose }) => {
 
   const handleAdd = async (e) => {
     e.preventDefault()
+    if (form.pin.length < 4) return
     setAdding(true)
     try {
       await createUser(form)
-      setForm({ name: '', email: '', role: 'op_admin' })
+      setForm({ name: '', pin: '', role: 'op_admin', operation_scope: '*' })
       load()
     } finally {
       setAdding(false)
     }
   }
 
-  const handleRemove = async (email) => {
-    if (!window.confirm(`ปิดการใช้งาน ${email}?`)) return
-    await deactivateUser(email)
+  const handleRemove = async (id, name) => {
+    if (!window.confirm(`ปิดการใช้งาน ${name}?`)) return
+    await deactivateUser(id)
     load()
   }
 
@@ -62,8 +63,13 @@ export const UserManagementModal = ({ onClose }) => {
             className={inputCls}
           />
           <input
-            type="email" required placeholder="อีเมล Google"
-            value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+            type="password" required placeholder="PIN (4 หลัก)" maxLength={8} minLength={4}
+            value={form.pin} onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g,'') }))}
+            className={inputCls}
+          />
+          <input
+            type="text" placeholder="ขอบเขตปฏิบัติการ (* = ทั้งหมด, หรือ OP-xxx,OP-yyy)"
+            value={form.operation_scope} onChange={e => setForm(f => ({ ...f, operation_scope: e.target.value }))}
             className={inputCls}
           />
           <select
@@ -73,7 +79,7 @@ export const UserManagementModal = ({ onClose }) => {
             {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
           <button
-            type="submit" disabled={adding}
+            type="submit" disabled={adding || form.pin.length < 4}
             className="w-full py-2 rounded-lg bg-ops-accent/12 border border-ops-accent/40 text-sm text-ops-accent hover:bg-ops-accent/22 transition-all font-bold disabled:opacity-60"
           >
             {adding ? 'กำลังเพิ่ม...' : 'เพิ่มผู้ใช้'}
@@ -92,10 +98,12 @@ export const UserManagementModal = ({ onClose }) => {
           ) : (
             <div className="space-y-2">
               {users.map(u => (
-                <div key={u.id || u.email} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-ops-border/50">
+                <div key={u.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-ops-border/50">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-ops-text-primary truncate">{u.name}</p>
-                    <p className="text-[11px] text-ops-text-muted font-mono truncate">{u.email}</p>
+                    <p className="text-[11px] text-ops-text-muted font-mono">
+                      ขอบเขต: {u.operation_scope || '*'}
+                    </p>
                     <span className={clsx(
                       'text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide uppercase mt-0.5 inline-block',
                       u.role === 'super_admin'
@@ -106,7 +114,7 @@ export const UserManagementModal = ({ onClose }) => {
                     </span>
                   </div>
                   <button
-                    onClick={() => handleRemove(u.email)}
+                    onClick={() => handleRemove(u.id, u.name)}
                     className="flex-shrink-0 text-[11px] font-medium text-ops-danger hover:bg-ops-danger-light border border-ops-danger/20 hover:border-ops-danger/40 px-3 py-1.5 rounded-lg transition-all"
                   >
                     ปิดใช้

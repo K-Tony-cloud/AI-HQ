@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react'
-import { loginGoogle as apiLoginGoogle, logoutUser as apiLogout } from '../services/sheetsAdapter'
+import { loginPin as apiLoginPin, logoutUser as apiLogout } from '../services/sheetsAdapter'
 
 const AUTH_STORAGE_KEY = 'ops_auth_session'
 const AuthContext = createContext(null)
@@ -14,10 +14,15 @@ function loadSession() {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(loadSession)
 
-  const login = useCallback(async (credential) => {
-    const result = await apiLoginGoogle(credential)
-    if (!result.ok) throw new Error(result.error || 'Login failed')
-    const session = { role: result.role, token: result.token, name: result.name, email: result.email }
+  const login = useCallback(async (pin) => {
+    const result = await apiLoginPin(pin)
+    if (!result.ok) throw new Error(result.error || 'PIN ไม่ถูกต้อง')
+    const session = {
+      role:            result.role,
+      token:           result.token,
+      name:            result.name,
+      operation_scope: result.operation_scope || '*',
+    }
     sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
     setUser(session)
     return session

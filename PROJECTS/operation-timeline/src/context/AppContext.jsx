@@ -53,7 +53,15 @@ export const AppProvider = ({ children }) => {
   const [lastSyncAt, setLastSyncAt] = useState(IS_MOCK ? new Date() : null)
 
   /* ── Auth ─────────────────────────────────────────────────────── */
-  const { isOpAdmin } = useAuth()
+  const { user, isOpAdmin, isSuperAdmin } = useAuth()
+
+  const scopedOperations = useMemo(() => {
+    if (!isOpAdmin || isSuperAdmin) return operations
+    const scope = user?.operation_scope
+    if (!scope || scope === '*') return operations
+    const ids = scope.split(',').map(s => s.trim()).filter(Boolean)
+    return operations.filter(op => ids.includes(op.id))
+  }, [operations, isOpAdmin, isSuperAdmin, user])
 
   /* ── UI state ─────────────────────────────────────────────────── */
   const [expandedEventId, setExpandedEventId] = useState(null)
@@ -325,7 +333,7 @@ export const AppProvider = ({ children }) => {
   return (
     <AppContext.Provider value={{
       /* operations */
-      operations,
+      operations: scopedOperations,
       currentOperationId,
       operationMeta,
       switchOperation,

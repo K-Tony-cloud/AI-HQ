@@ -38,7 +38,7 @@ export const LoginButton = () => {
 
   return (
     <button
-      onClick={() => openModal('googleLogin', {})}
+      onClick={() => openModal('pinLogin', {})}
       className="flex items-center gap-2 text-[11px] font-medium text-ops-text-secondary hover:text-ops-text-primary border border-ops-border hover:border-ops-border-focus bg-white hover:bg-ops-accent-light px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm"
     >
       <span>🔐</span>

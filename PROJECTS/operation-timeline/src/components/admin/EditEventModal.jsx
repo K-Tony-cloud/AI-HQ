@@ -22,10 +22,9 @@ const PRIORITIES = [
 ]
 
 const VISIBILITIES = [
-  { value: 'public',       label: 'สาธารณะ' },
-  { value: 'internal',     label: 'ภายใน' },
-  { value: 'restricted',   label: 'จำกัด' },
-  { value: 'needs_review', label: 'รอตรวจสอบ' },
+  { value: 'public',     label: 'สาธารณะ' },
+  { value: 'internal',   label: 'ภายใน' },
+  { value: 'restricted', label: 'จำกัด' },
 ]
 
 const STATUSES = [

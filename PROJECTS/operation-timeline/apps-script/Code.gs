@@ -188,10 +188,10 @@ function doPost(e) {
       case 'uploadAttachment': {
         return ok(createAttachment(payload.data || {}))
       }
-      case 'loginGoogle': {
-        const credential = payload.credential
-        if (!credential) return err('credential required')
-        return ok(loginWithGoogle(credential))
+      case 'loginPin': {
+        const pin = payload.pin
+        if (!pin) return err('pin required')
+        return ok(loginWithPin(pin))
       }
       case 'logout': {
         const token = payload.token
@@ -218,8 +218,8 @@ function doPost(e) {
       case 'removeUser': {
         const user = validateToken(payload.token)
         if (!user || user.role !== 'super_admin') return err('Access denied', 403)
-        if (!payload.email) return err('email required')
-        return ok({ removed: removeUser(payload.email) })
+        if (!payload.id) return err('id required')
+        return ok({ removed: removeUser(payload.id) })
       }
       default:
         return err('Unknown action: ' + action, 404)

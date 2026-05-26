@@ -34,7 +34,7 @@ const HEADERS = {
     'start_time', 'end_time', 'venue', 'status', 'updated_at',
   ],
   users: [
-    'id', 'name', 'role', 'email', 'active', 'token', 'token_created', 'created_at',
+    'id', 'name', 'role', 'pin_hash', 'operation_scope', 'active', 'token', 'token_created', 'created_at',
   ],
 }
 
