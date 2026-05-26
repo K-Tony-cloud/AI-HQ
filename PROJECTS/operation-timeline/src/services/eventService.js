@@ -155,3 +155,35 @@ export const testConnection = async () => {
 
 export const IS_MOCK = USE_MOCK
 export const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL || '30000', 10)
+
+/* ── Phase 2: delete / restore / deleted list ────────────────── */
+
+export const removeEvent = async (id) => {
+  if (USE_MOCK) return { ok: true }
+  return sheets.deleteEvent(id)
+}
+
+export const undeleteEvent = async (id) => {
+  if (USE_MOCK) return { ok: true }
+  return sheets.restoreEvent(id)
+}
+
+export const fetchDeletedEvents = async () => {
+  if (USE_MOCK) return []
+  return sheets.getDeletedEvents()
+}
+
+export const fetchUsers = async () => {
+  if (USE_MOCK) return []
+  return sheets.listUsers()
+}
+
+export const createUser = async (data) => {
+  if (USE_MOCK) return { id: `USR-${Date.now()}`, ...data }
+  return sheets.addUser(data)
+}
+
+export const deactivateUser = async (email) => {
+  if (USE_MOCK) return { removed: true }
+  return sheets.removeUser(email)
+}

@@ -19,7 +19,8 @@ const HEADERS = {
   events: [
     'id', 'operation_id', 'date', 'planned_time', 'actual_time', 'end_time',
     'title', 'status', 'type', 'detail', 'reporter',
-    'location', 'duration', 'priority', 'created_at', 'updated_at',
+    'location', 'duration', 'priority', 'visibility', 'deleted_at', 'deleted_by',
+    'created_at', 'updated_at',
   ],
   event_logs: [
     'id', 'operation_id', 'event_id', 'time', 'message', 'user', 'type', 'created_at',
@@ -33,7 +34,7 @@ const HEADERS = {
     'start_time', 'end_time', 'venue', 'status', 'updated_at',
   ],
   users: [
-    'id', 'name', 'role', 'email', 'pin_hash', 'created_at',
+    'id', 'name', 'role', 'email', 'active', 'token', 'token_created', 'created_at',
   ],
 }
 

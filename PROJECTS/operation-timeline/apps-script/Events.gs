@@ -2,18 +2,25 @@
  * Events.gs — CRUD operations for the EVENTS table
  */
 
-function getAllEvents() {
-  return readSheet(SHEET_NAMES.EVENTS).sort((a, b) =>
-    String(a.planned_time).localeCompare(String(b.planned_time))
-  )
+function getAllEvents(role) {
+  const allowed = visibilityForRole(role || null)
+  return readSheet(SHEET_NAMES.EVENTS)
+    .filter(e => !e.deleted_at && allowed.includes(e.visibility))
+    .sort((a, b) => String(a.planned_time).localeCompare(String(b.planned_time)))
 }
 
-function getEventsByDate(date) {
-  return getAllEvents().filter(e => e.date === date)
+function getEventsByDate(date, role) {
+  const allowed = visibilityForRole(role || null)
+  return readSheet(SHEET_NAMES.EVENTS)
+    .filter(e => e.date === date && !e.deleted_at && allowed.includes(e.visibility))
+    .sort((a, b) => String(a.planned_time).localeCompare(String(b.planned_time)))
 }
 
-function getEventsByOperationId(operationId) {
-  return getAllEvents().filter(e => e.operation_id === operationId)
+function getEventsByOperationId(operationId, role) {
+  const allowed = visibilityForRole(role || null)
+  return readSheet(SHEET_NAMES.EVENTS)
+    .filter(e => e.operation_id === operationId && !e.deleted_at && allowed.includes(e.visibility))
+    .sort((a, b) => String(a.planned_time).localeCompare(String(b.planned_time)))
 }
 
 function createEvent(data) {
@@ -36,6 +43,9 @@ function createEvent(data) {
       location:     data.location     || '',
       duration:     data.duration     || 30,
       priority:     data.priority     || 'normal',
+      visibility:   data.visibility   || 'public',
+      deleted_at:   '',
+      deleted_by:   '',
       created_at:   now,
       updated_at:   now,
     }
@@ -85,6 +95,9 @@ function bulkCreateEvents(operationId, defaultDate, eventsArray) {
         location:     data.location     || '',
         duration:     data.duration     !== undefined ? data.duration : 30,
         priority:     data.priority     || 'normal',
+        visibility:   data.visibility   || 'public',
+        deleted_at:   '',
+        deleted_by:   '',
         created_at:   now,
         updated_at:   now,
       }
@@ -101,4 +114,40 @@ function bulkCreateEvents(operationId, defaultDate, eventsArray) {
   } finally {
     lock.releaseLock()
   }
+}
+
+function deleteEvent(id, deletedBy) {
+  const lock = LockService.getScriptLock()
+  lock.waitLock(5000)
+  try {
+    const ok = updateRowById(SHEET_NAMES.EVENTS, id, {
+      deleted_at: new Date().toISOString(),
+      deleted_by: deletedBy || 'admin',
+      updated_at: new Date().toISOString(),
+    })
+    return { ok }
+  } finally {
+    lock.releaseLock()
+  }
+}
+
+function restoreEvent(id) {
+  const lock = LockService.getScriptLock()
+  lock.waitLock(5000)
+  try {
+    const ok = updateRowById(SHEET_NAMES.EVENTS, id, {
+      deleted_at: '',
+      deleted_by: '',
+      updated_at: new Date().toISOString(),
+    })
+    return { ok }
+  } finally {
+    lock.releaseLock()
+  }
+}
+
+function getDeletedEvents() {
+  return readSheet(SHEET_NAMES.EVENTS)
+    .filter(e => !!e.deleted_at)
+    .sort((a, b) => String(b.deleted_at).localeCompare(String(a.deleted_at)))
 }

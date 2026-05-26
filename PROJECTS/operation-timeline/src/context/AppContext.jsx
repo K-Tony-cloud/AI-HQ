@@ -10,11 +10,14 @@ import {
   importOperationFromCSV as apiImportOperation,
   createLog,
   IS_MOCK, POLL_INTERVAL,
+  removeEvent    as apiDeleteEvent,
+  undeleteEvent  as apiRestoreEvent,
 } from '../services/eventService'
 import { createPoller } from '../services/realtime'
 import { useToast } from './ToastContext'
 import { useNetworkStatus } from '../hooks/useNetworkStatus'
 import { useNotifications } from '../hooks/useNotifications'
+import { useAuth } from './AuthContext'
 
 const AppContext = createContext(null)
 
@@ -49,8 +52,10 @@ export const AppProvider = ({ children }) => {
   const [isSyncing,  setIsSyncing]  = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState(IS_MOCK ? new Date() : null)
 
+  /* ── Auth ─────────────────────────────────────────────────────── */
+  const { isOpAdmin } = useAuth()
+
   /* ── UI state ─────────────────────────────────────────────────── */
-  const [isAdminMode,     setIsAdminMode]    = useState(false)
   const [expandedEventId, setExpandedEventId] = useState(null)
   const [selectedEvent,   setSelectedEvent]  = useState(null)
   const [densityMode,    setDensityMode]    = useState('normal')
@@ -282,6 +287,26 @@ export const AppProvider = ({ children }) => {
     }
   }, [addToast])
 
+  const deleteEvent = useCallback(async (eventId) => {
+    setEvents(prev => prev.filter(e => e.id !== eventId))
+    try {
+      await apiDeleteEvent(eventId)
+    } catch (err) {
+      addToast('ลบไม่สำเร็จ', 'error')
+      throw err
+    }
+  }, [addToast])
+
+  const restoreEvent = useCallback(async (eventId) => {
+    try {
+      await apiRestoreEvent(eventId)
+      addToast('กู้คืนเหตุการณ์แล้ว', 'success')
+    } catch (err) {
+      addToast('กู้คืนไม่สำเร็จ', 'error')
+      throw err
+    }
+  }, [addToast])
+
   /* ── Expand/collapse — one at a time ─────────────────────────── */
   const toggleEventExpand = useCallback((eventId) => {
     setExpandedEventId(prev => prev === eventId ? null : eventId)
@@ -318,13 +343,15 @@ export const AppProvider = ({ children }) => {
       lastSyncAt,
       refetch:     () => loadAll(false),
       /* ui */
-      isAdminMode, setIsAdminMode,
+      isAdminMode: isOpAdmin,
       expandedEventId,
       toggleEventExpand,
       isEventExpanded,
       selectedEvent, setSelectedEvent,
       addEvent,
       updateEvent,
+      deleteEvent,
+      restoreEvent,
       densityMode, setDensityMode,
       isMockMode: IS_MOCK,
       getSnapshots: () => snapshotsRef.current,

@@ -1,6 +1,7 @@
 import { useRef, useEffect, memo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useModalActions } from '../../context/ModalContext'
+import { useAuth } from '../../context/AuthContext'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TypeIcon } from '../ui/TypeIcon'
 import { EventLogs } from './EventLogs'
@@ -26,8 +27,9 @@ const DelayBadge = ({ planned, actual }) => {
 
 export const EventCard = memo(
   function EventCard({ event, state }) {
-    const { toggleEventExpand, isEventExpanded, densityMode, isAdminMode, editingEventId } = useApp()
+    const { toggleEventExpand, isEventExpanded, densityMode, isAdminMode, editingEventId, deleteEvent } = useApp()
     const { openModal } = useModalActions()
+    const { isOpAdmin, isSuperAdmin } = useAuth()
     const cardRef        = useRef(null)
     const prevExpRef     = useRef(false)
 
@@ -186,6 +188,18 @@ export const EventCard = memo(
                       ฉุกเฉิน
                     </span>
                   )}
+                  {isOpAdmin && event.visibility && event.visibility !== 'public' && (
+                    <span className={clsx(
+                      'text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide uppercase',
+                      event.visibility === 'restricted'   && 'text-ops-danger bg-ops-danger-light border border-ops-danger/20',
+                      event.visibility === 'internal'     && 'text-ops-warning bg-ops-warning-light border border-ops-warning/20',
+                      event.visibility === 'needs_review' && 'text-ops-text-muted bg-ops-bg border border-ops-border',
+                    )}>
+                      {event.visibility === 'restricted'   && 'จำกัด'}
+                      {event.visibility === 'internal'     && 'ภายใน'}
+                      {event.visibility === 'needs_review' && 'รอตรวจสอบ'}
+                    </span>
+                  )}
                 </div>
 
                 {/* Time strip */}
@@ -250,6 +264,20 @@ export const EventCard = memo(
                         className="text-[10px] font-semibold text-ops-warning bg-ops-warning-light border border-ops-warning/25 hover:bg-amber-100 px-2 py-0.5 rounded-md transition-all"
                       >
                         แก้ไข
+                      </button>
+                    )}
+                    {isAdminMode && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          if (!window.confirm('ลบเหตุการณ์นี้?')) return
+                          await deleteEvent(event.id)
+                        }}
+                        className="p-1.5 rounded-lg text-ops-text-muted hover:text-ops-danger hover:bg-ops-danger-light transition-all"
+                        title="ลบเหตุการณ์"
+                        aria-label="ลบ"
+                      >
+                        🗑
                       </button>
                     )}
                   </div>

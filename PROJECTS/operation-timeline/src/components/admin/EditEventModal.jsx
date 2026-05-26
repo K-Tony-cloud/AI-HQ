@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext'
 import { useToast } from '../../context/ToastContext'
 import { createLog } from '../../services/eventService'
 import { Modal, ModalClose } from '../ui/Modal'
+import { useAuth } from '../../context/AuthContext'
 import clsx from 'clsx'
 
 const TYPES = [
@@ -18,6 +19,13 @@ const PRIORITIES = [
   { value: 'normal',   label: 'ปกติ' },
   { value: 'high',     label: 'สูง' },
   { value: 'critical', label: 'วิกฤต' },
+]
+
+const VISIBILITIES = [
+  { value: 'public',       label: 'สาธารณะ' },
+  { value: 'internal',     label: 'ภายใน' },
+  { value: 'restricted',   label: 'จำกัด' },
+  { value: 'needs_review', label: 'รอตรวจสอบ' },
 ]
 
 const STATUSES = [
@@ -37,8 +45,9 @@ const Field = ({ label, children, span }) => (
 )
 
 export const EditEventModal = ({ event, onClose }) => {
-  const { updateEvent, events, setEditingEventId } = useApp()
+  const { updateEvent, events, setEditingEventId, deleteEvent } = useApp()
   const { addToast }                               = useToast()
+  const { isSuperAdmin } = useAuth()
   const [isSubmitting,  setIsSubmitting]  = useState(false)
   const [showConflict,  setShowConflict]  = useState(false)
   const [openedUpdatedAt] = useState(() => event.updated_at)
@@ -54,6 +63,7 @@ export const EditEventModal = ({ event, onClose }) => {
     reporter:     event.reporter     || '',
     location:     event.location     || '',
     priority:     event.priority     || 'normal',
+    visibility:   event.visibility   || 'public',
   })
 
   // Mark this event as being edited (shows badge on timeline card)
@@ -242,6 +252,14 @@ export const EditEventModal = ({ event, onClose }) => {
             </Field>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="การมองเห็น">
+              <select value={form.visibility} onChange={e => set('visibility', e.target.value)} className={inputCls}>
+                {VISIBILITIES.map(v => <option key={v.value} value={v.value} className="bg-ops-card">{v.label}</option>)}
+              </select>
+            </Field>
+          </div>
+
           <Field label="รายละเอียด">
             <textarea
               rows={4}
@@ -256,6 +274,18 @@ export const EditEventModal = ({ event, onClose }) => {
 
       {/* Footer actions — fixed inside modal */}
       <div className="flex-shrink-0 flex gap-3 px-6 py-4 border-t border-ops-border/40 bg-ops-bg/50">
+        {/* Delete button — left side of footer */}
+        <button
+          type="button"
+          onClick={async () => {
+            if (!window.confirm('ลบเหตุการณ์นี้?')) return
+            await deleteEvent(event.id)
+            onClose()
+          }}
+          className="py-2.5 px-4 rounded-xl border border-ops-danger/30 text-sm text-ops-danger hover:bg-ops-danger-light transition-all font-semibold"
+        >
+          ลบ
+        </button>
         <button
           type="button"
           onClick={onClose}

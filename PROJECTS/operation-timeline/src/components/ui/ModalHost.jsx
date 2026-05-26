@@ -4,7 +4,9 @@ import { AddEventModal } from '../admin/AddEventModal'
 import { CreateOperationModal } from '../admin/CreateOperationModal'
 import { ImportOperationModal } from '../admin/ImportOperationModal'
 import { AuditPanel } from '../admin/AuditPanel'
-import { PinLoginModal } from '../admin/PinLoginModal'
+import { GoogleLoginModal } from '../admin/GoogleLoginModal'
+import { DeletedEventsPanel } from '../admin/DeletedEventsPanel'
+import { UserManagementModal } from '../admin/UserManagementModal'
 
 export const ModalHost = () => {
   const { activeModal, closeModal } = useModal()
@@ -28,13 +30,14 @@ export const ModalHost = () => {
     case 'audit':
       return <AuditPanel onClose={closeModal} />
 
-    case 'pinLogin':
-      return (
-        <PinLoginModal
-          onSuccess={() => { props.onSuccess?.(); closeModal() }}
-          onClose={closeModal}
-        />
-      )
+    case 'googleLogin':
+      return <GoogleLoginModal onClose={closeModal} />
+
+    case 'deletedEvents':
+      return <DeletedEventsPanel onClose={closeModal} />
+
+    case 'userManagement':
+      return <UserManagementModal onClose={closeModal} />
 
     default:
       return null

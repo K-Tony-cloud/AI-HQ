@@ -11,7 +11,9 @@
  * GET endpoints:
  *   ?action=getOperations
  *   ?action=getOperation&id=OP-xxx
- *   ?action=getEvents[&operationId=OP-xxx][&date=YYYY-MM-DD]
+ *   ?action=getEvents[&operationId=OP-xxx][&date=YYYY-MM-DD][&token=TOKEN]
+ *   ?action=getDeletedEvents&token=TOKEN          (super_admin only)
+ *   ?action=listUsers&token=TOKEN                 (super_admin only)
  *   ?action=getMeta
  *   ?action=getLogs&eventId=EVT-xxx
  *   ?action=getAllLogs[&limit=N]
@@ -19,14 +21,20 @@
  *   ?action=ping
  *
  * POST endpoints (body JSON):
+ *   {action:'loginGoogle',     credential:'...'}
+ *   {action:'logout',          token:'...'}
  *   {action:'addOperation',    data:{...}}
  *   {action:'updateOperation', id:'OP-xxx', data:{...}}
  *   {action:'cloneOperation',  sourceId:'OP-xxx', data:{...}}
  *   {action:'addEvent',        data:{...}}
  *   {action:'updateEvent',     id:'EVT-xxx', data:{...}}
- *   {action:'addLog',              data:{...}}
- *   {action:'importOperation',    data:{operation:{...}, events:[...]}}
- *   {action:'uploadAttachment',   data:{operationId, eventId, fileName, fileData, mimeType, uploadedBy}}
+ *   {action:'deleteEvent',     id:'EVT-xxx', token:'...'}          (op_admin+)
+ *   {action:'restoreEvent',    id:'EVT-xxx', token:'...'}          (super_admin only)
+ *   {action:'addLog',          data:{...}}
+ *   {action:'importOperation', data:{operation:{...}, events:[...]}}
+ *   {action:'uploadAttachment',data:{operationId, eventId, fileName, fileData, mimeType, uploadedBy}}
+ *   {action:'addUser',         data:{name, email, role}, token:'...'} (super_admin only)
+ *   {action:'removeUser',      email:'...', token:'...'}           (super_admin only)
  */
 
 function ok(payload) {
@@ -39,6 +47,20 @@ function err(message, code) {
   return ContentService
     .createTextOutput(JSON.stringify({ ok: false, error: message, code: code || 400 }))
     .setMimeType(ContentService.MimeType.JSON)
+}
+
+function getCallerRole(e) {
+  const token = (e && e.parameter && e.parameter.token) || ''
+  if (!token) return null
+  const user = validateToken(token)
+  return user ? user.role : null
+}
+
+function requireRole(role, allowedRoles) {
+  if (!allowedRoles.includes(role)) {
+    return err('Access denied', 403)
+  }
+  return null
 }
 
 /* ── GET handler ─────────────────────────────────────────────── */
@@ -55,11 +77,24 @@ function doGet(e) {
         return ok(getOperationById(id))
       }
       case 'getEvents': {
+        const role        = getCallerRole(e)
         const operationId = e.parameter.operationId
         const date        = e.parameter.date
-        if (operationId) return ok(getEventsByOperationId(operationId))
-        if (date)        return ok(getEventsByDate(date))
-        return ok(getAllEvents())
+        if (operationId) return ok(getEventsByOperationId(operationId, role))
+        if (date)        return ok(getEventsByDate(date, role))
+        return ok(getAllEvents(role))
+      }
+      case 'getDeletedEvents': {
+        const role = getCallerRole(e)
+        const denied = requireRole(role, ['super_admin'])
+        if (denied) return denied
+        return ok(getDeletedEvents())
+      }
+      case 'listUsers': {
+        const role = getCallerRole(e)
+        const denied = requireRole(role, ['super_admin'])
+        if (denied) return denied
+        return ok(listUsers())
       }
       case 'getMeta': {
         const rows = readSheet(SHEET_NAMES.META)
@@ -152,6 +187,39 @@ function doPost(e) {
       }
       case 'uploadAttachment': {
         return ok(createAttachment(payload.data || {}))
+      }
+      case 'loginGoogle': {
+        const credential = payload.credential
+        if (!credential) return err('credential required')
+        return ok(loginWithGoogle(credential))
+      }
+      case 'logout': {
+        const token = payload.token
+        if (!token) return err('token required')
+        return ok({ loggedOut: logoutToken(token) })
+      }
+      case 'deleteEvent': {
+        const role = validateToken(payload.token)
+        if (!role) return err('Access denied', 403)
+        if (!payload.id) return err('id required')
+        return ok(deleteEvent(payload.id, role.email || 'admin'))
+      }
+      case 'restoreEvent': {
+        const user = validateToken(payload.token)
+        if (!user || user.role !== 'super_admin') return err('Access denied', 403)
+        if (!payload.id) return err('id required')
+        return ok(restoreEvent(payload.id))
+      }
+      case 'addUser': {
+        const user = validateToken(payload.token)
+        if (!user || user.role !== 'super_admin') return err('Access denied', 403)
+        return ok(addUser(payload.data || {}))
+      }
+      case 'removeUser': {
+        const user = validateToken(payload.token)
+        if (!user || user.role !== 'super_admin') return err('Access denied', 403)
+        if (!payload.email) return err('email required')
+        return ok({ removed: removeUser(payload.email) })
       }
       default:
         return err('Unknown action: ' + action, 404)

@@ -18,6 +18,12 @@ const PRIORITIES = [
   { value: 'critical', label: 'วิกฤต' },
 ]
 
+const VISIBILITIES = [
+  { value: 'public',     label: 'สาธารณะ' },
+  { value: 'internal',   label: 'ภายใน' },
+  { value: 'restricted', label: 'จำกัด' },
+]
+
 const inputCls = 'w-full bg-ops-surface border border-ops-border/50 rounded-lg px-3 py-2 text-sm text-ops-text-primary font-mono focus:outline-none focus:border-ops-accent/50 focus:ring-1 focus:ring-ops-accent/20 transition-all placeholder-ops-text-muted'
 
 const Field = ({ label, children }) => (
@@ -38,6 +44,7 @@ export const AddEventModal = ({ onClose }) => {
     reporter:     '',
     location:     '',
     priority:     'normal',
+    visibility:   'public',
   })
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -54,6 +61,7 @@ export const AddEventModal = ({ onClose }) => {
         end_time:     null,
         status:       'upcoming',
         duration:     30,
+        visibility:   form.visibility,
       })
       onClose()
     } finally {
@@ -121,6 +129,14 @@ export const AddEventModal = ({ onClose }) => {
             <Field label="ความสำคัญ">
               <select value={form.priority} onChange={e => set('priority', e.target.value)} className={inputCls}>
                 {PRIORITIES.map(p => <option key={p.value} value={p.value} className="bg-ops-card">{p.label}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="การมองเห็น">
+              <select value={form.visibility} onChange={e => set('visibility', e.target.value)} className={inputCls}>
+                {VISIBILITIES.map(v => <option key={v.value} value={v.value} className="bg-ops-card">{v.label}</option>)}
               </select>
             </Field>
           </div>

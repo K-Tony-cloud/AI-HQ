@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './context/AppContext'
 import { ToastProvider } from './context/ToastContext'
 import { FilterProvider } from './context/FilterContext'
 import { ModalProvider, useModalState } from './context/ModalContext'
+import { AuthProvider } from './context/AuthContext'
 import { ToastContainer } from './components/ui/Toast'
 import { ModalHost } from './components/ui/ModalHost'
 import { Header } from './components/layout/Header'
@@ -153,16 +154,26 @@ const AppContent = () => {
 }
 
 export default function App() {
+  useEffect(() => {
+    const s = document.createElement('script')
+    s.src = 'https://accounts.google.com/gsi/client'
+    s.async = true
+    document.head.appendChild(s)
+    return () => { document.head.removeChild(s) }
+  }, [])
+
   return (
-    <ToastProvider>
-      <FilterProvider>
-        <ModalProvider>
-          <AppProvider>
-            <AppContent />
-            <ToastContainer />
-          </AppProvider>
-        </ModalProvider>
-      </FilterProvider>
-    </ToastProvider>
+    <AuthProvider>
+      <ToastProvider>
+        <FilterProvider>
+          <ModalProvider>
+            <AppProvider>
+              <AppContent />
+              <ToastContainer />
+            </AppProvider>
+          </ModalProvider>
+        </FilterProvider>
+      </ToastProvider>
+    </AuthProvider>
   )
 }
