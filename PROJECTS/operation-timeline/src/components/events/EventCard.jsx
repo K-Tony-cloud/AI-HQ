@@ -173,10 +173,10 @@ export const EventCard = memo(
                     onConfirm:  () => deleteEvent(event.id),
                   })
                 }}
-                className="flex-shrink-0 ml-1.5 flex items-center text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-1.5 py-0.5 rounded-md transition-all"
+                className="flex-shrink-0 ml-2 flex items-center gap-1 text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-2 py-0.5 rounded-md transition-all"
                 aria-label="ลบเหตุการณ์"
               >
-                🗑
+                🗑 ลบ
               </button>
             )}
           </div>
