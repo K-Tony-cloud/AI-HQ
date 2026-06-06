@@ -251,6 +251,9 @@ export const Header = () => {
             <span className="text-xs font-semibold text-amber-700">
               ⚠ โหมดผู้ดูแลระบบ — แก้ไขข้อมูลแบบเรียลไทม์
             </span>
+            <span className="font-mono text-[10px] text-amber-500 flex-shrink-0">
+              build {new Date(__BUILD_TIME__).toISOString().slice(0,16).replace('T',' ')}
+            </span>
             <button
               onClick={() => openModal('addEvent')}
               className="sm:hidden text-xs font-semibold text-ops-accent bg-white border border-ops-border rounded px-2 py-0.5"
