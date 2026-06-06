@@ -91,6 +91,7 @@ export const EventCard = memo(
           )}
 
           {/* ── Header (always visible) ── */}
+          <div className="relative">
           <button
             onClick={handleToggle}
             className={clsx(
@@ -99,6 +100,7 @@ export const EventCard = memo(
               isExpanded
                 ? dense ? 'pt-3 px-3 pb-2' : 'pt-4 px-4 pb-2'
                 : dense ? 'py-1 px-2.5'    : 'py-1.5 px-3',
+              isAdminMode && 'pr-8',
             )}
           >
             {/* Time */}
@@ -160,6 +162,23 @@ export const EventCard = memo(
               </span>
             )}
           </button>
+          {isAdminMode && (
+            <button
+              onClick={e => {
+                e.stopPropagation()
+                openModal('confirmDelete', {
+                  eventTitle: event.title,
+                  eventId:    event.id,
+                  onConfirm:  () => deleteEvent(event.id),
+                })
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-1.5 py-0.5 rounded-md transition-all"
+              aria-label="ลบเหตุการณ์"
+            >
+              🗑
+            </button>
+          )}
+          </div>
 
           {/* ── Animated detail panel ── */}
           <div
@@ -250,22 +269,6 @@ export const EventCard = memo(
                         className="text-[10px] font-semibold text-ops-warning bg-ops-warning-light border border-ops-warning/25 hover:bg-amber-100 px-2 py-0.5 rounded-md transition-all"
                       >
                         แก้ไข
-                      </button>
-                    )}
-                    {isAdminMode && (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation()
-                          openModal('confirmDelete', {
-                            eventTitle: event.title,
-                            eventId:    event.id,
-                            onConfirm:  () => deleteEvent(event.id),
-                          })
-                        }}
-                        className="flex items-center gap-1 text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-2 py-0.5 rounded-md transition-all"
-                        aria-label="ลบเหตุการณ์"
-                      >
-                        🗑 ลบ
                       </button>
                     )}
                   </div>
