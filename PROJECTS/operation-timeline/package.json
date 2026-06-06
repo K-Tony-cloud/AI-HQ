@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "npm run build && touch dist/.nojekyll",
-    "deploy": "gh-pages -d dist -r https://github.com/rw6-mpb/operation-timeline.git -b gh-pages"
+    "deploy": "gh-pages -d dist -r https://github.com/rw6-mpb/operation-timeline.git -b gh-pages --dotfiles"
   },
   "dependencies": {
     "clsx": "^2.0.0",
