@@ -91,93 +91,94 @@ export const EventCard = memo(
           )}
 
           {/* ── Header (always visible) ── */}
-          <div className="relative">
-          <button
-            onClick={handleToggle}
-            className={clsx(
-              'w-full text-left flex items-center gap-2.5 group',
-              isActive && 'cursor-default',
-              isExpanded
-                ? dense ? 'pt-3 px-3 pb-2' : 'pt-4 px-4 pb-2'
-                : dense ? 'py-1 px-2.5'    : 'py-1.5 px-3',
-              isAdminMode && 'pr-8',
-            )}
-          >
-            {/* Time */}
-            <span className={clsx(
-              'font-mono font-bold tabular-nums leading-none flex-shrink-0',
-              isActive ? 'text-ops-accent text-[13px]' :
-              isPast   ? 'text-ops-text-disabled text-xs' :
-                         'text-ops-text-secondary text-xs',
-            )}>
-              {event.actual_time || event.planned_time}
-            </span>
-
-            {/* Urgent pulse dot (compact only) */}
-            {urgent && !isExpanded && (
-              <span className="w-1 h-1 rounded-full bg-ops-danger flex-shrink-0 animate-pulse" />
-            )}
-
-            {/* Type emoji */}
-            <span className={clsx('flex-shrink-0 leading-none', dense ? 'text-sm' : 'text-base')}>
-              {typeConfig.icon}
-            </span>
-
-            {/* Title */}
-            <span className={clsx(
-              'flex-1 min-w-0 font-medium leading-snug transition-colors',
-              dense ? 'text-xs' : 'text-[13px]',
-              isExpanded
-                ? isActive
-                  ? 'text-ops-accent font-bold'
-                  : 'text-ops-text-primary font-semibold'
-                : isPast
-                  ? 'text-ops-text-muted truncate'
-                  : 'text-ops-text-secondary truncate group-hover:text-ops-text-primary',
-            )}>
-              {event.title}
-            </span>
-
-            {/* Right badges */}
-            {isEditing && (
-              <span className="text-[9px] font-medium text-ops-warning bg-ops-warning-light border border-ops-warning/30 px-1.5 py-0.5 rounded flex-shrink-0">
-                แก้ไขอยู่
-              </span>
-            )}
-            {isActive && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-ops-accent bg-sky-100 border border-ops-accent/30 px-2 py-0.5 rounded-full flex-shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-ops-accent animate-blink" />
-                ดำเนินการ
-              </span>
-            )}
-            <StatusBadge status={event.status} size="xs" showIcon={false} />
-
-            {/* Expand / collapse chevron */}
-            {!isActive && (
-              <span className={clsx(
-                'flex-shrink-0 text-ops-text-muted/60 text-[11px] transition-transform duration-300 select-none',
-                isExpanded && 'rotate-180',
-              )}>
-                ▾
-              </span>
-            )}
-          </button>
-          {isAdminMode && (
+          <div className={clsx(
+            'flex items-center group',
+            isExpanded
+              ? dense ? 'pt-3 px-3 pb-2' : 'pt-4 px-4 pb-2'
+              : dense ? 'py-1 px-2.5'    : 'py-1.5 px-3',
+          )}>
             <button
-              onClick={e => {
-                e.stopPropagation()
-                openModal('confirmDelete', {
-                  eventTitle: event.title,
-                  eventId:    event.id,
-                  onConfirm:  () => deleteEvent(event.id),
-                })
-              }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-1.5 py-0.5 rounded-md transition-all"
-              aria-label="ลบเหตุการณ์"
+              onClick={handleToggle}
+              className={clsx(
+                'flex-1 min-w-0 text-left flex items-center gap-2.5',
+                isActive && 'cursor-default',
+              )}
             >
-              🗑
+              {/* Time */}
+              <span className={clsx(
+                'font-mono font-bold tabular-nums leading-none flex-shrink-0',
+                isActive ? 'text-ops-accent text-[13px]' :
+                isPast   ? 'text-ops-text-disabled text-xs' :
+                           'text-ops-text-secondary text-xs',
+              )}>
+                {event.actual_time || event.planned_time}
+              </span>
+
+              {/* Urgent pulse dot (compact only) */}
+              {urgent && !isExpanded && (
+                <span className="w-1 h-1 rounded-full bg-ops-danger flex-shrink-0 animate-pulse" />
+              )}
+
+              {/* Type emoji */}
+              <span className={clsx('flex-shrink-0 leading-none', dense ? 'text-sm' : 'text-base')}>
+                {typeConfig.icon}
+              </span>
+
+              {/* Title */}
+              <span className={clsx(
+                'flex-1 min-w-0 font-medium leading-snug transition-colors',
+                dense ? 'text-xs' : 'text-[13px]',
+                isExpanded
+                  ? isActive
+                    ? 'text-ops-accent font-bold'
+                    : 'text-ops-text-primary font-semibold'
+                  : isPast
+                    ? 'text-ops-text-muted truncate'
+                    : 'text-ops-text-secondary truncate group-hover:text-ops-text-primary',
+              )}>
+                {event.title}
+              </span>
+
+              {/* Right badges */}
+              {isEditing && (
+                <span className="text-[9px] font-medium text-ops-warning bg-ops-warning-light border border-ops-warning/30 px-1.5 py-0.5 rounded flex-shrink-0">
+                  แก้ไขอยู่
+                </span>
+              )}
+              {isActive && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-ops-accent bg-sky-100 border border-ops-accent/30 px-2 py-0.5 rounded-full flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-ops-accent animate-blink" />
+                  ดำเนินการ
+                </span>
+              )}
+              <StatusBadge status={event.status} size="xs" showIcon={false} />
+
+              {/* Expand / collapse chevron */}
+              {!isActive && (
+                <span className={clsx(
+                  'flex-shrink-0 text-ops-text-muted/60 text-[11px] transition-transform duration-300 select-none',
+                  isExpanded && 'rotate-180',
+                )}>
+                  ▾
+                </span>
+              )}
             </button>
-          )}
+            {isAdminMode && (
+              <button
+                onClick={e => {
+                  e.stopPropagation()
+                  openModal('confirmDelete', {
+                    eventTitle: event.title,
+                    eventId:    event.id,
+                    onConfirm:  () => deleteEvent(event.id),
+                  })
+                }}
+                className="flex-shrink-0 ml-1.5 flex items-center text-[10px] font-semibold text-ops-danger bg-ops-danger-light border border-ops-danger/20 hover:bg-ops-danger/15 px-1.5 py-0.5 rounded-md transition-all"
+                aria-label="ลบเหตุการณ์"
+              >
+                🗑
+              </button>
+            )}
           </div>
 
           {/* ── Animated detail panel ── */}
