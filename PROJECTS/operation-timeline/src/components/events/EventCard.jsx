@@ -1,7 +1,6 @@
 import { useRef, useEffect, memo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useModalActions } from '../../context/ModalContext'
-import { useAuth } from '../../context/AuthContext'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TypeIcon } from '../ui/TypeIcon'
 import { EventLogs } from './EventLogs'
@@ -29,7 +28,6 @@ export const EventCard = memo(
   function EventCard({ event, state }) {
     const { toggleEventExpand, isEventExpanded, densityMode, isAdminMode, editingEventId, deleteEvent } = useApp()
     const { openModal } = useModalActions()
-    const { isOpAdmin, isSuperAdmin } = useAuth()
     const cardRef        = useRef(null)
     const prevExpRef     = useRef(false)
 
@@ -186,16 +184,6 @@ export const EventCard = memo(
                   {urgent && isEmergency && (
                     <span className="text-[9px] font-bold text-ops-danger bg-ops-danger-light border border-ops-danger/30 px-1.5 py-0.5 rounded tracking-widest animate-pulse">
                       ฉุกเฉิน
-                    </span>
-                  )}
-                  {isOpAdmin && event.visibility && event.visibility !== 'public' && (
-                    <span className={clsx(
-                      'text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide uppercase',
-                      event.visibility === 'restricted' && 'text-ops-danger bg-ops-danger-light border border-ops-danger/20',
-                      event.visibility === 'internal'   && 'text-ops-warning bg-ops-warning-light border border-ops-warning/20',
-                    )}>
-                      {event.visibility === 'restricted' && 'จำกัด'}
-                      {event.visibility === 'internal'   && 'ภายใน'}
                     </span>
                   )}
                 </div>

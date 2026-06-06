@@ -7,7 +7,7 @@ const ROLE_LABELS = {
 }
 
 export const LoginButton = () => {
-  const { user, logout, isSuperAdmin } = useAuth()
+  const { user, logout } = useAuth()
   const { openModal } = useModalActions()
 
   if (user) {
@@ -17,15 +17,6 @@ export const LoginButton = () => {
           <span className="w-1.5 h-1.5 rounded-full bg-ops-success animate-pulse flex-shrink-0" />
           <span className="truncate">{ROLE_LABELS[user.role] || user.role}</span>
         </span>
-        {isSuperAdmin && (
-          <button
-            onClick={() => openModal('userManagement', {})}
-            className="text-[11px] font-medium text-ops-text-muted hover:text-ops-accent border border-ops-border hover:border-ops-accent/30 hover:bg-ops-accent-light px-2 py-1.5 rounded-lg transition-all"
-            title="จัดการผู้ใช้"
-          >
-            👥
-          </button>
-        )}
         <button
           onClick={logout}
           className="text-[11px] font-medium text-ops-text-muted hover:text-ops-danger border border-ops-border hover:border-ops-danger/30 hover:bg-ops-danger-light px-2.5 py-1.5 rounded-lg transition-all"

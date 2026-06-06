@@ -88,9 +88,6 @@ const OperationSelector = ({ isAdmin }) => {
             <h1 className="font-bold text-sm md:text-[15px] text-ops-text-primary truncate leading-tight">
               {operationMeta?.title}
             </h1>
-            <span className="hidden sm:inline text-[9px] font-bold text-ops-danger bg-ops-danger-light border border-ops-danger/25 px-1.5 py-0.5 rounded tracking-widest flex-shrink-0">
-              {operationMeta?.classification}
-            </span>
             <span className="text-ops-text-muted text-xs group-hover:text-ops-accent transition-colors">▾</span>
           </div>
           <p className="text-[11px] text-ops-text-muted truncate mt-0.5">

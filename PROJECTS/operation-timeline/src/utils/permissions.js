@@ -11,7 +11,7 @@ export const ROLES = {
     canAddEvent:    true,
     canAddLog:      true,
     canViewAudit:   true,
-    canDeleteEvent: false, // reserved
+    canDeleteEvent: true,
   },
 }
 

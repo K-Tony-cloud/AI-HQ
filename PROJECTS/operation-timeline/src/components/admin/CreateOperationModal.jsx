@@ -4,8 +4,6 @@ import { useToast } from '../../context/ToastContext'
 import { Modal, ModalClose } from '../ui/Modal'
 import clsx from 'clsx'
 
-const CLASSIFICATIONS = ['RESTRICTED', 'CONFIDENTIAL', 'SECRET']
-
 const inputCls = 'w-full bg-ops-surface border border-ops-border/50 rounded-lg px-3 py-2 text-sm text-ops-text-primary font-mono focus:outline-none focus:border-ops-accent/50 focus:ring-1 focus:ring-ops-accent/20 transition-all placeholder-ops-text-muted'
 
 const Field = ({ label, children }) => (
@@ -86,28 +84,15 @@ export const CreateOperationModal = ({ onClose, cloneSourceId = null }) => {
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="วันที่ปฏิบัติการ">
-              <input
-                type="date"
-                required
-                value={form.date}
-                onChange={e => set('date', e.target.value)}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="ชั้นความลับ">
-              <select
-                value={form.classification}
-                onChange={e => set('classification', e.target.value)}
-                className={inputCls}
-              >
-                {CLASSIFICATIONS.map(c => (
-                  <option key={c} value={c} className="bg-ops-card">{c}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
+          <Field label="วันที่ปฏิบัติการ">
+            <input
+              type="date"
+              required
+              value={form.date}
+              onChange={e => set('date', e.target.value)}
+              className={inputCls}
+            />
+          </Field>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="เวลาเริ่ม">

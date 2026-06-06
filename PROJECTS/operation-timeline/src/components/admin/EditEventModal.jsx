@@ -3,7 +3,6 @@ import { useApp } from '../../context/AppContext'
 import { useToast } from '../../context/ToastContext'
 import { createLog } from '../../services/eventService'
 import { Modal, ModalClose } from '../ui/Modal'
-import { useAuth } from '../../context/AuthContext'
 import clsx from 'clsx'
 
 const TYPES = [
@@ -19,12 +18,6 @@ const PRIORITIES = [
   { value: 'normal',   label: 'ปกติ' },
   { value: 'high',     label: 'สูง' },
   { value: 'critical', label: 'วิกฤต' },
-]
-
-const VISIBILITIES = [
-  { value: 'public',     label: 'สาธารณะ' },
-  { value: 'internal',   label: 'ภายใน' },
-  { value: 'restricted', label: 'จำกัด' },
 ]
 
 const STATUSES = [
@@ -46,7 +39,6 @@ const Field = ({ label, children, span }) => (
 export const EditEventModal = ({ event, onClose }) => {
   const { updateEvent, events, setEditingEventId, deleteEvent } = useApp()
   const { addToast }                               = useToast()
-  const { isSuperAdmin } = useAuth()
   const [isSubmitting,  setIsSubmitting]  = useState(false)
   const [showConflict,  setShowConflict]  = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -250,14 +242,6 @@ export const EditEventModal = ({ event, onClose }) => {
                 onChange={e => set('location', e.target.value)}
                 className={inputCls}
               />
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="การมองเห็น">
-              <select value={form.visibility} onChange={e => set('visibility', e.target.value)} className={inputCls}>
-                {VISIBILITIES.map(v => <option key={v.value} value={v.value} className="bg-ops-card">{v.label}</option>)}
-              </select>
             </Field>
           </div>
 

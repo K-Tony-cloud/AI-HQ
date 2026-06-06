@@ -55,13 +55,7 @@ export const AppProvider = ({ children }) => {
   /* ── Auth ─────────────────────────────────────────────────────── */
   const { user, isOpAdmin, isSuperAdmin } = useAuth()
 
-  const scopedOperations = useMemo(() => {
-    if (!isOpAdmin || isSuperAdmin) return operations
-    const scope = user?.operation_scope
-    if (!scope || scope === '*') return operations
-    const ids = scope.split(',').map(s => s.trim()).filter(Boolean)
-    return operations.filter(op => ids.includes(op.id))
-  }, [operations, isOpAdmin, isSuperAdmin, user])
+  const scopedOperations = operations
 
   /* ── UI state ─────────────────────────────────────────────────── */
   const [expandedEventId, setExpandedEventId] = useState(null)

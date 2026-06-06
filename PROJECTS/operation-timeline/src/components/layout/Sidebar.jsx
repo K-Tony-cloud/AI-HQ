@@ -1,5 +1,4 @@
 import { useApp } from '../../context/AppContext'
-import { useAuth } from '../../context/AuthContext'
 import { useModalActions } from '../../context/ModalContext'
 import { useCurrentTime } from '../../hooks/useCurrentTime'
 import { getEventState } from '../../utils/timeUtils'
@@ -15,7 +14,6 @@ const StatPill = ({ label, value, colorClass, bg }) => (
 
 export const Sidebar = () => {
   const { events, operationMeta } = useApp()
-  const { isSuperAdmin } = useAuth()
   const { openModal } = useModalActions()
   const { timeStr } = useCurrentTime(10000)
 
@@ -120,16 +118,6 @@ export const Sidebar = () => {
           })}
         </div>
       </div>
-      {/* Super admin tools */}
-      {isSuperAdmin && (
-        <button
-          onClick={() => openModal('deletedEvents', {})}
-          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-ops-danger/20 bg-ops-danger-light text-ops-danger text-xs font-semibold hover:border-ops-danger/40 transition-all"
-        >
-          <span>🗑</span>
-          <span>เหตุการณ์ที่ถูกลบ</span>
-        </button>
-      )}
 
     </aside>
   )
