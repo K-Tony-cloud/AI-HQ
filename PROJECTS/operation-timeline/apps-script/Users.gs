@@ -214,6 +214,90 @@ function seedAdminPin() {
   Logger.log('Change PIN later: setPin("USR-001", "yourNewPin")')
 }
 
+/**
+ * repairUsersSheet — run once from the Apps Script editor to fix the broken
+ * column alignment caused by seeding into an old schema that had an 'email'
+ * column where 'pin_hash' now belongs.
+ *
+ * What happened:
+ *   Old sheet headers: id | name | role | email | pin_hash | created_at
+ *   appendRow() writes by HEADERS.users order, so:
+ *     • SHA256 hash landed in the 'email' column  (col 4)
+ *     • '*' (operation_scope) landed in 'pin_hash' (col 5)
+ *     • 'true' (active) landed in 'created_at'    (col 6)
+ *
+ * This function:
+ *   1. Reads USR-001 using the current (broken) column positions
+ *   2. Extracts the hash from wherever it actually sits
+ *   3. Clears the sheet
+ *   4. Writes correct headers (HEADERS.users)
+ *   5. Writes USR-001 back into the correct columns
+ */
+function repairUsersSheet() {
+  const sheet = getOrCreateSheet(SHEET_NAMES.USERS)
+  const data  = sheet.getDataRange().getValues()
+
+  if (data.length === 0) {
+    Logger.log('Users sheet is empty — run seedAdminPin() instead.')
+    return
+  }
+
+  const hdrs    = data[0]
+  const idIdx   = hdrs.indexOf('id')
+  const nameIdx = hdrs.indexOf('name')
+  const roleIdx = hdrs.indexOf('role')
+  // In the broken sheet the hash was written into the 'email' column
+  const emailIdx = hdrs.indexOf('email')
+
+  if (idIdx === -1) {
+    Logger.log('ERROR: no "id" column found in row 1. Inspect the sheet manually.')
+    return
+  }
+
+  // Find USR-001
+  let savedUser = null
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idIdx]) !== 'USR-001') continue
+
+    const storedHash = emailIdx >= 0 ? String(data[i][emailIdx]) : ''
+    // A valid SHA-256 hex string is exactly 64 chars
+    const pinHash = storedHash.length === 64 ? storedHash : _hashPin('1234')
+
+    savedUser = {
+      id:              'USR-001',
+      name:            nameIdx >= 0 ? (String(data[i][nameIdx]) || 'Super Admin') : 'Super Admin',
+      role:            roleIdx >= 0 ? (String(data[i][roleIdx]) || 'super_admin') : 'super_admin',
+      pin_hash:        pinHash,
+      operation_scope: '*',
+      active:          'true',
+      token:           '',
+      token_created:   '',
+      created_at:      new Date().toISOString(),
+    }
+    Logger.log('Found USR-001. pin_hash source: ' + (storedHash.length === 64 ? 'email column (rescued)' : 'freshly hashed'))
+    break
+  }
+
+  if (!savedUser) {
+    Logger.log('USR-001 not found. Rewriting headers only — run seedAdminPin() afterwards.')
+  }
+
+  // Clear and re-initialize with the correct schema
+  sheet.clear()
+  const correctHeaders = HEADERS[SHEET_NAMES.USERS]
+  sheet.appendRow(correctHeaders)
+  sheet.getRange(1, 1, 1, correctHeaders.length).setFontWeight('bold').setBackground('#f0f4ff')
+
+  if (savedUser) {
+    appendRow(SHEET_NAMES.USERS, savedUser)
+    Logger.log('USR-001 written with correct column alignment.')
+    Logger.log('pin_hash (first 8 chars): ' + savedUser.pin_hash.slice(0, 8) + '...')
+  }
+
+  Logger.log('Repair complete. New headers: ' + correctHeaders.join(' | '))
+  Logger.log('Test login with PIN: 1234')
+}
+
 // Run from GAS editor to set/reset a user's PIN by their id
 function setPin(userId, pin) {
   const sheet   = getOrCreateSheet(SHEET_NAMES.USERS)
