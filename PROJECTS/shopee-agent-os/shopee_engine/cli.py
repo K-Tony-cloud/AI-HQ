@@ -834,5 +834,189 @@ def cmd_profit_opportunities(
     print_profit_opportunities(df, top)
 
 
+# ===========================================================================
+# Phase 5 — Affiliate Operator Command Center
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# morning-brief
+# ---------------------------------------------------------------------------
+
+@app.command("morning-brief")
+def cmd_morning_brief(
+    top:   int = typer.Option(5,         "--top",   "-n", help="Items per section"),
+    table: str = typer.Option("products","--table", "-t", help="Product table"),
+) -> None:
+    """
+    Morning briefing: Top Opportunities, Top Viral, Top Niches, Top Profit.
+
+    Example:
+        shopee morning-brief
+        shopee morning-brief --top 10
+    """
+    from .operator_center import morning_brief, print_morning_brief
+
+    with console.status("[yellow]Loading morning brief...[/]"):
+        try:
+            data = morning_brief(table_name=table, top=top)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_morning_brief(data)
+
+
+# ---------------------------------------------------------------------------
+# category-brief
+# ---------------------------------------------------------------------------
+
+@app.command("category-brief")
+def cmd_category_brief(
+    category: str = typer.Option(...,        "--category", "-c", help="Category: Gadget | Health | Baby | Camping | Home | Mobile | Beauty | Fashion"),
+    top:      int = typer.Option(20,         "--top",      "-n", help="Number of products"),
+    table:    str = typer.Option("products", "--table",    "-t", help="Product table"),
+) -> None:
+    """
+    Top products in a category with opportunity score, profit score, content angle.
+
+    Example:
+        shopee category-brief --category Gadget
+        shopee category-brief --category Health --top 30
+    """
+    from .operator_center import category_brief, print_category_brief
+
+    with console.status(f"[yellow]Loading {category} brief...[/]"):
+        try:
+            data = category_brief(category=category, table_name=table, top=top)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_category_brief(data)
+
+
+# ---------------------------------------------------------------------------
+# trend-watch
+# ---------------------------------------------------------------------------
+
+@app.command("trend-watch")
+def cmd_trend_watch(
+    top:   int = typer.Option(20,         "--top",   "-n", help="Items per signal"),
+    table: str = typer.Option("products", "--table", "-t", help="Product table"),
+) -> None:
+    """
+    Find products showing unusual growth signals.
+
+    Signals:
+      - Social Momentum — high likes/sold ratio
+      - Promo Surge     — high discount + high sales
+      - New Viral       — high likes with low sold count
+
+    Example:
+        shopee trend-watch
+    """
+    from .operator_center import trend_watch, print_trend_watch
+
+    with console.status("[yellow]Scanning trends...[/]"):
+        try:
+            data = trend_watch(table_name=table, top=top)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_trend_watch(data)
+
+
+# ---------------------------------------------------------------------------
+# content-worklist
+# ---------------------------------------------------------------------------
+
+@app.command("content-worklist")
+def cmd_content_worklist(
+    top:   int = typer.Option(20,         "--top",   "-n", help="Number of items"),
+    table: str = typer.Option("products", "--table", "-t", help="Product table"),
+) -> None:
+    """
+    Daily content work list: Product, Priority, Suggested Hook, Format, Platform.
+
+    Example:
+        shopee content-worklist
+        shopee content-worklist --top 30
+    """
+    from .operator_center import content_worklist, print_content_worklist
+
+    with console.status("[yellow]Building content worklist...[/]"):
+        try:
+            worklist = content_worklist(table_name=table, top=top)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_content_worklist(worklist)
+
+
+# ---------------------------------------------------------------------------
+# executive-summary
+# ---------------------------------------------------------------------------
+
+@app.command("executive-summary")
+def cmd_executive_summary(
+    table: str = typer.Option("products", "--table", "-t", help="Product table"),
+) -> None:
+    """
+    Full executive summary: Opportunities, Risks, Market Gaps, Viral, Profit.
+
+    Example:
+        shopee executive-summary
+    """
+    from .operator_center import executive_summary, print_executive_summary
+
+    with console.status("[yellow]Generating executive summary...[/]"):
+        try:
+            data = executive_summary(table_name=table)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_executive_summary(data)
+
+
+# ---------------------------------------------------------------------------
+# daily-report
+# ---------------------------------------------------------------------------
+
+@app.command("daily-report")
+def cmd_daily_report(
+    format: str = typer.Option("markdown", "--format", "-f",
+                                help="Output format: markdown | html | csv"),
+    output: str = typer.Option("exports/reports", "--output", "-o",
+                                help="Output directory"),
+    table:  str = typer.Option("products", "--table", "-t", help="Product table"),
+) -> None:
+    """
+    Export daily affiliate report to markdown / html / csv.
+
+    Example:
+        shopee daily-report --format markdown
+        shopee daily-report --format html
+        shopee daily-report --format csv --output exports/reports
+    """
+    from .operator_center import daily_report
+
+    fmt = format.lower()
+    if fmt not in ("markdown", "html", "csv"):
+        console.print("[red]Invalid format.[/] Use: markdown | html | csv")
+        raise typer.Exit(1)
+
+    with console.status(f"[yellow]Generating {fmt} report...[/]"):
+        try:
+            out_path = daily_report(fmt=fmt, table_name=table, output_dir=output)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    console.print(f"[bold green]Report exported →[/] {out_path}")
+
+
 if __name__ == "__main__":
     app()

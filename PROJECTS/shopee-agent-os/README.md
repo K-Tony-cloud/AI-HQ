@@ -295,6 +295,73 @@ shopee profit-opportunities --min-commission 50 --min-conversion 2
 
 ---
 
+## Phase 5 — Affiliate Operator Command Center
+
+### 19. Morning Brief
+
+สรุปภาพรวมประจำเช้า: Top Opportunities, Top Viral, Top Niches, Top Profit
+
+```bash
+shopee morning-brief
+shopee morning-brief --top 10
+```
+
+### 20. Category Brief
+
+วิเคราะห์ category เชิงลึก: Top 20 products + Opportunity Score + Profit Score + Content Angle
+
+```bash
+shopee category-brief --category Gadget
+shopee category-brief --category Health --top 30
+shopee category-brief --category Baby
+shopee category-brief --category Camping
+shopee category-brief --category Home
+shopee category-brief --category Mobile
+```
+
+Categories: `Gadget` | `Health` | `Baby` | `Camping` | `Home` | `Mobile` | `Beauty` | `Fashion`
+
+### 21. Trend Watch
+
+หาสินค้าที่กำลัง trending ด้วย 3 สัญญาณ:
+
+- **Social Momentum** — likes ÷ sold ratio สูงผิดปกติ
+- **Promo Surge** — ส่วนลด ≥25% + ยอดขาย ≥500
+- **New Viral Potential** — likes ≥1,000 แต่ยอดขายยังต่ำ
+
+```bash
+shopee trend-watch
+```
+
+### 22. Content Worklist
+
+รายการงานคอนเทนต์ประจำวัน พร้อม Priority, Suggested Hook, Format, Platform
+
+```bash
+shopee content-worklist
+shopee content-worklist --top 30
+```
+
+### 23. Executive Summary
+
+สรุปภาพรวมทั้งหมด: Opportunities, Risks, Market Gaps, Viral Candidates, Profit Candidates
+
+```bash
+shopee executive-summary
+```
+
+### 24. Daily Report
+
+Export รายงานประจำวันเป็น Markdown / HTML / CSV
+
+```bash
+shopee daily-report --format markdown
+shopee daily-report --format html
+shopee daily-report --format csv --output exports/reports
+```
+
+---
+
 ## Opportunity Score Formula
 
 ```
