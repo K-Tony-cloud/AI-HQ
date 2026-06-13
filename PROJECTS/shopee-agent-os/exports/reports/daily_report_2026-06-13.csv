@@ -1,0 +1,41 @@
+section,rank,name,metric_a,val_a,metric_b,val_b,score
+opportunity,1,เซรั่มสูตรใหม่! Gen2 Dr.PONG 28D smart whitening drone activein serum เซรั่มบำรุงผิวกระจ่างใส,sold,939,price,1499,25192
+opportunity,2,แว๊กซ์ขน Waxing Hair Remover เซ็ท 1 กระปุก,sold,7702,price,289,22275
+opportunity,3,JisuLife Pro1s FA53 Pro1  พัดลมมือถือ ปรับระดับได้ 100 ระดับ พัดลมพกพา ไม่มีใบมีด ชาร์จใหม่ได้ ใช้งานได้ 15 ชม,sold,6177,price,2242,19191
+opportunity,4,[ช้อปครบ รับฟรี!] Dr.PONG ZERO PORE blurring K powder แป้งพัฟเบลอรูขุมขน ปกปิด คุมมัน MADE IN KOREA จากเกาหลี,sold,5006,price,1000,18321
+opportunity,5,[ลิปแมทติดทน16ชม*]MAYBELLINE SUPER STAY MATTE INK เมย์เบลลีน ลิปจิ้มจุ่มเนื้อแมท ซุปเปอร์ สเตย์ แมท อิ้งค์ ลิควิดลิปสติก,sold,14661,price,299,18180
+opportunity,6,DODOLOVE ทิชชู่  1ชิ้น ผ้าเช็ดทำความสะอาดสำหรับเด็ก สุ่มสี,sold,39506,price,69,17315
+opportunity,7,[โปรเด็ด!! ไม้แขวนเสื้อ] ไม้แขวนเสื้อ ไม้แขวนสแตนเลส เคลือบซีลีโคนกันลื่น 2ขนาด ผู้ใหญ่40cm*20cm เด็ก30cm*18cm CC0,sold,7816,price,99,16847
+opportunity,8,[ขายดี!] Dr.PONG 20%ACV APPLE CIDER VINEGAR 750mg แอปเปิ้ลไซเดอร์ แบบเม็ดทานง่าย คุมหิว ลดบวม เผาผลาญดี ไม่ระคายเคือง,sold,36450,price,1000,16207
+opportunity,9,ถุงเท้าเด็กนักเรียน พื้นมีกันลื่น ขาวพื้นเทา แพ็ค 12คู่ มีขนาด3-5/4-6/5-7/7-9/ฟรีไซส์ ผ้านิ่มดี ใส่สบายเท้า X LY,sold,30794,price,299,15130
+opportunity,10,SKINTIFIC Perfect Stay Velvet Matte Cushion แมตต์ คุชชั่นรองพื้น ปกปิดจัดเต็ม กันน้ำกันเหงื่อ ติดทนคุมมันนาน 12 ชั่วโมง,sold,21997,price,799,14475
+market_gap,1,Baby Colognes & Fragrances,products,11,avg_sold,143,
+market_gap,2,Book Covers,products,155,avg_sold,123,
+market_gap,3,Food Processors,products,21,avg_sold,120,
+market_gap,4,Toilet Paper,products,366,avg_sold,99,
+market_gap,5,Ready-to-Drink Milk,products,159,avg_sold,94,
+market_gap,6,Hair Removal Cream & Wax,products,228,avg_sold,87,
+market_gap,7,Scale & Body Fat Analyzers,products,139,avg_sold,67,
+market_gap,8,Adult Diapers & Incontinence,products,459,avg_sold,66,
+market_gap,9,GPS Trackers,products,168,avg_sold,65,
+market_gap,10,Brooms,products,430,avg_sold,65,
+viral,1,เซรั่มสูตรใหม่! Gen2 Dr.PONG 28D smart whitening drone activein serum เซรั่มบำรุงผิวกระจ่างใส,price,1499,,,59492
+viral,2,แว๊กซ์ขน Waxing Hair Remover เซ็ท 1 กระปุก,price,289,,,48474
+viral,3,JisuLife Pro1s FA53 Pro1  พัดลมมือถือ ปรับระดับได้ 100 ระดับ พัดลมพกพา ไม่มีใบมีด ชาร์จใหม่ได้ ใช้งานได้ 15 ชม,price,2242,,,42136
+viral,4,[ช้อปครบ รับฟรี!] Dr.PONG ZERO PORE blurring K powder แป้งพัฟเบลอรูขุมขน ปกปิด คุมมัน MADE IN KOREA จากเกาหลี,price,1000,,,41620
+viral,5,[โปรเด็ด!! ไม้แขวนเสื้อ] ไม้แขวนเสื้อ ไม้แขวนสแตนเลส เคลือบซีลีโคนกันลื่น 2ขนาด ผู้ใหญ่40cm*20cm เด็ก30cm*18cm CC0,price,99,,,36785
+viral,6,[ลิปแมทติดทน16ชม*]MAYBELLINE SUPER STAY MATTE INK เมย์เบลลีน ลิปจิ้มจุ่มเนื้อแมท ซุปเปอร์ สเตย์ แมท อิ้งค์ ลิควิดลิปสติก,price,299,,,34027
+viral,7,กางเกงขาสั้น BRNG BRNG โลโก้ปัก ถูกๆ🔥ลดแรง🔥มีกระเป๋า 2 ข้าง ราคาต่อ 1 ตัว,price,80,,,32580
+viral,8,Naturista Tea Tree Special Set ชุดป้องกันการเกิดสิว บำรุงผิว เรียบเนียน กระชับ ซื้อเป็นเซตถูกกว่า!,price,1700,,,32368
+viral,9,[Exclusive] SUGAR GLUTA - Scrub Tamarind (700 g.) สครับมะขามขัดผิวขาว ขายดีอันดับ 1,price,198,,,30792
+viral,10,Orientas ผ้าห่มหิมะ Koyuki Duvet ผ้าห่มเย็น ปรับอุณหภูมิได้เอง ขนห่านเทียมพรีเมี่ยม สัมผัสปุยหิมะ,price,1099,,,29992
+profit,1,JisuLife Face Fan PN18 - พัดลมหน้า,commission,12750.00,epc,4.2742,
+profit,2,Dr.PONG ครีมหน้าใส SPF50,commission,5500.00,epc,4.4571,
+profit,3,ลิปสติก Maybelline Superstay,commission,5200.00,epc,2.8825,
+profit,4,ครีมกันแดด Anessa Perfect UV,commission,4560.00,epc,7.6382,
+profit,5,กล้อง Canon EOS M50 Mark II,commission,4172.00,epc,43.9158,
+profit,6,นมผึ้ง Royal Jelly 1000mg,commission,2460.00,epc,4.0594,
+profit,7,Xiaomi Redmi Note 13 Pro,commission,2136.00,epc,11.2421,
+profit,8,ชุดครัว Tefal Non-Stick 28cm,commission,2016.00,epc,6.8339,
+profit,9,หูฟัง JBL Tune 510BT,commission,1512.00,epc,4.6957,
+profit,10,กระเป๋าผ้าแฟชั่น Tote Bag,commission,360.00,epc,2.4828,
