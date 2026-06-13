@@ -21,5 +21,9 @@ CHANNEL_PROFIT:           int | None = int(v) if (v := os.getenv("CHANNEL_PROFIT
 CHANNEL_CONTENT_QUEUE:    int | None = int(v) if (v := os.getenv("CHANNEL_CONTENT_QUEUE")) else None
 CHANNEL_ANALYTICS:        int | None = int(v) if (v := os.getenv("CHANNEL_ANALYTICS")) else None
 CHANNEL_EXECUTIVE:        int | None = int(v) if (v := os.getenv("CHANNEL_EXECUTIVE_SUMMARY")) else None
+CHANNEL_WEEKLY_REPORT:    int | None = int(v) if (v := os.getenv("CHANNEL_WEEKLY_REPORT")) else CHANNEL_ANALYTICS
 
 PAGE_SIZE = 10  # Products per embed page
+
+# Scheduler
+SCHEDULER_TIMEZONE: str = os.getenv("SCHEDULER_TIMEZONE", "Asia/Bangkok")

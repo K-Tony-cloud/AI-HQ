@@ -15,15 +15,17 @@ class ShopeeBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self) -> None:
-        from .commands.discovery   import DiscoveryCog
-        from .commands.performance import PerformanceCog
-        from .commands.content     import ContentCog
-        from .commands.operator    import OperatorCog
+        from .commands.discovery      import DiscoveryCog
+        from .commands.performance    import PerformanceCog
+        from .commands.content        import ContentCog
+        from .commands.operator       import OperatorCog
+        from .commands.scheduler_cmds import SchedulerCog
 
         await self.add_cog(DiscoveryCog(self))
         await self.add_cog(PerformanceCog(self))
         await self.add_cog(ContentCog(self))
         await self.add_cog(OperatorCog(self))
+        await self.add_cog(SchedulerCog(self))
 
         if DISCORD_GUILD_ID:
             guild = discord.Object(id=int(DISCORD_GUILD_ID))

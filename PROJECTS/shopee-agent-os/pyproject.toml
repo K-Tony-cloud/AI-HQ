@@ -18,11 +18,13 @@ dependencies = [
     "openai>=1.0.0",
     "discord.py>=2.3.0",
     "python-dotenv>=1.0.0",
+    "apscheduler>=3.10,<4",
 ]
 
 [project.scripts]
-shopee         = "shopee_engine.cli:app"
-shopee-discord = "discord_bot.__main__:run"
+shopee           = "shopee_engine.cli:app"
+shopee-discord   = "discord_bot.__main__:run"
+shopee-scheduler = "scheduler.__main__:run"
 
 [tool.hatch.build.targets.wheel]
-packages = ["shopee_engine", "discord_bot"]
+packages = ["shopee_engine", "discord_bot", "scheduler"]
