@@ -1018,5 +1018,168 @@ def cmd_daily_report(
     console.print(f"[bold green]Report exported →[/] {out_path}")
 
 
+# ===========================================================================
+# Phase 8 — Revenue Feedback Loop Intelligence
+# ===========================================================================
+
+@app.command("import-revenue-report")
+def cmd_import_revenue_report(
+    csv_path: str = typer.Argument(..., help="Path to revenue/commission CSV"),
+) -> None:
+    """
+    Import actual revenue & commission report CSV into DuckDB feedback tables.
+
+    Example:
+        shopee import-revenue-report reports/revenue_june.csv
+    """
+    from .feedback_engine import import_revenue_report, print_import_feedback_result
+    paths = list(Path(".").glob(csv_path)) if "*" in csv_path else [Path(csv_path)]
+    for p in paths:
+        with console.status(f"[yellow]Importing {p.name}...[/]"):
+            result = import_revenue_report(p)
+        print_import_feedback_result(result)
+
+
+@app.command("import-click-report")
+def cmd_import_click_report(
+    csv_path: str = typer.Argument(..., help="Path to click report CSV"),
+) -> None:
+    """
+    Import click-level report CSV.
+
+    Example:
+        shopee import-click-report reports/clicks_june.csv
+    """
+    from .feedback_engine import import_click_report, print_import_feedback_result
+    paths = list(Path(".").glob(csv_path)) if "*" in csv_path else [Path(csv_path)]
+    for p in paths:
+        with console.status(f"[yellow]Importing {p.name}...[/]"):
+            result = import_click_report(p)
+        print_import_feedback_result(result)
+
+
+@app.command("import-order-report")
+def cmd_import_order_report(
+    csv_path: str = typer.Argument(..., help="Path to order report CSV"),
+) -> None:
+    """
+    Import order-level report CSV.
+
+    Example:
+        shopee import-order-report reports/orders_june.csv
+    """
+    from .feedback_engine import import_order_report, print_import_feedback_result
+    paths = list(Path(".").glob(csv_path)) if "*" in csv_path else [Path(csv_path)]
+    for p in paths:
+        with console.status(f"[yellow]Importing {p.name}...[/]"):
+            result = import_order_report(p)
+        print_import_feedback_result(result)
+
+
+@app.command("log-predictions")
+def cmd_log_predictions(
+    top:   int = typer.Option(100,       "--top",   "-n", help="Products to snapshot"),
+    table: str = typer.Option("products","--table", "-t", help="Source table"),
+) -> None:
+    """
+    Snapshot current top-N predictions into prediction_log for later comparison.
+
+    Example:
+        shopee log-predictions --top 100
+    """
+    from .feedback_engine import log_predictions
+    with console.status("[yellow]Logging predictions...[/]"):
+        count = log_predictions(table_name=table, top=top)
+    console.print(f"[bold green]Logged[/] {count} predictions → prediction_log")
+
+
+@app.command("learning-report")
+def cmd_learning_report() -> None:
+    """
+    Compare logged predictions vs actual revenue.
+    Shows Product Accuracy, Opportunity Accuracy, Viral Accuracy.
+
+    Example:
+        shopee learning-report
+    """
+    from .feedback_engine import learning_report, print_learning_report
+    with console.status("[yellow]Computing learning report...[/]"):
+        data = learning_report()
+    print_learning_report(data)
+
+
+@app.command("retrain-rankings")
+def cmd_retrain_rankings(
+    table:         str   = typer.Option("products", "--table",         "-t", help="Product table"),
+    learning_rate: float = typer.Option(0.05,       "--learning-rate", "-l",
+                                        help="Weight adjustment rate (default 0.05)"),
+) -> None:
+    """
+    Adapt opportunity score weights based on signal-to-revenue correlations.
+    New weights are stored in learning_weights and used by adaptive commands.
+
+    Example:
+        shopee retrain-rankings
+        shopee retrain-rankings --learning-rate 0.10
+    """
+    from .feedback_engine import retrain_rankings, print_weight_update
+    with console.status("[yellow]Retraining ranking weights...[/]"):
+        data = retrain_rankings(table_name=table, learning_rate=learning_rate)
+    print_weight_update(data)
+
+
+@app.command("profit-learning")
+def cmd_profit_learning(
+    top: int = typer.Option(20, "--top", "-n", help="Top-N predictions to evaluate"),
+) -> None:
+    """
+    Classify prediction quality: True/False Positives and False Negatives.
+    Shows Precision, Recall, F1.
+
+    Example:
+        shopee profit-learning --top 20
+    """
+    from .feedback_engine import profit_learning, print_profit_learning
+    with console.status("[yellow]Running profit learning analysis...[/]"):
+        data = profit_learning(top=top)
+    print_profit_learning(data)
+
+
+@app.command("recommend-next-products")
+def cmd_recommend_next_products(
+    top:   int = typer.Option(20,        "--top",   "-n", help="Number of recommendations"),
+    table: str = typer.Option("products","--table", "-t", help="Source table"),
+) -> None:
+    """
+    Recommend untapped products ranked by learned adaptive weights.
+    Excludes products already in revenue_feedback (already promoted).
+
+    Example:
+        shopee recommend-next-products --top 20
+    """
+    from .feedback_engine import recommend_next_products, print_recommendations
+    with console.status("[yellow]Computing recommendations...[/]"):
+        recs = recommend_next_products(top=top, table_name=table)
+    print_recommendations(recs)
+
+
+@app.command("adaptive-daily-picks")
+def cmd_adaptive_daily_picks(
+    top:   int = typer.Option(5,         "--top",   "-n", help="Products per bucket"),
+    table: str = typer.Option("products","--table", "-t", help="Source table"),
+) -> None:
+    """
+    Daily Picks ranked by LEARNED weights (adapts based on real performance data).
+    Falls back to default weights if no retraining has been done yet.
+
+    Example:
+        shopee adaptive-daily-picks --top 5
+    """
+    from .feedback_engine import adaptive_daily_picks, print_adaptive_picks
+    with console.status("[yellow]Computing adaptive daily picks...[/]"):
+        picks = adaptive_daily_picks(top=top, table_name=table)
+    print_adaptive_picks(picks)
+
+
 if __name__ == "__main__":
     app()
