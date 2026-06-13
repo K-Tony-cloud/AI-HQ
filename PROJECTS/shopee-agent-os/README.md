@@ -235,6 +235,66 @@ shopee export-opportunities --top 500 --output exports/all_top500.csv
 
 ---
 
+## Phase 4 — Affiliate Performance Engine
+
+### 13. Import Affiliate Report
+
+นำเข้า Shopee Affiliate Report CSV (Orders / Click / Commission) พร้อม auto-detect schema
+รองรับหลายไฟล์ — append เข้า DuckDB โดยอัตโนมัติ
+
+```bash
+shopee import-affiliate-report reports/orders_june.csv
+shopee import-affiliate-report reports/commission_q2.csv
+```
+
+### 14. Daily Performance
+
+ดู performance รายวัน: Clicks, Orders, Conv.%, EPC, Revenue, Commission
+
+```bash
+shopee daily-performance
+shopee daily-performance --days 14
+```
+
+### 15. Product Performance
+
+ตาราง ranked สินค้า: Clicks, Orders, Conv.%, EPC, Revenue, Commission
+
+```bash
+shopee product-performance --top 50
+```
+
+### 16. Top Profit Products
+
+จัดอันดับสินค้าด้วย Commission → EPC → Conversion Rate
+
+```bash
+shopee top-profit-products
+shopee top-profit-products --top 50
+```
+
+### 17. Merge Product Intelligence
+
+Join ข้อมูล affiliate performance กับ 1M product discovery data  
+สร้าง `profit_intelligence` view พร้อม `profit_score`
+
+```bash
+shopee merge-product-intelligence
+```
+
+`profit_score = commission×0.40 + epc×1000×0.30 + conversion_rate×0.30`
+
+### 18. Profit Opportunities
+
+ค้นหาสินค้า high commission + good conversion + low competition
+
+```bash
+shopee profit-opportunities --top 30
+shopee profit-opportunities --min-commission 50 --min-conversion 2
+```
+
+---
+
 ## Opportunity Score Formula
 
 ```

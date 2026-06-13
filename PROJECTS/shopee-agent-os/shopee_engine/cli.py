@@ -640,5 +640,199 @@ def cmd_queue_approve(
         raise typer.Exit(1)
 
 
+# ===========================================================================
+# Phase 4 — Affiliate Performance Engine
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# import-affiliate-report
+# ---------------------------------------------------------------------------
+
+@app.command("import-affiliate-report")
+def cmd_import_affiliate_report(
+    csv_path: str = typer.Argument(..., help="Path to Shopee Affiliate report CSV"),
+) -> None:
+    """
+    Import a Shopee Affiliate Report CSV (Orders / Click / Commission).
+    Auto-detects schema and appends to existing performance data.
+
+    Example:
+        shopee import-affiliate-report reports/orders_2024_06.csv
+        shopee import-affiliate-report reports/*.csv
+    """
+    from .performance_engine import import_affiliate_report, print_import_result
+
+    paths = list(Path(".").glob(csv_path)) if "*" in csv_path else [Path(csv_path)]
+    if not paths:
+        console.print(f"[red]No files matched:[/] {csv_path}")
+        raise typer.Exit(1)
+
+    for p in paths:
+        with console.status(f"[yellow]Importing {p.name}...[/]"):
+            try:
+                result = import_affiliate_report(p)
+            except FileNotFoundError as e:
+                console.print(f"[red]Error:[/] {e}")
+                raise typer.Exit(1)
+            except Exception as e:
+                console.print(f"[red]Import failed:[/] {e}")
+                raise typer.Exit(1)
+        print_import_result(result)
+
+
+# ---------------------------------------------------------------------------
+# daily-performance
+# ---------------------------------------------------------------------------
+
+@app.command("daily-performance")
+def cmd_daily_performance(
+    days: int = typer.Option(30, "--days", "-d", help="Number of days to show"),
+) -> None:
+    """
+    Show daily affiliate performance: Clicks, Orders, Conv.%, EPC, Revenue, Commission.
+
+    Example:
+        shopee daily-performance
+        shopee daily-performance --days 14
+    """
+    from .performance_engine import daily_performance, print_daily_performance
+
+    with console.status("[yellow]Loading daily performance...[/]"):
+        try:
+            df = daily_performance(days=days)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_daily_performance(df)
+
+
+# ---------------------------------------------------------------------------
+# product-performance
+# ---------------------------------------------------------------------------
+
+@app.command("product-performance")
+def cmd_product_performance(
+    top: int = typer.Option(50, "--top", "-n", help="Number of products to show"),
+) -> None:
+    """
+    Ranked table of Product, Clicks, Orders, Conv.%, EPC, Revenue, Commission.
+
+    Example:
+        shopee product-performance --top 50
+    """
+    from .performance_engine import product_performance, print_product_performance
+
+    with console.status("[yellow]Loading product performance...[/]"):
+        try:
+            df = product_performance(top=top)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_product_performance(df, top)
+
+
+# ---------------------------------------------------------------------------
+# top-profit-products
+# ---------------------------------------------------------------------------
+
+@app.command("top-profit-products")
+def cmd_top_profit_products(
+    top: int = typer.Option(30, "--top", "-n", help="Number of products to show"),
+) -> None:
+    """
+    Top products ranked by Commission → EPC → Conversion Rate.
+
+    Example:
+        shopee top-profit-products
+        shopee top-profit-products --top 50
+    """
+    from .performance_engine import top_profit_products, print_top_profit
+
+    with console.status("[yellow]Ranking profit products...[/]"):
+        try:
+            df = top_profit_products(top=top)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_top_profit(df, top)
+
+
+# ---------------------------------------------------------------------------
+# merge-product-intelligence
+# ---------------------------------------------------------------------------
+
+@app.command("merge-product-intelligence")
+def cmd_merge_product_intelligence(
+    table: str = typer.Option("products", "--table", "-t", help="Product datafeed table name"),
+) -> None:
+    """
+    Join affiliate performance data with product discovery data.
+    Creates 'profit_intelligence' view with profit_score.
+
+    profit_score = commission×0.40 + epc×1000×0.30 + conversion_rate×0.30
+
+    Example:
+        shopee merge-product-intelligence
+    """
+    from .performance_engine import merge_product_intelligence
+
+    with console.status("[yellow]Merging affiliate + discovery data...[/]"):
+        try:
+            count = merge_product_intelligence(table_name=table)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    console.print(
+        Panel(
+            f"[bold green]✓ profit_intelligence view created[/]\n"
+            f"  [cyan]{count:,}[/] product records merged\n"
+            f"  Use [bold]shopee profit-opportunities[/] to query results",
+            title="[bold]Merge Complete[/]",
+            expand=False,
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# profit-opportunities
+# ---------------------------------------------------------------------------
+
+@app.command("profit-opportunities")
+def cmd_profit_opportunities(
+    top:            int           = typer.Option(30,   "--top",            "-n", help="Number of results"),
+    min_commission: float         = typer.Option(0.0,  "--min-commission",       help="Minimum total commission (฿)"),
+    min_conversion: float         = typer.Option(0.0,  "--min-conversion",       help="Minimum conversion rate (%)"),
+    category:       Optional[str] = typer.Option(None, "--category",       "-c", help="Filter by category"),
+) -> None:
+    """
+    Find high commission + good conversion + low competition products.
+
+    Profit Score = commission×0.40 + epc×1000×0.30 + conversion_rate×0.30
+
+    Example:
+        shopee profit-opportunities --top 30
+        shopee profit-opportunities --min-commission 50 --min-conversion 2
+    """
+    from .performance_engine import profit_opportunities, print_profit_opportunities
+
+    with console.status("[yellow]Finding profit opportunities...[/]"):
+        try:
+            df = profit_opportunities(
+                top=top,
+                min_commission=min_commission,
+                min_conversion=min_conversion,
+                category=category,
+            )
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_profit_opportunities(df, top)
+
+
 if __name__ == "__main__":
     app()
