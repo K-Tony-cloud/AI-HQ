@@ -413,13 +413,112 @@ shopee show-schema
 
 ---
 
+## Phase 6 — Discord Command Center
+
+### Setup
+
+#### 1. Create a Discord Bot
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. **New Application** → give it a name (e.g. `shopee-intelligence`)
+3. **Bot** tab → **Reset Token** → copy the token
+4. Enable **Message Content Intent** under Privileged Gateway Intents
+5. **OAuth2 → URL Generator** → Scopes: `bot`, `applications.commands`
+6. Bot Permissions: `Send Messages`, `Embed Links`, `Read Message History`
+7. Copy the generated URL and invite the bot to your server
+
+#### 2. Configure .env
+
+```bash
+cp .env.example .env
+# Edit .env and fill in:
+# DISCORD_TOKEN=your_bot_token_here
+# DISCORD_GUILD_ID=your_server_id_here
+```
+
+To get your Guild ID: enable **Developer Mode** (User Settings → Advanced), then right-click your server → **Copy Server ID**.
+
+#### 3. Run the Bot
+
+```bash
+# Make sure shopee-agent-os is installed and datafeed is imported
+shopee import-datafeed /path/to/ShopeeDatafeed.csv
+
+# Start the Discord bot
+shopee-discord
+# or
+python -m discord_bot
+```
+
+Commands sync instantly to your guild on startup.
+
+---
+
+### Discord Slash Commands
+
+| Command | Description | Options |
+|---------|-------------|---------|
+| `/daily-picks` | Daily product briefing across all buckets | `top` |
+| `/top-opportunities` | Top products by opportunity score | `category`, `top` |
+| `/top-viral` | Top viral products for TikTok/Reels | `category`, `top` |
+| `/top-profit` | Top affiliate products by commission | `top` |
+| `/find-product` | Search products by keyword | `keyword`, `category` |
+| `/content-pack` | Full content pack (hooks/captions/scripts/CTA) | `keyword` |
+| `/queue` | Show content queue | — |
+| `/approve` | Approve a queue item (draft → approved) | `id` |
+| `/morning-brief` | Morning briefing from Operator Center | `top` |
+| `/executive-summary` | Full executive summary | — |
+
+### Recommended Channel Setup
+
+| Channel | Commands to use |
+|---------|----------------|
+| `#daily-picks` | `/daily-picks` |
+| `#viral-products` | `/top-viral` |
+| `#profit-products` | `/top-profit` |
+| `#content-queue` | `/content-pack`, `/queue`, `/approve` |
+| `#analytics` | `/top-opportunities`, `/find-product` |
+| `#executive-summary` | `/morning-brief`, `/executive-summary` |
+
+### Bot Architecture
+
+```
+discord_bot/
+├── bot.py              # ShopeeBot class — loads cogs, syncs commands
+├── config.py           # Loads DISCORD_TOKEN, GUILD_ID from .env
+├── commands/
+│   ├── discovery.py    # /daily-picks /top-opportunities /top-viral /find-product
+│   ├── performance.py  # /top-profit
+│   ├── content.py      # /content-pack /queue /approve
+│   └── operator.py     # /morning-brief /executive-summary
+├── embeds/
+│   ├── base.py         # PaginatedView + color palette
+│   ├── discovery_embeds.py
+│   ├── performance_embeds.py
+│   ├── content_embeds.py
+│   └── operator_embeds.py
+├── services/           # Thin wrappers — no business logic duplication
+│   ├── discovery_service.py
+│   ├── performance_service.py
+│   ├── content_service.py
+│   └── operator_service.py
+└── tests/
+    └── test_commands.py  # 18 mock-based tests (no Discord connection needed)
+```
+
+Run tests: `python -m pytest discord_bot/tests/ -v`
+
+---
+
 ## Tech Stack
 
-| Library   | Version   | Role                                 |
-|-----------|-----------|--------------------------------------|
-| Python    | 3.12+     | Runtime                              |
-| DuckDB    | ≥ 1.1.0   | Analytical database engine           |
-| Pandas    | ≥ 2.2.0   | DataFrame output layer               |
-| PyArrow   | ≥ 16.0.0  | Arrow IPC / Parquet support          |
-| Rich      | ≥ 13.7.0  | Terminal UI (tables, progress, color)|
-| Typer     | ≥ 0.12.0  | CLI framework                        |
+| Library        | Version   | Role                                     |
+|----------------|-----------|------------------------------------------|
+| Python         | 3.12+     | Runtime                                  |
+| DuckDB         | ≥ 1.1.0   | Analytical database engine               |
+| Pandas         | ≥ 2.2.0   | DataFrame output layer                   |
+| PyArrow        | ≥ 16.0.0  | Arrow IPC / Parquet support              |
+| Rich           | ≥ 13.7.0  | Terminal UI (tables, progress, color)    |
+| Typer          | ≥ 0.12.0  | CLI framework                            |
+| discord.py     | ≥ 2.3.0   | Discord bot + slash commands             |
+| python-dotenv  | ≥ 1.0.0   | .env configuration loading               |
