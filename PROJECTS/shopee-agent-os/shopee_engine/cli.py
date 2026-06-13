@@ -206,5 +206,212 @@ def cmd_summary(
         raise typer.Exit(1)
 
 
+# ---------------------------------------------------------------------------
+# find-winning-products
+# ---------------------------------------------------------------------------
+
+@app.command("find-winning-products")
+def cmd_find_winning(
+    keyword:         Optional[str]   = typer.Option(None,  "--keyword",          "-k",  help="Search keyword in title"),
+    category:        Optional[str]   = typer.Option(None,  "--category",         "-c",  help="Filter by category (any level)"),
+    min_sold:        Optional[int]   = typer.Option(None,  "--min-sold",                help="Minimum item_sold"),
+    min_rating:      Optional[float] = typer.Option(None,  "--min-rating",              help="Minimum item_rating"),
+    min_shop_rating: Optional[float] = typer.Option(None,  "--min-shop-rating",         help="Minimum shop_rating"),
+    price_min:       Optional[float] = typer.Option(None,  "--price-min",               help="Minimum sale_price"),
+    price_max:       Optional[float] = typer.Option(None,  "--price-max",               help="Maximum sale_price"),
+    min_discount:    Optional[float] = typer.Option(None,  "--min-discount",            help="Minimum discount_percentage"),
+    top:             int             = typer.Option(30,    "--top",              "-n",  help="Max results"),
+    table:           str             = typer.Option("products", "--table",       "-t",  help="Table name"),
+) -> None:
+    """
+    Find winning products for affiliate/content creation with multi-filter + opportunity_score.
+
+    Example:
+        shopee find-winning-products --category Face --min-sold 500 --min-shop-rating 4.8 --price-min 50 --price-max 1500 --top 30
+        shopee find-winning-products --keyword ลิปสติก --min-discount 20 --top 20
+    """
+    from .discovery import find_winning_products, print_winning_products
+
+    filters = []
+    if keyword:         filters.append(f"keyword={keyword}")
+    if category:        filters.append(f"cat={category}")
+    if min_sold:        filters.append(f"sold≥{min_sold}")
+    if min_shop_rating: filters.append(f"shop★≥{min_shop_rating}")
+    if price_min:       filters.append(f"฿≥{price_min:.0f}")
+    if price_max:       filters.append(f"฿≤{price_max:.0f}")
+    if min_discount:    filters.append(f"disc≥{min_discount:.0f}%")
+
+    with console.status("[yellow]Finding winning products...[/]"):
+        try:
+            df = find_winning_products(
+                keyword=keyword, category=category, min_sold=min_sold,
+                min_rating=min_rating, min_shop_rating=min_shop_rating,
+                price_min=price_min, price_max=price_max,
+                min_discount=min_discount, top=top, table_name=table,
+            )
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_winning_products(df, filters_desc=", ".join(filters))
+
+
+# ---------------------------------------------------------------------------
+# top-opportunities
+# ---------------------------------------------------------------------------
+
+@app.command("top-opportunities")
+def cmd_top_opportunities(
+    top:      int          = typer.Option(30,        "--top",      "-n", help="Number of results"),
+    category: Optional[str] = typer.Option(None,    "--category", "-c", help="Filter by category"),
+    table:    str          = typer.Option("products","--table",    "-t", help="Table name"),
+) -> None:
+    """
+    Rank all products by opportunity_score (sales×0.40 + likes×0.15 + discount×0.15 + ratings×0.30).
+
+    Example:
+        shopee top-opportunities --top 50
+        shopee top-opportunities --category Beauty --top 30
+    """
+    from .discovery import top_opportunities, print_top_opportunities
+
+    with console.status("[yellow]Computing opportunity scores...[/]"):
+        try:
+            df = top_opportunities(top=top, category=category, table_name=table)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_top_opportunities(df, top)
+
+
+# ---------------------------------------------------------------------------
+# top-viral
+# ---------------------------------------------------------------------------
+
+@app.command("top-viral")
+def cmd_top_viral(
+    top:       int            = typer.Option(30,    "--top",       "-n", help="Number of results"),
+    price_max: float          = typer.Option(500.0, "--price-max",       help="Max price (default ฿500)"),
+    category:  Optional[str]  = typer.Option(None,  "--category",  "-c", help="Filter by category"),
+    table:     str            = typer.Option("products", "--table", "-t", help="Table name"),
+) -> None:
+    """
+    Find products best suited for TikTok/Reels content.
+
+    Scores by: item_sold×0.35 + likes×0.35 + discount%×100×0.30
+    Filters: price ≤ price_max, sold ≥ 50.
+
+    Example:
+        shopee top-viral --price-max 500 --top 30
+        shopee top-viral --category Beauty --price-max 300
+    """
+    from .discovery import top_viral, print_top_viral
+
+    with console.status("[yellow]Finding viral products...[/]"):
+        try:
+            df = top_viral(top=top, price_max=price_max, category=category, table_name=table)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_top_viral(df, top, price_max)
+
+
+# ---------------------------------------------------------------------------
+# top-niche
+# ---------------------------------------------------------------------------
+
+@app.command("top-niche")
+def cmd_top_niche(
+    top:          int = typer.Option(20,   "--top",          "-n",  help="Number of categories"),
+    min_products: int = typer.Option(20,   "--min-products",        help="Min products per category"),
+    max_products: int = typer.Option(3000, "--max-products",        help="Max products per category (niche ceiling)"),
+    table:        str = typer.Option("products", "--table",  "-t",  help="Table name"),
+) -> None:
+    """
+    Find niche categories: high avg_sales but low product count (market gap signal).
+
+    Example:
+        shopee top-niche --top 20
+        shopee top-niche --max-products 1000 --top 30
+    """
+    from .discovery import top_niche, print_top_niche
+
+    with console.status("[yellow]Analyzing niche categories...[/]"):
+        try:
+            df = top_niche(top=top, min_products=min_products, max_products=max_products, table_name=table)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_top_niche(df, top)
+
+
+# ---------------------------------------------------------------------------
+# daily-picks
+# ---------------------------------------------------------------------------
+
+@app.command("daily-picks")
+def cmd_daily_picks(
+    top:   int = typer.Option(10,        "--top",   "-n", help="Products per category bucket"),
+    table: str = typer.Option("products","--table", "-t", help="Table name"),
+) -> None:
+    """
+    Daily product recommendations across 7 content buckets:
+    Gadget, Home, Viral TikTok, Mobile Accessories, Mother & Baby, Health, Camping.
+
+    Example:
+        shopee daily-picks --top 10
+    """
+    from .discovery import daily_picks, print_daily_picks
+
+    console.print(
+        Panel("[bold green]Daily Picks[/]  — top products per content category", expand=False)
+    )
+    with console.status("[yellow]Selecting daily picks...[/]"):
+        try:
+            picks = daily_picks(top=top, table_name=table)
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_daily_picks(picks)
+
+
+# ---------------------------------------------------------------------------
+# export-opportunities
+# ---------------------------------------------------------------------------
+
+@app.command("export-opportunities")
+def cmd_export_opportunities(
+    output:   str          = typer.Option("exports/opportunities.csv", "--output", "-o", help="Output CSV path"),
+    category: Optional[str] = typer.Option(None,    "--category", "-c", help="Filter by category"),
+    keyword:  Optional[str] = typer.Option(None,    "--keyword",  "-k", help="Filter by keyword"),
+    top:      int          = typer.Option(100,      "--top",      "-n", help="Max rows to export"),
+    table:    str          = typer.Option("products","--table",   "-t", help="Table name"),
+) -> None:
+    """
+    Export top opportunities to CSV (DuckDB COPY TO — no RAM overhead).
+
+    Example:
+        shopee export-opportunities --category Face --top 100 --output exports/face_opportunities.csv
+        shopee export-opportunities --keyword ลิปสติก --top 200 --output exports/lip.csv
+    """
+    from .discovery import export_opportunities
+
+    with console.status(f"[yellow]Exporting top {top} opportunities...[/]"):
+        try:
+            out_path = export_opportunities(
+                output=output, category=category, keyword=keyword,
+                top=top, table_name=table,
+            )
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    console.print(f"[bold green]Exported {top} rows →[/] {out_path}")
+
+
 if __name__ == "__main__":
     app()

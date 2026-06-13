@@ -156,6 +156,101 @@ shopee summary
 
 ---
 
+## Phase 1.5 — Product Discovery Engine
+
+### 7. Find Winning Products
+
+ค้นหาสินค้าน่าทำคอนเทนต์/น่าทำ Affiliate ด้วย multi-filter + opportunity_score
+
+```bash
+# filter หลาย criteria พร้อมกัน
+shopee find-winning-products --category Face --min-sold 500 --min-shop-rating 4.8 --price-min 50 --price-max 1500 --top 30
+
+# ค้นด้วย keyword + discount
+shopee find-winning-products --keyword ลิปสติก --min-discount 20 --top 20
+
+# สินค้า Health ราคาไม่เกิน 1000 ยอดขายดี
+shopee find-winning-products --category Health --max-price 1000 --min-sold 200
+```
+
+Options:
+- `--keyword` — ค้นใน title
+- `--category` — filter category (ทุก level)
+- `--min-sold` — ขั้นต่ำ item_sold
+- `--min-rating` — ขั้นต่ำ item_rating
+- `--min-shop-rating` — ขั้นต่ำ shop_rating
+- `--price-min` / `--price-max` — ช่วงราคา sale_price
+- `--min-discount` — ส่วนลดขั้นต่ำ (%)
+- `--top` — จำนวนผลลัพธ์
+
+### 8. Top Opportunities
+
+จัดอันดับสินค้าด้วย opportunity_score:
+`item_sold×0.40 + likes×0.15 + discount%×0.15 + shop_rating×100×0.15 + item_rating×100×0.15`
+
+```bash
+shopee top-opportunities --top 30
+shopee top-opportunities --category Beauty --top 50
+```
+
+### 9. Top Viral
+
+หาสินค้าเหมาะทำ TikTok/Reels — ราคาต่ำ, ยอดขายดี, likes สูง, ส่วนลดดี
+
+```bash
+shopee top-viral --price-max 500 --top 30
+shopee top-viral --category Beauty --price-max 300 --top 20
+```
+
+Viral score = `item_sold×0.35 + likes×0.35 + discount%×100×0.30`  
+Filter: price ≤ price_max, item_sold ≥ 50
+
+### 10. Top Niche
+
+หา category เฉพาะที่มี avg_sales สูง แต่จำนวนสินค้าน้อย → market gap signal
+
+```bash
+shopee top-niche --top 20
+shopee top-niche --max-products 1000 --top 30
+```
+
+### 11. Daily Picks
+
+สินค้าแนะนำประจำวัน แยกตาม 7 content buckets:
+Gadget, Home, Viral TikTok, Mobile Accessories, Mother & Baby, Health, Camping
+
+```bash
+shopee daily-picks --top 10
+```
+
+### 12. Export Opportunities
+
+Export ผลลัพธ์ไปเป็น CSV โดยตรงจาก DuckDB (ไม่โหลดเข้า RAM)
+
+```bash
+shopee export-opportunities --category Face --top 100 --output exports/face_opportunities.csv
+shopee export-opportunities --keyword ลิปสติก --top 200 --output exports/lip.csv
+shopee export-opportunities --top 500 --output exports/all_top500.csv
+```
+
+---
+
+## Opportunity Score Formula
+
+```
+opportunity_score =
+  (item_sold          × 0.40)
++ (likes              × 0.15)
++ (discount_%         × 0.15)
++ (shop_rating × 100  × 0.15)
++ (item_rating × 100  × 0.15)   ← falls back to shop_rating if item_rating absent
+```
+
+> **Note:** `likes` มีผลสูงมากในข้อมูลจริง (บางสินค้ามี likes 100K+)  
+> ปรับ weight ได้ใน `discovery.py → _opportunity_score_expr()`
+
+---
+
 ## Column Detection
 
 โปรเจกต์นี้ detect column names อัตโนมัติจาก alias ใน `config.py`  
