@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# DuckDB databases (can be large)
+data/*.duckdb
+data/*.duckdb.wal
+data/*.csv
+data/*.parquet
+
+# Keep data dir tracked
+!data/.gitkeep
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
