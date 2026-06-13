@@ -413,5 +413,232 @@ def cmd_export_opportunities(
     console.print(f"[bold green]Exported {top} rows →[/] {out_path}")
 
 
+# ===========================================================================
+# Phase 3 — Content Intelligence Engine
+# ===========================================================================
+
+def _provider_note(provider: str) -> str:
+    if provider == "template":
+        return "[dim](template mode — set ANTHROPIC_API_KEY or OPENAI_API_KEY for AI)[/]"
+    return f"[dim](AI: {provider})[/]"
+
+
+# ---------------------------------------------------------------------------
+# generate-hook
+# ---------------------------------------------------------------------------
+
+@app.command("generate-hook")
+def cmd_generate_hook(
+    keyword:  str = typer.Argument(..., help="Product keyword to search"),
+    provider: str = typer.Option("auto", "--provider", "-p",
+                                 help="AI provider: auto | claude | openai | template"),
+    table:    str = typer.Option("products", "--table", "-t", help="Table name"),
+) -> None:
+    """
+    Generate 10 affiliate hooks (5 types × 2) for a product.
+
+    Types: Viral, Curiosity, Problem/Solution, Review, Before/After
+
+    Example:
+        shopee generate-hook "JisuLife"
+        shopee generate-hook "ลิปสติก" --provider claude
+    """
+    from .content_engine import generate_hook, print_hooks, detect_provider
+
+    prov = provider if provider != "auto" else detect_provider()
+    with console.status(f"[yellow]Generating hooks via {prov}...[/]"):
+        try:
+            result = generate_hook(keyword, provider=provider, table_name=table)
+        except (RuntimeError, ValueError) as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_hooks(result)
+    console.print(_provider_note(result.get("provider", prov)))
+
+
+# ---------------------------------------------------------------------------
+# generate-caption
+# ---------------------------------------------------------------------------
+
+@app.command("generate-caption")
+def cmd_generate_caption(
+    keyword:  str = typer.Argument(..., help="Product keyword to search"),
+    provider: str = typer.Option("auto", "--provider", "-p",
+                                 help="AI provider: auto | claude | openai | template"),
+    table:    str = typer.Option("products", "--table", "-t", help="Table name"),
+) -> None:
+    """
+    Generate 5 TikTok + 3 Facebook + 5 Reels captions.
+
+    Example:
+        shopee generate-caption "JisuLife"
+        shopee generate-caption "Dr.PONG" --provider openai
+    """
+    from .content_engine import generate_caption, print_captions, detect_provider
+
+    prov = provider if provider != "auto" else detect_provider()
+    with console.status(f"[yellow]Generating captions via {prov}...[/]"):
+        try:
+            result = generate_caption(keyword, provider=provider, table_name=table)
+        except (RuntimeError, ValueError) as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_captions(result)
+    console.print(_provider_note(result.get("provider", prov)))
+
+
+# ---------------------------------------------------------------------------
+# generate-script
+# ---------------------------------------------------------------------------
+
+@app.command("generate-script")
+def cmd_generate_script(
+    keyword:  str = typer.Argument(..., help="Product keyword to search"),
+    provider: str = typer.Option("auto", "--provider", "-p",
+                                 help="AI provider: auto | claude | openai | template"),
+    table:    str = typer.Option("products", "--table", "-t", help="Table name"),
+) -> None:
+    """
+    Generate TikTok scripts for 15s, 30s, and 60s.
+
+    Example:
+        shopee generate-script "JisuLife"
+    """
+    from .content_engine import generate_script, print_scripts, detect_provider
+
+    prov = provider if provider != "auto" else detect_provider()
+    with console.status(f"[yellow]Generating scripts via {prov}...[/]"):
+        try:
+            result = generate_script(keyword, provider=provider, table_name=table)
+        except (RuntimeError, ValueError) as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_scripts(result)
+    console.print(_provider_note(result.get("provider", prov)))
+
+
+# ---------------------------------------------------------------------------
+# content-pack
+# ---------------------------------------------------------------------------
+
+@app.command("content-pack")
+def cmd_content_pack(
+    keyword:  str = typer.Argument(..., help="Product keyword to search"),
+    provider: str = typer.Option("auto", "--provider", "-p",
+                                 help="AI provider: auto | claude | openai | template"),
+    table:    str = typer.Option("products", "--table", "-t", help="Table name"),
+) -> None:
+    """
+    Generate a full content package: hooks + captions + scripts + CTA + hashtags.
+
+    Example:
+        shopee content-pack "JisuLife"
+        shopee content-pack "Dr.PONG" --provider claude
+    """
+    from .content_engine import content_pack, print_content_pack, detect_provider
+
+    prov = provider if provider != "auto" else detect_provider()
+    with console.status(f"[yellow]Building content pack via {prov}...[/]"):
+        try:
+            result = content_pack(keyword, provider=provider, table_name=table)
+        except (RuntimeError, ValueError) as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_content_pack(result)
+    console.print(_provider_note(result.get("provider", prov)))
+
+
+# ---------------------------------------------------------------------------
+# queue-add
+# ---------------------------------------------------------------------------
+
+@app.command("queue-add")
+def cmd_queue_add(
+    keyword:  str = typer.Argument(..., help="Product keyword — finds best match in DuckDB"),
+    provider: str = typer.Option("auto", "--provider", "-p",
+                                 help="AI provider: auto | claude | openai | template"),
+    table:    str = typer.Option("products", "--table", "-t", help="Table name"),
+) -> None:
+    """
+    Generate a full content pack and save it to the content queue (status: draft).
+
+    Example:
+        shopee queue-add "JisuLife"
+        shopee queue-add "ลิปสติก" --provider claude
+    """
+    from .content_engine import queue_add, detect_provider
+
+    prov = provider if provider != "auto" else detect_provider()
+    with console.status(f"[yellow]Generating & saving content via {prov}...[/]"):
+        try:
+            row_id = queue_add(keyword, provider=provider, table_name=table)
+        except (RuntimeError, ValueError) as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    console.print(
+        f"[bold green]✓ Saved to queue[/]  ID=[bold]{row_id}[/]  "
+        f"keyword=[cyan]{keyword}[/]  status=[yellow]draft[/]  "
+        + _provider_note(prov)
+    )
+    console.print(f"  Approve with: [dim]shopee queue-approve --id {row_id}[/]")
+
+
+# ---------------------------------------------------------------------------
+# queue-list
+# ---------------------------------------------------------------------------
+
+@app.command("queue-list")
+def cmd_queue_list() -> None:
+    """
+    Show all items in the content queue.
+
+    Example:
+        shopee queue-list
+    """
+    from .content_engine import queue_list, print_queue
+
+    try:
+        df = queue_list()
+    except RuntimeError as e:
+        console.print(f"[red]Error:[/] {e}")
+        raise typer.Exit(1)
+
+    print_queue(df)
+
+
+# ---------------------------------------------------------------------------
+# queue-approve
+# ---------------------------------------------------------------------------
+
+@app.command("queue-approve")
+def cmd_queue_approve(
+    id: int = typer.Option(..., "--id", help="Queue item ID to approve"),
+) -> None:
+    """
+    Change a queue item's status from draft → approved.
+
+    Example:
+        shopee queue-approve --id 1
+    """
+    from .content_engine import queue_approve
+
+    try:
+        ok = queue_approve(id)
+    except RuntimeError as e:
+        console.print(f"[red]Error:[/] {e}")
+        raise typer.Exit(1)
+
+    if ok:
+        console.print(f"[bold green]✓ Approved[/]  ID={id}  status → [green]approved[/]")
+    else:
+        console.print(f"[red]ID {id} not found in queue.[/]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
