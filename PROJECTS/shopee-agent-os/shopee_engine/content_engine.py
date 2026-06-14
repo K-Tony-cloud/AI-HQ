@@ -874,6 +874,20 @@ def print_content_pack(result: dict) -> None:
     console.print(Rule("[bold]🏷  HASHTAGS", style="dim"))
     console.print(f"  {content.get('hashtags', '')}")
 
+    # Affiliate link status
+    console.print(Rule("[bold]🔗 AFFILIATE LINK", style="green"))
+    raw_link = p.get("product_short_link") or p.get("product_id", "")
+    from .affiliate_link_engine import get_affiliate_link
+    aff = get_affiliate_link(str(raw_link)) if raw_link else None
+    if aff:
+        console.print(f"  [bold green]✅ Ready to post:[/] [cyan]{aff}[/]")
+    else:
+        console.print(
+            "  [bold red]⚠ Needs affiliate link[/]\n"
+            "  Run: [dim]shopee export-link-tasks[/]  →  fill CSV  →  "
+            "[dim]shopee import-affiliate-links <file>[/]"
+        )
+
 
 def print_queue(df: pd.DataFrame) -> None:
     if df.empty:

@@ -1181,5 +1181,69 @@ def cmd_adaptive_daily_picks(
     print_adaptive_picks(picks)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 9: Manual Affiliate Link Workflow
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.command("export-link-tasks")
+def cmd_export_link_tasks(
+    top:      int = typer.Option(50,            "--top",      "-n", help="Top N products to include"),
+    campaign: str = typer.Option("daily-picks", "--campaign", "-c", help="Campaign tag (sub_id1)"),
+    platform: str = typer.Option("tiktok",      "--platform", "-p", help="Platform tag (sub_id2)"),
+    table:    str = typer.Option("products",    "--table",    "-t", help="Source table"),
+) -> None:
+    """
+    Export top products that need affiliate links to CSV.
+
+    Open the file, go to affiliate.shopee.co.th → Create Link,
+    paste product_link, generate, fill affiliate_link column, then import.
+
+    Example:
+        shopee export-link-tasks --top 50 --campaign daily-picks --platform tiktok
+    """
+    from .affiliate_link_engine import export_link_tasks, print_export_result
+    with console.status("[yellow]Exporting link tasks...[/]"):
+        data = export_link_tasks(top=top, campaign=campaign, platform=platform, table_name=table)
+    print_export_result(data)
+
+
+@app.command("import-affiliate-links")
+def cmd_import_affiliate_links(
+    csv_file: str = typer.Argument(..., help="Path to filled CSV with affiliate_link column"),
+) -> None:
+    """
+    Import affiliate links from a CSV you filled in from the Shopee portal.
+
+    Required CSV columns: product_link, affiliate_link
+    Optional: sub_id1..sub_id5, campaign, platform
+
+    Example:
+        shopee import-affiliate-links exports/link-tasks/2026-06-14-daily-picks-tiktok.csv
+    """
+    from .affiliate_link_engine import import_affiliate_links, print_import_result
+    with console.status(f"[yellow]Importing affiliate links...[/]"):
+        data = import_affiliate_links(csv_file)
+    print_import_result(data)
+
+
+@app.command("link-coverage-report")
+def cmd_link_coverage_report(
+    top:   int = typer.Option(50,         "--top",   "-n", help="Top N products to check"),
+    table: str = typer.Option("products", "--table", "-t", help="Source table"),
+) -> None:
+    """
+    Show affiliate link coverage for top products.
+
+    Displays which products have affiliate links and which are missing.
+
+    Example:
+        shopee link-coverage-report --top 50
+    """
+    from .affiliate_link_engine import link_coverage_report, print_link_coverage
+    with console.status("[yellow]Building link coverage report...[/]"):
+        data = link_coverage_report(top=top, table_name=table)
+    print_link_coverage(data)
+
+
 if __name__ == "__main__":
     app()

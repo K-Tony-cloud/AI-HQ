@@ -563,6 +563,9 @@ def daily_picks(
 
 
 def print_daily_picks(picks: dict[str, pd.DataFrame]) -> None:
+    from .affiliate_link_engine import get_all_affiliate_links, _normalize_link
+    aff_map = get_all_affiliate_links()
+
     bucket_colors = {
         "Gadget":             "bold cyan",
         "Home":               "bold blue",
@@ -579,6 +582,16 @@ def print_daily_picks(picks: dict[str, pd.DataFrame]) -> None:
             console.print(f"  [dim]No products found for this category.[/]\n")
             continue
         _print_table(df, f"[{color}]{bucket}[/]  [dim]({len(df)} picks)[/]")
+        # Affiliate link status per product
+        for _, row in df.iterrows():
+            raw_link = str(row.get("product_short_link", "") or "")
+            norm     = _normalize_link(raw_link)
+            aff      = aff_map.get(norm) or aff_map.get(raw_link)
+            title_s  = str(row.get("title", ""))[:40]
+            if aff:
+                console.print(f"  [green]🔗 {title_s}[/]  [dim]{aff[:60]}[/]")
+            else:
+                console.print(f"  [red]⚠  {title_s}[/]  [dim]Needs affiliate link[/]")
         console.print()
 
 
