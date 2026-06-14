@@ -15,7 +15,7 @@ async def run_weekly_report(bot=None) -> None:
     """
     logger.info("[job:weekly_report] Starting")
 
-    from discord_bot.config import CHANNEL_ANALYTICS
+    from discord_bot.config import CHANNEL_LEARNING_REPORTS
     from discord_bot.embeds.scheduler_embeds import build_weekly_report_embed
     from scheduler.notifications.discord_notify import send_to_channel
     from shopee_engine.operator_center import daily_report, executive_summary
@@ -49,7 +49,7 @@ async def run_weekly_report(bot=None) -> None:
 
         await send_to_channel(
             bot,
-            CHANNEL_ANALYTICS,
+            CHANNEL_LEARNING_REPORTS,
             [embed],
             content="📊 **Weekly Affiliate Report**",
             files=files,

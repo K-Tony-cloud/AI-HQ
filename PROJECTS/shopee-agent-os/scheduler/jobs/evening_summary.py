@@ -14,7 +14,7 @@ async def run_evening_summary(bot=None) -> None:
     """
     logger.info("[job:evening_summary] Starting")
 
-    from discord_bot.config import CHANNEL_EXECUTIVE
+    from discord_bot.config import CHANNEL_REVENUE
     from discord_bot.embeds.operator_embeds import build_executive_summary_embeds
     from discord_bot.services.operator_service import get_executive_summary
     from scheduler.notifications.discord_notify import send_to_channel
@@ -23,7 +23,7 @@ async def run_evening_summary(bot=None) -> None:
         result = get_executive_summary()
         if result["success"]:
             embeds = build_executive_summary_embeds(result["data"])
-            await send_to_channel(bot, CHANNEL_EXECUTIVE, embeds)
+            await send_to_channel(bot, CHANNEL_REVENUE, embeds)
             logger.info("[job:evening_summary] Sent %d embeds", len(embeds))
         else:
             logger.error("[job:evening_summary] executive_summary failed: %s", result["error"])

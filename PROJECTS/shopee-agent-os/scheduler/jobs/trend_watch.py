@@ -14,7 +14,7 @@ async def run_trend_watch(bot=None) -> None:
     """
     logger.info("[job:trend_watch] Starting")
 
-    from discord_bot.config import CHANNEL_ANALYTICS
+    from discord_bot.config import CHANNEL_TREND_WATCH
     from discord_bot.embeds.scheduler_embeds import build_trend_watch_embeds
     from scheduler.notifications.discord_notify import send_to_channel
     from shopee_engine.operator_center import trend_watch
@@ -22,7 +22,7 @@ async def run_trend_watch(bot=None) -> None:
     try:
         data = trend_watch(top=10)
         embeds = build_trend_watch_embeds(data)
-        await send_to_channel(bot, CHANNEL_ANALYTICS, embeds)
+        await send_to_channel(bot, CHANNEL_TREND_WATCH, embeds)
         logger.info("[job:trend_watch] Sent %d embeds", len(embeds))
     except Exception as exc:
         logger.error("[job:trend_watch] Error: %s", exc)

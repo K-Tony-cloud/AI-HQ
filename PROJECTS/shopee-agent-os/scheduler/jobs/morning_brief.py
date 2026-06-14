@@ -14,7 +14,11 @@ async def run_morning_brief(bot=None) -> None:
     """
     logger.info("[job:morning_brief] Starting")
 
-    from discord_bot.config import CHANNEL_DAILY_PICKS
+    from discord_bot.config import (
+        CHANNEL_MORNING_BRIEF,
+        CHANNEL_DAILY_PICKS,
+        CHANNEL_CONTENT_QUEUE,
+    )
     from discord_bot.embeds.operator_embeds import build_morning_brief_embeds
     from discord_bot.embeds.discovery_embeds import build_daily_picks_embed
     from discord_bot.embeds.scheduler_embeds import build_content_worklist_embed
@@ -27,7 +31,7 @@ async def run_morning_brief(bot=None) -> None:
         result = get_morning_brief(top=5)
         if result["success"]:
             embeds = build_morning_brief_embeds(result["data"])
-            await send_to_channel(bot, CHANNEL_DAILY_PICKS, embeds)
+            await send_to_channel(bot, CHANNEL_MORNING_BRIEF, embeds)
             logger.info("[job:morning_brief] Morning brief sent (%d embeds)", len(embeds))
         else:
             logger.error("[job:morning_brief] morning_brief failed: %s", result["error"])
@@ -47,7 +51,7 @@ async def run_morning_brief(bot=None) -> None:
         worklist = content_worklist(top=10)
         if worklist:
             wl_embed = build_content_worklist_embed(worklist)
-            await send_to_channel(bot, CHANNEL_DAILY_PICKS, [wl_embed])
+            await send_to_channel(bot, CHANNEL_CONTENT_QUEUE, [wl_embed])
             logger.info("[job:morning_brief] Worklist sent (%d items)", len(worklist))
     except Exception as exc:
         logger.error("[job:morning_brief] Content worklist error: %s", exc)
