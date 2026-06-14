@@ -129,10 +129,10 @@ async def send_and_confirm(
         bot = interaction.client
         try:
             ch = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
-            for i in range(0, max(len(embeds), 1), 10):
-                batch = embeds[i : i + 10]
-                if batch:
-                    await ch.send(content=content if i == 0 else None, embeds=batch)
+            # Send one embed per message to stay within Discord's 6000-char
+            # combined-embed limit, which applies across all embeds in one message.
+            for i, embed in enumerate(embeds):
+                await ch.send(content=content if i == 0 else None, embed=embed)
             await interaction.followup.send(f"✅ Posted to <#{channel_id}>", ephemeral=True)
             return
         except Exception:
