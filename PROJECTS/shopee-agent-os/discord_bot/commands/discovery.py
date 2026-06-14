@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_bot.embeds.base import PaginatedView, error_embed
+from discord_bot.embeds.base import PaginatedView, error_embed, send_and_confirm
 from discord_bot.embeds.discovery_embeds import (
     build_daily_picks_embed,
     build_find_product_embed,
@@ -41,6 +41,7 @@ class DiscoveryCog(commands.Cog):
         interaction: discord.Interaction,
         top: int = 5,
     ) -> None:
+        from discord_bot.config import CHANNEL_DAILY_PICKS
         await interaction.response.defer()
         result = get_daily_picks(top=top)
         if not result["success"]:
@@ -48,11 +49,7 @@ class DiscoveryCog(commands.Cog):
             return
 
         embeds = build_daily_picks_embed(result["data"])
-        if len(embeds) == 1:
-            await interaction.followup.send(embed=embeds[0])
-        else:
-            view = PaginatedView(embeds)
-            await interaction.followup.send(embed=embeds[0], view=view)
+        await send_and_confirm(interaction, embeds, CHANNEL_DAILY_PICKS)
 
     # ------------------------------------------------------------------
     # /top-opportunities
@@ -72,6 +69,7 @@ class DiscoveryCog(commands.Cog):
         category: Optional[str] = None,
         top: int = 20,
     ) -> None:
+        from discord_bot.config import CHANNEL_MORNING_BRIEF
         await interaction.response.defer()
         result = get_top_opportunities(category=category, top=top)
         if not result["success"]:
@@ -79,11 +77,7 @@ class DiscoveryCog(commands.Cog):
             return
 
         pages = build_top_opportunities_pages(result["data"], category)
-        if len(pages) == 1:
-            await interaction.followup.send(embed=pages[0])
-        else:
-            view = PaginatedView(pages)
-            await interaction.followup.send(embed=pages[0], view=view)
+        await send_and_confirm(interaction, pages, CHANNEL_MORNING_BRIEF)
 
     # ------------------------------------------------------------------
     # /top-viral
@@ -103,6 +97,7 @@ class DiscoveryCog(commands.Cog):
         category: Optional[str] = None,
         top: int = 20,
     ) -> None:
+        from discord_bot.config import CHANNEL_DAILY_PICKS
         await interaction.response.defer()
         result = get_top_viral(category=category, top=top)
         if not result["success"]:
@@ -110,11 +105,7 @@ class DiscoveryCog(commands.Cog):
             return
 
         pages = build_top_viral_pages(result["data"], category)
-        if len(pages) == 1:
-            await interaction.followup.send(embed=pages[0])
-        else:
-            view = PaginatedView(pages)
-            await interaction.followup.send(embed=pages[0], view=view)
+        await send_and_confirm(interaction, pages, CHANNEL_DAILY_PICKS)
 
     # ------------------------------------------------------------------
     # /find-product

@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_bot.embeds.base import error_embed
+from discord_bot.embeds.base import error_embed, send_and_confirm
 
 
 DEFAULT_IMPORT_PATH = "exports/link-tasks"
@@ -193,12 +193,13 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
         interaction: discord.Interaction,
         top: int = 50,
     ) -> None:
+        from discord_bot.config import CHANNEL_LINK_COVERAGE
         await interaction.response.defer(thinking=True)
         try:
             from shopee_engine.affiliate_link_engine import link_coverage_report
             data = link_coverage_report(top=top)
             embed = _coverage_embed(data)
-            await interaction.followup.send(embed=embed)
+            await send_and_confirm(interaction, [embed], CHANNEL_LINK_COVERAGE)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed("Link Coverage", str(exc)))
 
@@ -212,12 +213,13 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
         interaction: discord.Interaction,
         top: int = 50,
     ) -> None:
+        from discord_bot.config import CHANNEL_MISSING_LINKS
         await interaction.response.defer(thinking=True)
         try:
             from shopee_engine.affiliate_link_engine import link_coverage_report
             data = link_coverage_report(top=top)
             embeds = _missing_links_embeds(data)
-            await interaction.followup.send(embeds=embeds[:10])
+            await send_and_confirm(interaction, embeds[:10], CHANNEL_MISSING_LINKS)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed("Missing Links", str(exc)))
 
@@ -274,10 +276,11 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
                 )
                 return
 
+            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
             data = await asyncio.to_thread(
                 bulk_add_affiliate_links, link_list, campaign, platform
             )
             embed = _bulk_add_embed(data)
-            await interaction.followup.send(embed=embed)
+            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed("Affiliate Link Add", str(exc)))

@@ -106,3 +106,43 @@ class PaginatedView(discord.ui.View):
     async def on_timeout(self) -> None:
         for child in self.children:
             child.disabled = True  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Channel-routing helper for slash commands
+# ---------------------------------------------------------------------------
+
+async def send_and_confirm(
+    interaction: discord.Interaction,
+    embeds: list[discord.Embed],
+    channel_id: int | None,
+    *,
+    content: str | None = None,
+) -> None:
+    """Post embeds to a configured channel and acknowledge the interaction.
+
+    If channel_id is set the embeds go to that channel and the interaction
+    receives a short confirmation.  If channel_id is None the embeds are
+    sent as the interaction reply (original in-place behaviour).
+    """
+    if channel_id:
+        bot = interaction.client
+        try:
+            ch = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+            for i in range(0, max(len(embeds), 1), 10):
+                batch = embeds[i : i + 10]
+                if batch:
+                    await ch.send(content=content if i == 0 else None, embeds=batch)
+            await interaction.followup.send(f"✅ Posted to <#{channel_id}>", ephemeral=True)
+            return
+        except Exception:
+            pass  # fall through to in-place reply on any channel error
+
+    # Fallback: reply in-place with pagination if needed
+    if not embeds:
+        return
+    if len(embeds) == 1:
+        await interaction.followup.send(content=content, embed=embeds[0])
+    else:
+        view = PaginatedView(embeds)
+        await interaction.followup.send(content=content, embed=embeds[0], view=view)

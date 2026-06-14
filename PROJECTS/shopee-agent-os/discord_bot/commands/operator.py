@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_bot.embeds.base import PaginatedView, error_embed
+from discord_bot.embeds.base import PaginatedView, error_embed, send_and_confirm
 from discord_bot.embeds.operator_embeds import (
     build_executive_summary_embeds,
     build_morning_brief_embeds,
@@ -35,6 +35,7 @@ class OperatorCog(commands.Cog):
         interaction: discord.Interaction,
         top: int = 5,
     ) -> None:
+        from discord_bot.config import CHANNEL_MORNING_BRIEF
         await interaction.response.defer()
         result = get_morning_brief(top=top)
         if not result["success"]:
@@ -42,8 +43,7 @@ class OperatorCog(commands.Cog):
             return
 
         embeds = build_morning_brief_embeds(result["data"])
-        view = PaginatedView(embeds)
-        await interaction.followup.send(embed=embeds[0], view=view)
+        await send_and_confirm(interaction, embeds, CHANNEL_MORNING_BRIEF)
 
     # ------------------------------------------------------------------
     # /executive-summary
@@ -54,6 +54,7 @@ class OperatorCog(commands.Cog):
         description="Full executive summary: Opportunities, Risks, Gaps, Viral, Profit",
     )
     async def cmd_executive_summary(self, interaction: discord.Interaction) -> None:
+        from discord_bot.config import CHANNEL_REVENUE
         await interaction.response.defer()
         result = get_executive_summary()
         if not result["success"]:
@@ -61,5 +62,4 @@ class OperatorCog(commands.Cog):
             return
 
         embeds = build_executive_summary_embeds(result["data"])
-        view = PaginatedView(embeds)
-        await interaction.followup.send(embed=embeds[0], view=view)
+        await send_and_confirm(interaction, embeds, CHANNEL_REVENUE)

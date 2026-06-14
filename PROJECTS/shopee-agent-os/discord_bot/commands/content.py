@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_bot.embeds.base import PaginatedView, error_embed, make_embed
+from discord_bot.embeds.base import PaginatedView, error_embed, make_embed, send_and_confirm
 from discord_bot.embeds.content_embeds import (
     build_approve_embed,
     build_content_pack_embeds,
@@ -37,6 +37,7 @@ class ContentCog(commands.Cog):
         interaction: discord.Interaction,
         keyword: str,
     ) -> None:
+        from discord_bot.config import CHANNEL_CONTENT_QUEUE
         await interaction.response.defer()
         result = generate_content_pack(keyword=keyword)
         if not result["success"]:
@@ -44,11 +45,7 @@ class ContentCog(commands.Cog):
             return
 
         embeds = build_content_pack_embeds(result["data"])
-        # Send header embed first, then use pagination for the rest
-        await interaction.followup.send(embed=embeds[0])
-        if len(embeds) > 1:
-            view = PaginatedView(embeds[1:])
-            await interaction.followup.send(embed=embeds[1], view=view)
+        await send_and_confirm(interaction, embeds, CHANNEL_CONTENT_QUEUE)
 
     # ------------------------------------------------------------------
     # /queue
@@ -59,6 +56,7 @@ class ContentCog(commands.Cog):
         description="Show all items in the content queue",
     )
     async def cmd_queue(self, interaction: discord.Interaction) -> None:
+        from discord_bot.config import CHANNEL_CONTENT_QUEUE
         await interaction.response.defer()
         result = get_queue()
         if not result["success"]:
@@ -66,11 +64,7 @@ class ContentCog(commands.Cog):
             return
 
         pages = build_queue_pages(result["data"])
-        if len(pages) == 1:
-            await interaction.followup.send(embed=pages[0])
-        else:
-            view = PaginatedView(pages)
-            await interaction.followup.send(embed=pages[0], view=view)
+        await send_and_confirm(interaction, pages, CHANNEL_CONTENT_QUEUE)
 
     # ------------------------------------------------------------------
     # /approve
@@ -86,7 +80,8 @@ class ContentCog(commands.Cog):
         interaction: discord.Interaction,
         id: int,
     ) -> None:
+        from discord_bot.config import CHANNEL_APPROVED_CONTENT
         await interaction.response.defer()
         result = approve_queue_item(id)
         embed = build_approve_embed(id, result.get("success", False))
-        await interaction.followup.send(embed=embed)
+        await send_and_confirm(interaction, [embed], CHANNEL_APPROVED_CONTENT)

@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from discord_bot.embeds.base import PaginatedView, error_embed
+from discord_bot.embeds.base import PaginatedView, error_embed, send_and_confirm
 from discord_bot.embeds.performance_embeds import (
     build_daily_performance_embed,
     build_top_profit_pages,
@@ -35,6 +35,7 @@ class PerformanceCog(commands.Cog):
         interaction: discord.Interaction,
         top: int = 20,
     ) -> None:
+        from discord_bot.config import CHANNEL_TOP_EARNERS
         await interaction.response.defer()
         result = get_top_profit(top=top)
         if not result["success"]:
@@ -42,8 +43,4 @@ class PerformanceCog(commands.Cog):
             return
 
         pages = build_top_profit_pages(result["data"])
-        if len(pages) == 1:
-            await interaction.followup.send(embed=pages[0])
-        else:
-            view = PaginatedView(pages)
-            await interaction.followup.send(embed=pages[0], view=view)
+        await send_and_confirm(interaction, pages, CHANNEL_TOP_EARNERS)
