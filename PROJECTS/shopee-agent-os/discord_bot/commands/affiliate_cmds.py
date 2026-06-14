@@ -76,6 +76,49 @@ def _missing_links_embeds(data: dict) -> list[discord.Embed]:
     return embeds[:3]  # Discord limit — first 30 missing max
 
 
+def _bulk_add_embed(data: dict) -> discord.Embed:
+    imported  = data["imported"]
+    total     = data["total"]
+    dupes     = data["duplicates"]
+    unmatched = data["unmatched"]
+    invalid   = data["invalid"]
+
+    color = (
+        discord.Color.green()  if imported > 0 and unmatched == 0 and invalid == 0
+        else discord.Color.yellow() if imported > 0
+        else discord.Color.red()
+    )
+    embed = discord.Embed(title="🔗 Bulk Affiliate Links — Import Summary", color=color)
+    embed.add_field(name="📥 Received",    value=str(total),    inline=True)
+    embed.add_field(name="✅ Imported",    value=str(imported), inline=True)
+    embed.add_field(name="♻️ Duplicates",  value=str(dupes),    inline=True)
+    embed.add_field(name="⚠️ Unmatched",   value=str(unmatched), inline=True)
+    embed.add_field(name="❌ Invalid",     value=str(invalid),  inline=True)
+
+    if data["matched_products"]:
+        lines = "\n".join(
+            f"`{i:>2}.` {p['title'][:50]}"
+            for i, p in enumerate(data["matched_products"][:10], 1)
+        )
+        embed.add_field(name="Matched products", value=lines, inline=False)
+
+    if data["unmatched_links"]:
+        lines = "\n".join(
+            f"• `{u['original'][:38]}` — {u['reason']}"
+            for u in data["unmatched_links"][:5]
+        )
+        embed.add_field(name="⚠️ Unmatched links", value=lines, inline=False)
+
+    if data["duplicate_products"]:
+        lines = "\n".join(
+            f"• {p['title'][:45]}"
+            for p in data["duplicate_products"][:5]
+        )
+        embed.add_field(name="♻️ Already have links", value=lines, inline=False)
+
+    return embed
+
+
 def _import_status_embed(import_path: str) -> discord.Embed:
     """Check if a filled CSV exists locally and report its status."""
     base = Path(import_path)
@@ -194,3 +237,47 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             await interaction.followup.send(embed=embed)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed("Import Links Status", str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-link-add  — bulk paste affiliate short links
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-link-add",
+        description="Bulk-add affiliate links — paste multiple Shopee short links (one per line)",
+    )
+    @app_commands.describe(
+        links="Paste affiliate links separated by newlines or spaces",
+        campaign="Campaign tag e.g. daily-picks (optional)",
+        platform="Platform tag e.g. tiktok (optional)",
+    )
+    async def cmd_affiliate_link_add(
+        self,
+        interaction: discord.Interaction,
+        links: str,
+        campaign: str = "daily-picks",
+        platform: str = "tiktok",
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            import asyncio
+            from shopee_engine.affiliate_link_engine import bulk_add_affiliate_links
+
+            # Accept newline, comma, or space-separated links
+            link_list = [
+                lnk.strip()
+                for lnk in links.replace(",", "\n").splitlines()
+                if lnk.strip()
+            ]
+            if not link_list:
+                await interaction.followup.send(
+                    embed=error_embed("Affiliate Link Add", "No valid links found in input.")
+                )
+                return
+
+            data = await asyncio.to_thread(
+                bulk_add_affiliate_links, link_list, campaign, platform
+            )
+            embed = _bulk_add_embed(data)
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed("Affiliate Link Add", str(exc)))

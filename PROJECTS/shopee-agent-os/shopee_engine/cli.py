@@ -1245,5 +1245,48 @@ def cmd_link_coverage_report(
     print_link_coverage(data)
 
 
+@app.command("add-affiliate-links")
+def cmd_add_affiliate_links(
+    links_file: str = typer.Option(...,            "--links-file", "-f", help="Text file with one affiliate link per line"),
+    campaign:   str = typer.Option("daily-picks",  "--campaign",  "-c", help="Campaign tag (sub_id1)"),
+    platform:   str = typer.Option("tiktok",       "--platform",  "-p", help="Platform tag (sub_id2)"),
+    table:      str = typer.Option("products",     "--table",     "-t", help="Source table"),
+) -> None:
+    """
+    Bulk-add affiliate links from a plain-text file (one link per line).
+
+    Each link is resolved via HTTP redirect, auto-matched to a product in DuckDB,
+    and stored. Unmatched links are saved to affiliate_links_unmatched for review.
+
+    Example:
+        shopee add-affiliate-links --links-file links.txt
+        shopee add-affiliate-links --links-file links.txt --campaign daily-picks --platform tiktok
+    """
+    from .affiliate_link_engine import bulk_add_affiliate_links, print_bulk_add_result
+
+    p = Path(links_file)
+    if not p.exists():
+        console.print(f"[red]File not found:[/] {links_file}")
+        raise typer.Exit(1)
+
+    raw = p.read_text(encoding="utf-8")
+    link_list = [lnk.strip() for lnk in raw.splitlines() if lnk.strip()]
+    if not link_list:
+        console.print("[yellow]No links found in file.[/]")
+        raise typer.Exit(0)
+
+    console.print(f"[dim]Resolving {len(link_list)} link(s) via HTTP...[/]")
+    with console.status("[yellow]Resolving and matching products...[/]"):
+        try:
+            data = bulk_add_affiliate_links(
+                link_list, campaign=campaign, platform=platform, table_name=table
+            )
+        except RuntimeError as e:
+            console.print(f"[red]Error:[/] {e}")
+            raise typer.Exit(1)
+
+    print_bulk_add_result(data)
+
+
 if __name__ == "__main__":
     app()

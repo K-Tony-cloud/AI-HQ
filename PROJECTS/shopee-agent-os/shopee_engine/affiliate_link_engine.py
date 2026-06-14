@@ -7,6 +7,9 @@ this module exports the task list, imports the results, and tracks coverage.
 from __future__ import annotations
 
 import csv as csv_mod
+import re
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -21,7 +24,8 @@ from .config import config
 
 console = Console()
 
-AFFILIATE_TABLE = "affiliate_links"
+AFFILIATE_TABLE   = "affiliate_links"
+UNMATCHED_TABLE   = "affiliate_links_unmatched"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -72,6 +76,232 @@ def _normalize_link(url: str) -> str:
     # Strip query params so plain product URLs also normalize cleanly
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+
+def _init_unmatched_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {UNMATCHED_TABLE} (
+            id            INTEGER PRIMARY KEY,
+            created_at    VARCHAR,
+            original_link VARCHAR,
+            resolved_url  VARCHAR,
+            reason        VARCHAR,
+            campaign      VARCHAR DEFAULT '',
+            platform      VARCHAR DEFAULT ''
+        )
+    """)
+
+
+def resolve_shopee_link(url: str, timeout: int = 10) -> str | None:
+    """Follow HTTP redirects and return the final destination URL, or None on failure."""
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ShopeeAgent/1.0)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.url
+    except Exception:
+        return None
+
+
+def extract_product_ids(url: str) -> tuple[int, int] | None:
+    """Extract (shopid, itemid) from a Shopee product URL.
+
+    Handles:
+      /product/<shopid>/<itemid>
+      <name>-i.<shopid>.<itemid>
+    """
+    if not url:
+        return None
+    m = re.search(r'/product/(\d+)/(\d+)', url)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.search(r'-i\.(\d+)\.(\d+)', url)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _match_product_in_db(
+    con: duckdb.DuckDBPyConnection,
+    shopid: int,
+    itemid: int,
+    table_name: str,
+) -> dict | None:
+    """Return product info dict if (shopid, itemid) exists in the products table."""
+    try:
+        cols = [r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            [table_name]
+        ).fetchall()]
+    except Exception:
+        return None
+    if not cols:
+        return None
+
+    lm = {c.lower(): c for c in cols}
+    itemid_col = lm.get("itemid") or lm.get("item_id") or lm.get("product_id")
+    shopid_col = lm.get("shopid") or lm.get("shop_id")
+    title_col  = lm.get("title") or lm.get("name") or lm.get("product_name")
+    pl_col     = lm.get("product_link") or lm.get("product_url") or lm.get("url")
+
+    if not itemid_col or not shopid_col or not title_col:
+        return None
+
+    pl_expr = f'COALESCE("{pl_col}", \'\')' if pl_col else "''"
+
+    try:
+        row = con.execute(
+            f'SELECT CAST("{itemid_col}" AS BIGINT), CAST("{shopid_col}" AS BIGINT), '
+            f'"{title_col}", {pl_expr} '
+            f'FROM "{table_name}" '
+            f'WHERE CAST("{itemid_col}" AS BIGINT) = ? AND CAST("{shopid_col}" AS BIGINT) = ? '
+            f'LIMIT 1',
+            [itemid, shopid]
+        ).fetchone()
+        if row:
+            pl = row[3] or f"https://shopee.co.th/product/{row[1]}/{row[0]}"
+            return {"itemid": row[0], "shopid": row[1], "title": row[2], "product_link": pl}
+    except Exception:
+        pass
+
+    # Fallback: match by itemid alone
+    try:
+        row = con.execute(
+            f'SELECT CAST("{itemid_col}" AS BIGINT), CAST("{shopid_col}" AS BIGINT), '
+            f'"{title_col}", {pl_expr} '
+            f'FROM "{table_name}" '
+            f'WHERE CAST("{itemid_col}" AS BIGINT) = ? LIMIT 1',
+            [itemid]
+        ).fetchone()
+        if row:
+            pl = row[3] or f"https://shopee.co.th/product/{row[1]}/{row[0]}"
+            return {"itemid": row[0], "shopid": row[1], "title": row[2], "product_link": pl}
+    except Exception:
+        pass
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Phase 9.1 — Bulk affiliate link ingestion
+# ---------------------------------------------------------------------------
+
+def bulk_add_affiliate_links(
+    links:      list[str],
+    campaign:   str = "",
+    platform:   str = "",
+    sub_ids:    tuple[str, str, str, str, str] = ("", "", "", "", ""),
+    table_name: str | None = None,
+) -> dict:
+    """Resolve and bulk-import Shopee affiliate short links.
+
+    Each link is resolved via HTTP redirect, matched against the products table,
+    and stored in affiliate_links. Unmatched links are saved to
+    affiliate_links_unmatched for review.
+
+    Returns a summary dict with counts and per-link details.
+    """
+    table_name = table_name or config.default_table
+    if not config.db_path.exists():
+        raise RuntimeError("No database found. Run import-datafeed first.")
+
+    raw_links = [lnk.strip() for lnk in links if lnk.strip()]
+    if not raw_links:
+        return {
+            "total": 0, "imported": 0, "duplicates": 0, "unmatched": 0, "invalid": 0,
+            "matched_products": [], "unmatched_links": [], "duplicate_products": [], "invalid_links": [],
+        }
+
+    # Phase 1: resolve all links concurrently
+    resolved: list[tuple[str, str | None]] = [("", None)] * len(raw_links)
+    with ThreadPoolExecutor(max_workers=min(10, len(raw_links))) as pool:
+        future_map = {pool.submit(resolve_shopee_link, url): i for i, url in enumerate(raw_links)}
+        for fut in as_completed(future_map):
+            idx = future_map[fut]
+            resolved[idx] = (raw_links[idx], fut.result())
+
+    # Phase 2: classify and store
+    con = _connect(read_only=False)
+    _init_affiliate_table(con)
+    _init_unmatched_table(con)
+
+    now_str   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    s1, s2, s3, s4, s5 = sub_ids
+
+    matched:       list[dict] = []
+    unmatched_acc: list[dict] = []
+    duplicates:    list[dict] = []
+    invalid:       list[str]  = []
+
+    try:
+        for original, final_url in resolved:
+            if not final_url:
+                invalid.append(original)
+                continue
+
+            ids = extract_product_ids(final_url)
+            if not ids:
+                unmatched_acc.append({"original": original, "resolved": final_url, "reason": "no_product_ids"})
+                continue
+
+            shopid, itemid = ids
+            canonical = f"https://shopee.co.th/product/{shopid}/{itemid}"
+            product   = _match_product_in_db(con, shopid, itemid, table_name)
+
+            if not product:
+                unmatched_acc.append({"original": original, "resolved": final_url, "reason": "product_not_found"})
+                continue
+
+            # Duplicate: product already has an affiliate link stored
+            existing = con.execute(
+                f"SELECT affiliate_link FROM {AFFILIATE_TABLE} WHERE product_link = ?", [canonical]
+            ).fetchone()
+            if existing and existing[0]:
+                duplicates.append({"title": product["title"], "link": original, "existing_link": existing[0]})
+                continue
+
+            # Upsert
+            con.execute(f"DELETE FROM {AFFILIATE_TABLE} WHERE product_link = ?", [canonical])
+            max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {AFFILIATE_TABLE}").fetchone()[0]
+            con.execute(f"""
+                INSERT INTO {AFFILIATE_TABLE}
+                (id, created_at, itemid, shopid, product_link, affiliate_link,
+                 sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, campaign, platform, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                max_id + 1, now_str,
+                product["itemid"], product["shopid"],
+                canonical, original,
+                s1 or campaign, s2 or platform, s3, s4, s5,
+                campaign, platform, "",
+            ])
+            matched.append({"title": product["title"], "link": original, "product_link": canonical})
+
+        # Persist unmatched entries for operator review
+        for u in unmatched_acc:
+            max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {UNMATCHED_TABLE}").fetchone()[0]
+            con.execute(f"""
+                INSERT INTO {UNMATCHED_TABLE}
+                (id, created_at, original_link, resolved_url, reason, campaign, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, [max_id + 1, now_str, u["original"], u.get("resolved", ""), u["reason"], campaign, platform])
+
+    finally:
+        con.close()
+
+    return {
+        "total":             len(raw_links),
+        "imported":          len(matched),
+        "duplicates":        len(duplicates),
+        "unmatched":         len(unmatched_acc),
+        "invalid":           len(invalid),
+        "matched_products":  matched,
+        "unmatched_links":   unmatched_acc,
+        "duplicate_products": duplicates,
+        "invalid_links":     invalid,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -476,3 +706,41 @@ def print_link_coverage(data: dict) -> None:
         )
 
     console.print(tbl)
+
+
+def print_bulk_add_result(data: dict) -> None:
+    total     = data["total"]
+    imported  = data["imported"]
+    dupes     = data["duplicates"]
+    unmatched = data["unmatched"]
+    invalid   = data["invalid"]
+
+    color = "green" if imported > 0 else "yellow"
+    console.print(Panel(
+        f"[bold {color}]✅ Imported  : {imported}[/bold {color}]\n"
+        f"Total       : {total}\n"
+        f"[yellow]Duplicates  : {dupes}[/yellow]\n"
+        f"[red]Unmatched   : {unmatched}[/red]\n"
+        f"[red]Invalid     : {invalid}[/red]",
+        title="[bold]Bulk Affiliate Link Import[/]",
+        expand=False,
+    ))
+
+    if data["matched_products"]:
+        tbl = Table(show_lines=False, expand=False)
+        tbl.add_column("#",       width=4, style="dim", justify="right")
+        tbl.add_column("Product", max_width=55)
+        tbl.add_column("Link",    max_width=42)
+        for i, p in enumerate(data["matched_products"], 1):
+            tbl.add_row(str(i), str(p["title"])[:55], str(p["link"])[:42])
+        console.print(tbl)
+
+    if data["unmatched_links"]:
+        console.print("\n[red]⚠ Unmatched (saved to affiliate_links_unmatched for review):[/]")
+        for u in data["unmatched_links"][:10]:
+            console.print(f"  [dim]{u['original'][:60]}[/]  → [red]{u['reason']}[/]")
+
+    if data["invalid_links"]:
+        console.print("\n[red]❌ Invalid / unreachable:[/]")
+        for lnk in data["invalid_links"][:5]:
+            console.print(f"  [dim]{lnk[:60]}[/]")
