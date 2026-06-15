@@ -1107,8 +1107,9 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             health       = stats["health_score"]
             n_issues     = stats["issues"]
             recent       = stats.get("recent", [])
+            cat_cov      = stats.get("category_coverage", [])
 
-            health_emoji  = "🟢" if health  >= 80 else "🟡" if health  >= 50 else "🔴"
+            health_emoji  = "🟢" if health    >= 80 else "🟡" if health    >= 50 else "🔴"
             top10_emoji   = "🟢" if top10_pct >= 80 else "🟡" if top10_pct >= 40 else "🔴"
             overall_color = (discord.Color.green()  if health >= 80 and top10_pct >= 80
                              else discord.Color.yellow() if health >= 50
@@ -1118,15 +1119,38 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
                 title="🏠 Shopee Affiliate — Control Center",
                 color=overall_color,
             )
-            embed.add_field(name="📦 Total Products",    value=str(total),       inline=True)
-            embed.add_field(name="✅ With Link",          value=str(with_link),   inline=True)
-            embed.add_field(name="⚠️ Missing Link",       value=str(without_link), inline=True)
+            embed.add_field(name="📦 Total Products",         value=str(total),        inline=True)
+            embed.add_field(name="✅ With Link",               value=str(with_link),    inline=True)
+            embed.add_field(name="⚠️ Missing Link",           value=str(without_link), inline=True)
             embed.add_field(name=f"{top10_emoji} Top-10 Coverage",
                             value=f"{top10_pct}%", inline=True)
             embed.add_field(name=f"{health_emoji} Health Score",
                             value=f"{health}%", inline=True)
             embed.add_field(name="🔍 Issues",
                             value=str(n_issues) if n_issues else "None", inline=True)
+
+            # Category coverage summary
+            if cat_cov:
+                def _cat_emoji(pct: float) -> str:
+                    return "🟢" if pct >= 80 else "🟡" if pct >= 40 else "🔴"
+
+                cat_lines = "\n".join(
+                    f"{_cat_emoji(c['pct'])} **{c['name'].title()}** "
+                    f"{c['covered']}/{c['total']} ({c['pct']}%)"
+                    for c in sorted(cat_cov, key=lambda x: -x["pct"])
+                )
+                # Top priority: most missing
+                priority = sorted(
+                    [c for c in cat_cov if c["missing"] > 0],
+                    key=lambda x: -x["missing"]
+                )[:3]
+                priority_lines = "\n".join(
+                    f"`{i}.` {c['name'].title()} ({c['missing']} missing)"
+                    for i, c in enumerate(priority, 1)
+                )
+                embed.add_field(name="📊 Category Coverage (Top 10)", value=cat_lines, inline=False)
+                if priority_lines:
+                    embed.add_field(name="🎯 Top Priority", value=priority_lines, inline=False)
 
             if recent:
                 lines = "\n".join(
@@ -1138,14 +1162,141 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             embed.add_field(
                 name="Quick Commands",
                 value=(
-                    "`/affiliate-dashboard` — full summary\n"
-                    "`/affiliate-missing` — what needs links\n"
-                    "`/affiliate-coverage` — top-N breakdown\n"
+                    "`/affiliate-category-report` — full category breakdown\n"
+                    "`/affiliate-missing-category <cat>` — missing per category\n"
+                    "`/affiliate-missing` — top opportunities missing links\n"
                     "`/affiliate-list` — browse all products\n"
                     "`/affiliate-health` — data quality check"
                 ),
                 inline=False,
             )
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-category-report
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-category-report",
+        description="Affiliate link coverage breakdown for every product category",
+    )
+    @app_commands.describe(top_n="Top N products per category to benchmark (default 20)")
+    async def cmd_affiliate_category_report(
+        self,
+        interaction: discord.Interaction,
+        top_n: int = 20,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import get_category_coverage
+            data = await asyncio.to_thread(get_category_coverage, top_n)
+
+            categories    = data.get("categories", [])
+            total_prod    = data.get("total_products", 0)
+            total_covered = data.get("total_covered",  0)
+            total_missing = data.get("total_missing",  0)
+
+            overall_pct = round(total_covered / total_prod * 100, 1) if total_prod else 0.0
+            color = (discord.Color.green()  if overall_pct >= 80
+                     else discord.Color.yellow() if overall_pct >= 40
+                     else discord.Color.red())
+
+            embed = discord.Embed(
+                title=f"📊 Affiliate Category Coverage (Top {top_n} per category)",
+                color=color,
+            )
+
+            def _bar(pct: float, width: int = 10) -> str:
+                filled = int(pct / 100 * width)
+                return "█" * filled + "░" * (width - filled)
+
+            def _emoji(pct: float) -> str:
+                return "🟢" if pct >= 80 else "🟡" if pct >= 40 else "🔴"
+
+            for cat in sorted(categories, key=lambda x: -x["pct"]):
+                pct  = cat["pct"]
+                warn = f"⚠️ Missing {cat['missing']}" if cat["missing"] else "✅ Complete"
+                embed.add_field(
+                    name=f"{_emoji(pct)} {cat['name'].title()}",
+                    value=(
+                        f"✅ {cat['covered']}/{cat['total']} ({pct}%) "
+                        f"`{_bar(pct)}`\n{warn}"
+                    ),
+                    inline=True,
+                )
+
+            # Totals
+            embed.add_field(name="​", value="​", inline=False)  # spacer
+            embed.add_field(
+                name="━━ Total ━━",
+                value=(
+                    f"✅ **{total_covered}** products with link\n"
+                    f"⚠️ **{total_missing}** products missing\n"
+                    f"Overall: **{overall_pct}%**  `{_bar(overall_pct, 20)}`"
+                ),
+                inline=False,
+            )
+            embed.set_footer(
+                text="Use /affiliate-missing-category <name> to see which products need links"
+            )
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-missing-category
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-missing-category",
+        description="Show top products in a category that still need affiliate links",
+    )
+    @app_commands.describe(category="Category: beauty / gadget / home / baby / health / fashion / camping")
+    @app_commands.choices(category=[
+        app_commands.Choice(name="Beauty",  value="beauty"),
+        app_commands.Choice(name="Gadget",  value="gadget"),
+        app_commands.Choice(name="Home",    value="home"),
+        app_commands.Choice(name="Baby",    value="baby"),
+        app_commands.Choice(name="Health",  value="health"),
+        app_commands.Choice(name="Fashion", value="fashion"),
+        app_commands.Choice(name="Camping", value="camping"),
+    ])
+    async def cmd_affiliate_missing_category(
+        self,
+        interaction: discord.Interaction,
+        category: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import get_missing_for_category
+            items = await asyncio.to_thread(get_missing_for_category, category, 20)
+
+            cat_label = category.title()
+            cat_icons = {
+                "beauty": "💄", "gadget": "📱", "home": "🏠",
+                "baby": "🍼", "health": "💊", "fashion": "👗", "camping": "⛺",
+            }
+            icon = cat_icons.get(category, "📦")
+
+            embed = discord.Embed(
+                title=f"{icon} {cat_label} — Missing Affiliate Links",
+                color=discord.Color.orange() if items else discord.Color.green(),
+            )
+
+            if not items:
+                embed.description = f"✅ All top {cat_label} products have affiliate links!"
+            else:
+                lines = []
+                for i, p in enumerate(items, 1):
+                    lines.append(
+                        f"`{i:>2}.` **{p['title'][:55] or '—'}**\n"
+                        f"      ItemID: `{p['itemid']}` | Score: `{p['opp_score']:,}`"
+                    )
+                embed.description = "\n\n".join(lines[:15])
+                embed.set_footer(
+                    text=f"{len(items)} products need links • Use /affiliate-product-add to add them"
+                )
+
             await interaction.followup.send(embed=embed)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))

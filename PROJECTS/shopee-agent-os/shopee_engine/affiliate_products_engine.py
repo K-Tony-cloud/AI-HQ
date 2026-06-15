@@ -846,12 +846,155 @@ def get_control_center_stats() -> dict:
     # Recent activity (last 3)
     recent = dash.get("recently_added", [])[:3]
 
+    # Category coverage (fast — top 10 per bucket)
+    cat_cov = get_category_coverage(top_n=10)
+
     return {
-        "total":         dash["total"],
-        "with_link":     dash["with_link"],
-        "without_link":  dash["without_link"],
-        "top10_coverage": top10_pct,
-        "health_score":  health["health_score"],
-        "recent":        recent,
-        "issues":        len(health.get("issues", [])),
+        "total":            dash["total"],
+        "with_link":        dash["with_link"],
+        "without_link":     dash["without_link"],
+        "top10_coverage":   top10_pct,
+        "health_score":     health["health_score"],
+        "recent":           recent,
+        "issues":           len(health.get("issues", [])),
+        "category_coverage": cat_cov.get("categories", []),
     }
+
+
+# ---------------------------------------------------------------------------
+# Category coverage report
+# ---------------------------------------------------------------------------
+
+# Raw score expressions (no table alias — for use inside subqueries)
+_OPP_SCORE_RAW = (
+    "COALESCE(TRY_CAST(item_sold AS DOUBLE),0)*0.40 + "
+    "COALESCE(TRY_CAST(\"like\" AS DOUBLE),0)*0.15 + "
+    "COALESCE(TRY_CAST(discount_percentage AS DOUBLE),0)*0.15 + "
+    "COALESCE(TRY_CAST(shop_rating AS DOUBLE),0)*100*0.15 + "
+    "COALESCE(TRY_CAST(item_rating AS DOUBLE),0)*100*0.15"
+)
+
+
+def get_category_coverage(top_n: int = 20) -> dict:
+    """Affiliate link coverage per category bucket.
+
+    For each bucket, benchmarks the top_n products by opportunity score
+    and counts how many have affiliate links.
+
+    Returns {categories: [{name, total, covered, missing, pct}],
+             total_products, total_covered, total_missing}
+    """
+    if not config.db_path.exists():
+        return {"categories": [], "total_products": 0,
+                "total_covered": 0, "total_missing": 0}
+    con = _connect(read_only=True)
+    try:
+        results = []
+        for bucket, patterns in CATEGORY_PATTERNS.items():
+            cat_cond = " OR ".join(
+                f"global_category1 ILIKE '{pat}'" for pat in patterns
+            )
+            rows = con.execute(f"""
+                SELECT
+                    (ap.itemid IS NOT NULL
+                     AND ap.affiliate_short_url IS NOT NULL
+                     AND ap.affiliate_short_url != '')
+                    OR (al.itemid IS NOT NULL AND al.latest_link = true)
+                    AS has_aff
+                FROM (
+                    SELECT
+                        TRY_CAST(itemid AS BIGINT) AS itemid,
+                        TRY_CAST(shopid AS BIGINT) AS shopid
+                    FROM products
+                    WHERE ({cat_cond})
+                      AND COALESCE(product_link, '') != ''
+                    ORDER BY {_OPP_SCORE_RAW} DESC
+                    LIMIT {top_n}
+                ) t
+                LEFT JOIN affiliate_products ap
+                    ON ap.itemid = t.itemid AND ap.shopid = t.shopid
+                LEFT JOIN affiliate_links al
+                    ON al.itemid = t.itemid AND al.shopid = t.shopid
+            """).fetchall()
+
+            total   = len(rows)
+            covered = sum(1 for r in rows if r[0])
+            missing = total - covered
+            pct     = round(covered / total * 100, 1) if total else 0.0
+            results.append({
+                "name":    bucket,
+                "total":   total,
+                "covered": covered,
+                "missing": missing,
+                "pct":     pct,
+            })
+
+        total_products = sum(r["total"]   for r in results)
+        total_covered  = sum(r["covered"] for r in results)
+        total_missing  = sum(r["missing"] for r in results)
+        return {
+            "categories":     results,
+            "total_products": total_products,
+            "total_covered":  total_covered,
+            "total_missing":  total_missing,
+            "top_n":          top_n,
+        }
+    except Exception as exc:
+        return {"categories": [], "total_products": 0,
+                "total_covered": 0, "total_missing": 0, "error": str(exc)}
+    finally:
+        con.close()
+
+
+def get_missing_for_category(category: str, limit: int = 20) -> list[dict]:
+    """Top products in a category that still need affiliate links.
+
+    Sorted by opportunity score descending.
+    Returns [{itemid, shopid, title, category, opp_score}]
+    """
+    cat_key = category.lower().strip()
+    patterns = CATEGORY_PATTERNS.get(cat_key)
+    if not patterns:
+        return []
+    if not config.db_path.exists():
+        return []
+
+    con = _connect(read_only=True)
+    try:
+        cat_cond = " OR ".join(
+            f"p.global_category1 ILIKE '{pat}'" for pat in patterns
+        )
+        rows = con.execute(f"""
+            SELECT
+                TRY_CAST(p.itemid AS BIGINT)     AS itemid,
+                TRY_CAST(p.shopid AS BIGINT)      AS shopid,
+                p.title,
+                COALESCE(p.global_category1, '')  AS category,
+                ROUND({_OPP_SCORE}, 0)            AS opp_score
+            FROM products p
+            LEFT JOIN affiliate_products ap
+                ON ap.itemid = TRY_CAST(p.itemid AS BIGINT)
+                AND ap.shopid = TRY_CAST(p.shopid AS BIGINT)
+                AND ap.affiliate_short_url IS NOT NULL
+                AND ap.affiliate_short_url != ''
+            LEFT JOIN affiliate_links al
+                ON al.itemid = TRY_CAST(p.itemid AS BIGINT)
+                AND al.shopid = TRY_CAST(p.shopid AS BIGINT)
+                AND al.latest_link = true
+            WHERE ({cat_cond})
+              AND COALESCE(p.product_link, '') != ''
+              AND ap.itemid IS NULL
+              AND al.itemid IS NULL
+            ORDER BY opp_score DESC
+            LIMIT ?
+        """, [limit]).fetchall()
+
+        return [
+            {"itemid": r[0], "shopid": r[1], "title": r[2],
+             "category": r[3], "opp_score": int(r[4] or 0)}
+            for r in rows
+        ]
+    except Exception:
+        return []
+    finally:
+        con.close()
