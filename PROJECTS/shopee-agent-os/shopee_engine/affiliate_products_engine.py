@@ -13,7 +13,9 @@ from urllib.parse import urlparse
 import duckdb
 
 from .config import config
-from .affiliate_link_engine import _connect, _fetch_page_metadata, extract_product_ids
+from .affiliate_link_engine import (
+    _connect, _fetch_page_metadata, _match_product_in_db, extract_product_ids,
+)
 
 PRODUCTS_TABLE = "affiliate_products"
 
@@ -41,11 +43,22 @@ def _title_from_url_slug(url: str) -> str:
     """Extract a human-readable name from the Shopee URL slug.
 
     https://shopee.co.th/Dr-PONG-28D-i.6583190.6690255925 → "Dr PONG 28D"
+    Returns "" if the slug is purely numeric (i.e. /product/SHOPID/ITEMID format).
     """
     path = urlparse(url).path.rstrip("/")
     slug = path.split("/")[-1]
     slug = re.sub(r"-i\.\d+\.\d+$", "", slug)
-    return slug.replace("-", " ").strip()
+    slug = slug.replace("-", " ").strip()
+    return "" if slug.isdigit() else slug
+
+
+def _lookup_title_from_products(con: duckdb.DuckDBPyConnection, shopid: int, itemid: int) -> str:
+    """Look up the real product title from the products table by shopid+itemid."""
+    try:
+        product = _match_product_in_db(con, shopid, itemid, config.default_table)
+        return (product or {}).get("title", "") or ""
+    except Exception:
+        return ""
 
 
 def add_affiliate_product(
@@ -75,13 +88,6 @@ def add_affiliate_product(
         }
     shopid, itemid = ids
 
-    # Fetch title: try page meta first, fall back to URL slug
-    meta  = _fetch_page_metadata(long_url)
-    title = meta.get("title", "") or ""
-    title = re.sub(r"\s*[|\-]\s*(Shopee.*)?$", "", title, flags=re.IGNORECASE).strip()
-    if not title:
-        title = _title_from_url_slug(long_url)
-
     if not config.db_path.exists():
         return {"success": False, "error": "No database found. Run import-datafeed first."}
 
@@ -90,29 +96,36 @@ def add_affiliate_product(
 
     try:
         _init_table(con)
+
+        # Title lookup priority:
+        # 1. products table (datafeed — most reliable)
+        # 2. og:title from page metadata
+        # 3. URL slug (only if it's not purely numeric)
+        title = _lookup_title_from_products(con, shopid, itemid)
+        if not title:
+            meta  = _fetch_page_metadata(long_url)
+            title = meta.get("title", "") or ""
+            title = re.sub(r"\s*[|\-]\s*(Shopee.*)?$", "", title, flags=re.IGNORECASE).strip()
+        if not title:
+            title = _title_from_url_slug(long_url)
+
         existing = con.execute(
             f"SELECT id, title FROM {PRODUCTS_TABLE} WHERE itemid=? AND shopid=?",
             [itemid, shopid],
         ).fetchone()
 
         if existing:
-            if title:
-                con.execute(
-                    f"UPDATE {PRODUCTS_TABLE} "
-                    f"SET identification_url=?, affiliate_short_url=?, campaign=?, platform=?, "
-                    f"    title=?, updated_at=?, latest_link=true "
-                    f"WHERE itemid=? AND shopid=?",
-                    [long_url, short_url, campaign, platform, title, now_str, itemid, shopid],
-                )
-            else:
-                title = existing[1]  # keep stored title
-                con.execute(
-                    f"UPDATE {PRODUCTS_TABLE} "
-                    f"SET identification_url=?, affiliate_short_url=?, campaign=?, platform=?, "
-                    f"    updated_at=?, latest_link=true "
-                    f"WHERE itemid=? AND shopid=?",
-                    [long_url, short_url, campaign, platform, now_str, itemid, shopid],
-                )
+            stored_title = existing[1] or ""
+            # Prefer the better title: products table > stored > empty
+            final_title = title or stored_title
+            con.execute(
+                f"UPDATE {PRODUCTS_TABLE} "
+                f"SET identification_url=?, affiliate_short_url=?, campaign=?, platform=?, "
+                f"    title=?, updated_at=?, latest_link=true "
+                f"WHERE itemid=? AND shopid=?",
+                [long_url, short_url, campaign, platform, final_title, now_str, itemid, shopid],
+            )
+            title  = final_title
             action = "updated"
         else:
             max_id = con.execute(f"SELECT COALESCE(MAX(id),0) FROM {PRODUCTS_TABLE}").fetchone()[0]
