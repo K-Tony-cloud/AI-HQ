@@ -103,11 +103,15 @@ def _bulk_add_embed(data: dict) -> discord.Embed:
         embed.add_field(name="Matched products", value=lines, inline=False)
 
     if data["unmatched_links"]:
-        lines = "\n".join(
-            f"• `{u['original'][:38]}` — {u['reason']}"
-            for u in data["unmatched_links"][:5]
-        )
-        embed.add_field(name="⚠️ Unmatched links", value=lines, inline=False)
+        parts = []
+        for u in data["unmatched_links"][:5]:
+            resolved = u.get("resolved") or ""
+            parts.append(
+                f"• `{u['original'][:35]}`\n"
+                f"  → `{resolved[:50] or 'no response'}`\n"
+                f"  ↳ {u['reason']}"
+            )
+        embed.add_field(name="⚠️ Unmatched links", value="\n".join(parts), inline=False)
 
     if data["duplicate_products"]:
         lines = "\n".join(

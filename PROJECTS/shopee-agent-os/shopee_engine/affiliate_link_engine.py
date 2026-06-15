@@ -7,6 +7,8 @@ this module exports the task list, imports the results, and tracks coverage.
 from __future__ import annotations
 
 import csv as csv_mod
+import http.cookiejar
+import logging
 import re
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,6 +25,7 @@ from rich.table import Table
 from .config import config
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 AFFILIATE_TABLE   = "affiliate_links"
 UNMATCHED_TABLE   = "affiliate_links_unmatched"
@@ -92,17 +95,70 @@ def _init_unmatched_table(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def resolve_shopee_link(url: str, timeout: int = 10) -> str | None:
-    """Follow HTTP redirects and return the final destination URL, or None on failure."""
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; ShopeeAgent/1.0)"},
+def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[str]]:
+    """Follow HTTP and JS redirects for a Shopee short link.
+
+    Returns (final_url, redirect_chain). final_url is None only on network error.
+    Uses a mobile User-Agent so Shopee issues clean HTTP 301/302 redirects instead
+    of JS-redirect pages that urllib cannot follow automatically.
+    """
+    chain: list[str] = [url]
+    current = url
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "Version/17.0 Mobile/15E148 Safari/604.1"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8",
+    }
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    for _ in range(8):
+        try:
+            req = urllib.request.Request(current, headers=headers)
+            with opener.open(req, timeout=timeout) as resp:
+                landed = resp.url
+                body = resp.read(8192).decode("utf-8", errors="ignore")
+        except Exception as exc:
+            logger.debug("[resolve] %s → error: %s", current, exc)
+            return None, chain
+
+        if landed != current:
+            chain.append(landed)
+            current = landed
+
+        if extract_product_ids(current):
+            return current, chain
+
+        # JS redirect: window.location.href = "..." or location.replace("...")
+        js_m = re.search(
+            r'(?:window\.location(?:\.href)?\s*=\s*|location\.replace\s*\()\s*["\']([^"\']+)["\']',
+            body,
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.url
-    except Exception:
-        return None
+        if js_m:
+            nxt = js_m.group(1).strip()
+            if nxt and nxt not in chain:
+                chain.append(nxt)
+                current = nxt
+                continue
+
+        # Meta-refresh
+        meta_m = re.search(
+            r'content=["\'][^"\']*url=([^"\'&\s>]+)', body, re.IGNORECASE
+        )
+        if meta_m:
+            nxt = meta_m.group(1).strip()
+            if nxt and nxt not in chain:
+                chain.append(nxt)
+                current = nxt
+                continue
+
+        break
+
+    return current, chain
 
 
 def extract_product_ids(url: str) -> tuple[int, int] | None:
@@ -215,12 +271,13 @@ def bulk_add_affiliate_links(
         }
 
     # Phase 1: resolve all links concurrently
-    resolved: list[tuple[str, str | None]] = [("", None)] * len(raw_links)
+    resolved: list[tuple[str, str | None, list[str]]] = [("", None, [])] * len(raw_links)
     with ThreadPoolExecutor(max_workers=min(10, len(raw_links))) as pool:
         future_map = {pool.submit(resolve_shopee_link, url): i for i, url in enumerate(raw_links)}
         for fut in as_completed(future_map):
             idx = future_map[fut]
-            resolved[idx] = (raw_links[idx], fut.result())
+            final_url, chain = fut.result()
+            resolved[idx] = (raw_links[idx], final_url, chain)
 
     # Phase 2: classify and store
     con = _connect(read_only=False)
@@ -236,23 +293,34 @@ def bulk_add_affiliate_links(
     invalid:       list[str]  = []
 
     try:
-        for original, final_url in resolved:
+        for original, final_url, chain in resolved:
             if not final_url:
                 invalid.append(original)
+                logger.info("[affiliate] ❌ network error  %s", original)
                 continue
+
+            logger.info("[affiliate] 🔗 %s", original)
+            if len(chain) > 1:
+                for hop in chain[1:]:
+                    logger.info("[affiliate]    → %s", hop)
 
             ids = extract_product_ids(final_url)
             if not ids:
+                logger.info("[affiliate]    ⚠️  no product IDs in resolved URL")
                 unmatched_acc.append({"original": original, "resolved": final_url, "reason": "no_product_ids"})
                 continue
 
             shopid, itemid = ids
+            logger.info("[affiliate]    shopid=%d  itemid=%d", shopid, itemid)
             canonical = f"https://shopee.co.th/product/{shopid}/{itemid}"
             product   = _match_product_in_db(con, shopid, itemid, table_name)
 
             if not product:
+                logger.info("[affiliate]    ⚠️  not found in DB")
                 unmatched_acc.append({"original": original, "resolved": final_url, "reason": "product_not_found"})
                 continue
+
+            logger.info("[affiliate]    ✅ %s", product["title"])
 
             # Duplicate: product already has an affiliate link stored
             existing = con.execute(

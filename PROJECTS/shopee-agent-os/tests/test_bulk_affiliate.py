@@ -75,9 +75,10 @@ class TestBulkAffiliateLinks(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_valid_matched_link(self) -> None:
         """A short link that resolves to a known product must be imported."""
+        short = "https://s.shopee.co.th/Abc123"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = KNOWN_URL
-            result = _run_bulk(self.db, ["https://s.shopee.co.th/Abc123"])
+            mock_res.return_value = (KNOWN_URL, [short, KNOWN_URL])
+            result = _run_bulk(self.db, [short])
 
         self.assertEqual(result["total"],    1)
         self.assertEqual(result["imported"], 1)
@@ -92,12 +93,14 @@ class TestBulkAffiliateLinks(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_duplicate_link(self) -> None:
         """A second link for the same product must be skipped as a duplicate."""
+        s1, s2 = "https://s.shopee.co.th/First111", "https://s.shopee.co.th/Second222"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = KNOWN_URL
+            mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL])
             # First import succeeds
-            _run_bulk(self.db, ["https://s.shopee.co.th/First111"])
+            _run_bulk(self.db, [s1])
+            mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL])
             # Second import for the same product → duplicate
-            result = _run_bulk(self.db, ["https://s.shopee.co.th/Second222"])
+            result = _run_bulk(self.db, [s2])
 
         self.assertEqual(result["total"],      1)
         self.assertEqual(result["imported"],   0)
@@ -110,9 +113,10 @@ class TestBulkAffiliateLinks(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_unmatched_link(self) -> None:
         """A link pointing to an unknown product must land in unmatched, not imported."""
+        short = "https://s.shopee.co.th/Unknown999"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = UNKNOWN_URL
-            result = _run_bulk(self.db, ["https://s.shopee.co.th/Unknown999"])
+            mock_res.return_value = (UNKNOWN_URL, [short, UNKNOWN_URL])
+            result = _run_bulk(self.db, [short])
 
         self.assertEqual(result["total"],     1)
         self.assertEqual(result["imported"],  0)
