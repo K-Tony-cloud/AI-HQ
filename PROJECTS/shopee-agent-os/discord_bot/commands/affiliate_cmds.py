@@ -655,6 +655,21 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             embed.add_field(name="ShopID",     value=str(result["shopid"]),      inline=True)
             embed.add_field(name="Short Link", value=f"`{short_url[:80]}`",      inline=False)
             embed.add_field(name="Status",     value="Saved" if action == "added" else "Updated", inline=True)
+
+            # Auto-fetch product images into asset library (fire-and-forget)
+            try:
+                from shopee_engine.asset_engine import fetch_and_save_product_assets
+                asset_r = await asyncio.to_thread(
+                    fetch_and_save_product_assets,
+                    result["itemid"],
+                    result["shopid"],
+                )
+                if asset_r.get("success") and asset_r.get("image_1"):
+                    embed.set_thumbnail(url=asset_r["image_1"])
+                    embed.add_field(name="🖼️ Assets", value="Images saved to asset library ✅", inline=False)
+            except Exception:
+                pass  # asset fetch failure must never block product-add
+
             await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
 
         except Exception as exc:

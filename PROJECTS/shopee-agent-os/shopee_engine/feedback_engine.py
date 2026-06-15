@@ -684,7 +684,128 @@ def profit_learning(top: int = 20) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 6. recommend_next_products
+# 6. get_revenue_dashboard  (Phase 11)
+# ---------------------------------------------------------------------------
+
+def get_revenue_dashboard(top_n: int = 5) -> dict:
+    """Aggregate revenue_feedback rows for the Discord revenue dashboard.
+
+    Returns totals, top clicked, top orders, top commission, EPC leaders,
+    and worst-performing products (clicks but no conversions).
+    """
+    if not config.db_path.exists():
+        return {"error": "Database not found"}
+
+    con = _connect(read_only=True)
+    try:
+        if not _has_table(con, REVENUE_TABLE):
+            return {
+                "error": (
+                    "No revenue data yet. Use /affiliate-import-report to import "
+                    "a Click / Order / Revenue CSV from the Shopee affiliate portal."
+                )
+            }
+
+        totals = con.execute(f"""
+            SELECT
+                COALESCE(SUM(clicks),     0) AS total_clicks,
+                COALESCE(SUM(orders),     0) AS total_orders,
+                COALESCE(SUM(revenue),    0) AS total_revenue,
+                COALESCE(SUM(commission), 0) AS total_commission,
+                COUNT(DISTINCT product_name) AS total_products,
+                MIN(report_date)             AS date_from,
+                MAX(report_date)             AS date_to
+            FROM {REVENUE_TABLE}
+        """).fetchone()
+
+        total_clicks     = float(totals[0] or 0)
+        total_orders     = float(totals[1] or 0)
+        total_revenue    = float(totals[2] or 0)
+        total_commission = float(totals[3] or 0)
+        total_products   = int(totals[4] or 0)
+        date_from        = totals[5] or "—"
+        date_to          = totals[6] or "—"
+        epc              = round(total_commission / total_clicks * 100, 4) if total_clicks > 0 else 0.0
+
+        def _fetch(sql: str) -> list:
+            return con.execute(sql).fetchall()
+
+        top_clicked = _fetch(f"""
+            SELECT product_name, SUM(clicks) AS c, SUM(orders) AS o
+            FROM {REVENUE_TABLE} GROUP BY product_name ORDER BY c DESC LIMIT {top_n}
+        """)
+
+        top_orders = _fetch(f"""
+            SELECT product_name, SUM(orders) AS o, SUM(revenue) AS r
+            FROM {REVENUE_TABLE} GROUP BY product_name ORDER BY o DESC LIMIT {top_n}
+        """)
+
+        top_commission = _fetch(f"""
+            SELECT product_name, SUM(commission) AS cm, SUM(clicks) AS c
+            FROM {REVENUE_TABLE} GROUP BY product_name ORDER BY cm DESC LIMIT {top_n}
+        """)
+
+        top_epc = _fetch(f"""
+            SELECT product_name,
+                   SUM(commission) / NULLIF(SUM(clicks), 0) AS epc,
+                   SUM(clicks)     AS c,
+                   SUM(commission) AS cm
+            FROM {REVENUE_TABLE}
+            GROUP BY product_name
+            HAVING SUM(clicks) >= 5
+            ORDER BY epc DESC LIMIT {top_n}
+        """)
+
+        worst = _fetch(f"""
+            SELECT product_name, SUM(clicks) AS c, SUM(orders) AS o, SUM(commission) AS cm
+            FROM {REVENUE_TABLE}
+            GROUP BY product_name
+            HAVING SUM(clicks) >= 5 AND SUM(orders) = 0
+            ORDER BY c DESC LIMIT {top_n}
+        """)
+
+        return {
+            "summary": {
+                "total_clicks":     total_clicks,
+                "total_orders":     total_orders,
+                "total_revenue":    total_revenue,
+                "total_commission": total_commission,
+                "total_products":   total_products,
+                "epc":              epc,
+                "date_from":        date_from,
+                "date_to":          date_to,
+            },
+            "top_clicked":    [
+                {"name": (r[0] or "")[:55], "clicks": float(r[1] or 0), "orders": float(r[2] or 0)}
+                for r in top_clicked
+            ],
+            "top_orders":     [
+                {"name": (r[0] or "")[:55], "orders": float(r[1] or 0), "revenue": float(r[2] or 0)}
+                for r in top_orders
+            ],
+            "top_commission": [
+                {"name": (r[0] or "")[:55], "commission": float(r[1] or 0), "clicks": float(r[2] or 0)}
+                for r in top_commission
+            ],
+            "top_epc":        [
+                {"name": (r[0] or "")[:55], "epc": float(r[1] or 0),
+                 "clicks": float(r[2] or 0), "commission": float(r[3] or 0)}
+                for r in top_epc
+            ],
+            "worst_performing": [
+                {"name": (r[0] or "")[:55], "clicks": float(r[1] or 0),
+                 "orders": float(r[2] or 0), "commission": float(r[3] or 0)}
+                for r in worst
+            ],
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+    finally:
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# 7. recommend_next_products
 # ---------------------------------------------------------------------------
 
 def _get_learned_weights(con: duckdb.DuckDBPyConnection) -> dict[str, float]:

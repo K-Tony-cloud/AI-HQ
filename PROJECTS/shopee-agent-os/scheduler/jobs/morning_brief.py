@@ -86,4 +86,17 @@ async def run_morning_brief(bot=None) -> None:
     except Exception as exc:
         logger.error("[job:morning_brief] Content worklist error: %s", exc)
 
+    # Revenue winners (Phase 11) — only if data has been imported
+    try:
+        from shopee_engine.feedback_engine import get_revenue_dashboard
+        from discord_bot.embeds.revenue_embeds import build_revenue_winners_embed
+
+        rev = get_revenue_dashboard(top_n=3)
+        if not rev.get("error") and rev.get("top_commission"):
+            rev_embed = build_revenue_winners_embed(rev)
+            await send_to_channel(bot, CHANNEL_MORNING_BRIEF, [rev_embed])
+            logger.info("[job:morning_brief] Revenue winners sent")
+    except Exception as exc:
+        logger.warning("[job:morning_brief] Revenue winners error: %s", exc)
+
     logger.info("[job:morning_brief] Done")
