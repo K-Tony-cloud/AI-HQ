@@ -57,9 +57,14 @@ def _init_affiliate_table(con: duckdb.DuckDBPyConnection) -> None:
             sub_id5         VARCHAR DEFAULT '',
             campaign        VARCHAR DEFAULT '',
             platform        VARCHAR DEFAULT '',
-            notes           VARCHAR DEFAULT ''
+            notes           VARCHAR DEFAULT '',
+            latest_link     BOOLEAN DEFAULT true,
+            status          VARCHAR DEFAULT 'matched'
         )
     """)
+    # migrate existing table
+    con.execute(f"ALTER TABLE {AFFILIATE_TABLE} ADD COLUMN IF NOT EXISTS latest_link BOOLEAN DEFAULT true")
+    con.execute(f"ALTER TABLE {AFFILIATE_TABLE} ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'matched'")
 
 
 def _has_table(con: duckdb.DuckDBPyConnection) -> bool:
@@ -91,9 +96,158 @@ def _init_unmatched_table(con: duckdb.DuckDBPyConnection) -> None:
             resolved_url  VARCHAR,
             reason        VARCHAR,
             campaign      VARCHAR DEFAULT '',
-            platform      VARCHAR DEFAULT ''
+            platform      VARCHAR DEFAULT '',
+            status        VARCHAR DEFAULT 'needs_manual_match'
         )
     """)
+    con.execute(f"ALTER TABLE {UNMATCHED_TABLE} ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'needs_manual_match'")
+
+
+def _fetch_page_metadata(url: str, timeout: int = 8) -> dict:
+    """Fetch first 16KB of a page and extract og:url and og:title / <title>.
+
+    Returns {"og_url": ..., "title": ...} with keys omitted if not found.
+    Catches all exceptions silently and returns {}.
+    """
+    try:
+        _ua = (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "Version/17.0 Mobile/15E148 Safari/604.1"
+        )
+        parsed = urlparse(url)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        conn = http.client.HTTPSConnection(parsed.netloc, timeout=timeout)
+        conn.request("GET", path, headers={
+            "Host": parsed.netloc,
+            "User-Agent": _ua,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8",
+        })
+        resp = conn.getresponse()
+        body = resp.read(16384).decode("utf-8", errors="replace")
+        conn.close()
+
+        result: dict = {}
+
+        # og:url — try both attribute orderings
+        m = re.search(r'<meta[^>]+property=["\']og:url["\'][^>]+content=["\']([^"\']+)["\']', body)
+        if not m:
+            m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:url["\']', body)
+        if m:
+            result["og_url"] = m.group(1).strip()
+
+        # og:title
+        m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', body)
+        if not m:
+            m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']', body)
+        if m:
+            result["title"] = m.group(1).strip()
+        else:
+            # fallback to <title>
+            m = re.search(r'<title[^>]*>([^<]+)</title>', body, re.IGNORECASE)
+            if m:
+                result["title"] = m.group(1).strip()
+
+        return result
+    except Exception:
+        return {}
+
+
+def _identify_product(final_url: str, chain: list[str]) -> dict:
+    """Identify a product from its resolved URL + redirect chain.
+
+    Priority:
+    1. extract_product_ids(final_url)
+    2. Loop reversed(chain[:-1]) → extract_product_ids
+    3. _fetch_page_metadata(final_url) → extract_product_ids(og_url)
+    4. Return title (or method='none')
+    """
+    # 1. Direct IDs from final_url
+    ids = extract_product_ids(final_url)
+    if ids:
+        shopid, itemid = ids
+        return {"shopid": shopid, "itemid": itemid, "method": "ids"}
+
+    # 2. IDs from redirect chain (skip last element which is final_url)
+    for hop in reversed(chain[:-1]):
+        ids = extract_product_ids(hop)
+        if ids:
+            shopid, itemid = ids
+            return {"shopid": shopid, "itemid": itemid, "method": "ids_from_chain"}
+
+    # 3. Fetch page metadata and try og:url
+    meta = _fetch_page_metadata(final_url)
+    og_url = meta.get("og_url")
+    if og_url:
+        ids = extract_product_ids(og_url)
+        if ids:
+            shopid, itemid = ids
+            return {"shopid": shopid, "itemid": itemid, "method": "og_url", "og_url": og_url}
+
+    # 4. Fall back to title
+    title = meta.get("title")
+    return {"title": title, "method": "title" if title else "none"}
+
+
+def _fuzzy_match_by_title(
+    con: duckdb.DuckDBPyConnection,
+    title: str,
+    table_name: str,
+) -> dict | None:
+    """Attempt to match a product by fuzzy title search (ILIKE).
+
+    Strips common Shopee suffix noise, checks title length, then queries.
+    Returns product dict or None.
+    """
+    if not title:
+        return None
+
+    # Strip trailing noise
+    clean = re.sub(r'\s*[-|]\s*(Shopee Thailand|Shopee)\s*$', '', title, flags=re.IGNORECASE).strip()
+    if len(clean) < 5:
+        return None
+
+    try:
+        cols = [r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            [table_name]
+        ).fetchall()]
+    except Exception:
+        return None
+
+    if not cols:
+        return None
+
+    lm = {c.lower(): c for c in cols}
+    itemid_col = lm.get("itemid") or lm.get("item_id") or lm.get("product_id")
+    shopid_col = lm.get("shopid") or lm.get("shop_id")
+    title_col  = lm.get("title") or lm.get("name") or lm.get("product_name")
+    pl_col     = lm.get("product_link") or lm.get("product_url") or lm.get("url")
+
+    if not itemid_col or not shopid_col or not title_col:
+        return None
+
+    pl_expr = f'COALESCE("{pl_col}", \'\')' if pl_col else "''"
+
+    try:
+        row = con.execute(
+            f'SELECT CAST("{itemid_col}" AS BIGINT), CAST("{shopid_col}" AS BIGINT), '
+            f'"{title_col}", {pl_expr} '
+            f'FROM "{table_name}" '
+            f'WHERE "{title_col}" ILIKE ? '
+            f'LIMIT 1',
+            [f"%{clean[:40]}%"]
+        ).fetchone()
+        if row:
+            pl = row[3] or f"https://shopee.co.th/product/{row[1]}/{row[0]}"
+            return {"itemid": row[0], "shopid": row[1], "title": row[2], "product_link": pl}
+    except Exception:
+        pass
+
+    return None
 
 
 def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[str]]:
@@ -255,9 +409,17 @@ def bulk_add_affiliate_links(
 ) -> dict:
     """Resolve and bulk-import Shopee affiliate short links.
 
-    Each link is resolved via HTTP redirect, matched against the products table,
-    and stored in affiliate_links. Unmatched links are saved to
-    affiliate_links_unmatched for review.
+    The affiliate short link is used as the link-to-store value. Product
+    identity is determined by shopid+itemid extracted from the resolved URL
+    (or redirect chain / page metadata). Multiple affiliate links per product
+    are allowed; a ``latest_link`` flag tracks the newest one.
+
+    Result categories:
+    - imported        — first link ever stored for this product
+    - updated         — additional link for a product that already has links
+    - needs_manual_match — resolved OK but product could not be identified
+    - invalid         — network error (final_url is None)
+    - duplicate_links — exact same affiliate_link URL already in DB
 
     Returns a summary dict with counts and per-link details.
     """
@@ -268,8 +430,17 @@ def bulk_add_affiliate_links(
     raw_links = [lnk.strip() for lnk in links if lnk.strip()]
     if not raw_links:
         return {
-            "total": 0, "imported": 0, "duplicates": 0, "unmatched": 0, "invalid": 0,
-            "matched_products": [], "unmatched_links": [], "duplicate_products": [], "invalid_links": [],
+            "total": 0,
+            "imported": 0,
+            "updated": 0,
+            "needs_manual_match": 0,
+            "invalid": 0,
+            "duplicate_links": 0,
+            "imported_products": [],
+            "updated_products": [],
+            "unmatched_links": [],
+            "invalid_links": [],
+            "duplicate_link_urls": [],
         }
 
     # Phase 1: resolve all links concurrently
@@ -289,10 +460,11 @@ def bulk_add_affiliate_links(
     now_str   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     s1, s2, s3, s4, s5 = sub_ids
 
-    matched:       list[dict] = []
-    unmatched_acc: list[dict] = []
-    duplicates:    list[dict] = []
-    invalid:       list[str]  = []
+    imported:   list[dict] = []
+    updated:    list[dict] = []
+    unmatched:  list[dict] = []
+    invalid:    list[str]  = []
+    dup_links:  list[str]  = []
 
     try:
         for original, final_url, chain in resolved:
@@ -306,72 +478,190 @@ def bulk_add_affiliate_links(
                 for hop in chain[1:]:
                     logger.info("[affiliate]    → %s", hop)
 
-            ids = extract_product_ids(final_url)
-            if not ids:
-                logger.info("[affiliate]    ⚠️  no product IDs in resolved URL")
-                unmatched_acc.append({"original": original, "resolved": final_url, "reason": "no_product_ids"})
+            # Check for exact duplicate affiliate link URL already in DB
+            dup_row = con.execute(
+                f"SELECT id FROM {AFFILIATE_TABLE} WHERE affiliate_link = ?", [original]
+            ).fetchone()
+            if dup_row:
+                dup_links.append(original)
+                logger.info("[affiliate]    ♻️  duplicate link (exact URL already stored)")
                 continue
 
-            shopid, itemid = ids
-            logger.info("[affiliate]    shopid=%d  itemid=%d", shopid, itemid)
-            canonical = f"https://shopee.co.th/product/{shopid}/{itemid}"
-            product   = _match_product_in_db(con, shopid, itemid, table_name)
+            # Identify the product from the resolved URL / chain / metadata
+            identity = _identify_product(final_url, chain)
+            shopid = identity.get("shopid")
+            itemid = identity.get("itemid")
+            product: dict | None = None
 
-            if not product:
-                logger.info("[affiliate]    ⚠️  not found in DB")
-                unmatched_acc.append({"original": original, "resolved": final_url, "reason": "product_not_found"})
+            if shopid is not None and itemid is not None:
+                logger.info("[affiliate]    shopid=%d  itemid=%d  (via %s)", shopid, itemid, identity.get("method"))
+                product = _match_product_in_db(con, shopid, itemid, table_name)
+
+            if product is None and identity.get("title"):
+                product = _fuzzy_match_by_title(con, identity["title"], table_name)
+
+            if product is None:
+                logger.info("[affiliate]    ⚠️  product not identified → needs_manual_match")
+                unmatched_entry: dict = {
+                    "original": original,
+                    "resolved": final_url,
+                    "reason": "product_not_identified",
+                }
+                max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {UNMATCHED_TABLE}").fetchone()[0]
+                con.execute(f"""
+                    INSERT INTO {UNMATCHED_TABLE}
+                    (id, created_at, original_link, resolved_url, reason, campaign, platform, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    max_id + 1, now_str, original, final_url,
+                    "product_not_identified", campaign, platform, "needs_manual_match",
+                ])
+                unmatched_entry["unmatched_id"] = max_id + 1
+                unmatched.append(unmatched_entry)
                 continue
 
             logger.info("[affiliate]    ✅ %s", product["title"])
 
-            # Duplicate: product already has an affiliate link stored
-            existing = con.execute(
-                f"SELECT affiliate_link FROM {AFFILIATE_TABLE} WHERE product_link = ?", [canonical]
-            ).fetchone()
-            if existing and existing[0]:
-                duplicates.append({"title": product["title"], "link": original, "existing_link": existing[0]})
-                continue
+            canonical = f"https://shopee.co.th/product/{product['shopid']}/{product['itemid']}"
 
-            # Upsert
-            con.execute(f"DELETE FROM {AFFILIATE_TABLE} WHERE product_link = ?", [canonical])
+            # Count existing links for this product
+            existing_count = con.execute(
+                f"SELECT COUNT(*) FROM {AFFILIATE_TABLE} WHERE itemid = ? AND shopid = ?",
+                [product["itemid"], product["shopid"]],
+            ).fetchone()[0]
+
+            # Mark older links as not-latest
+            con.execute(
+                f"UPDATE {AFFILIATE_TABLE} SET latest_link = false WHERE itemid = ? AND shopid = ?",
+                [product["itemid"], product["shopid"]],
+            )
+
+            # Insert new row
             max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {AFFILIATE_TABLE}").fetchone()[0]
             con.execute(f"""
                 INSERT INTO {AFFILIATE_TABLE}
                 (id, created_at, itemid, shopid, product_link, affiliate_link,
-                 sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, campaign, platform, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, campaign, platform, notes,
+                 latest_link, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 max_id + 1, now_str,
                 product["itemid"], product["shopid"],
                 canonical, original,
                 s1 or campaign, s2 or platform, s3, s4, s5,
                 campaign, platform, "",
+                True, "matched",
             ])
-            matched.append({"title": product["title"], "link": original, "product_link": canonical})
 
-        # Persist unmatched entries for operator review
-        for u in unmatched_acc:
-            max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {UNMATCHED_TABLE}").fetchone()[0]
-            con.execute(f"""
-                INSERT INTO {UNMATCHED_TABLE}
-                (id, created_at, original_link, resolved_url, reason, campaign, platform)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, [max_id + 1, now_str, u["original"], u.get("resolved", ""), u["reason"], campaign, platform])
+            entry = {"title": product["title"], "link": original, "product_link": canonical}
+            if existing_count > 0:
+                updated.append(entry)
+                logger.info("[affiliate]    🔄 updated (additional link for product)")
+            else:
+                imported.append(entry)
+                logger.info("[affiliate]    ✅ imported (first link for product)")
 
     finally:
         con.close()
 
     return {
-        "total":             len(raw_links),
-        "imported":          len(matched),
-        "duplicates":        len(duplicates),
-        "unmatched":         len(unmatched_acc),
-        "invalid":           len(invalid),
-        "matched_products":  matched,
-        "unmatched_links":   unmatched_acc,
-        "duplicate_products": duplicates,
-        "invalid_links":     invalid,
+        "total":               len(raw_links),
+        "imported":            len(imported),
+        "updated":             len(updated),
+        "needs_manual_match":  len(unmatched),
+        "invalid":             len(invalid),
+        "duplicate_links":     len(dup_links),
+        "imported_products":   imported,
+        "updated_products":    updated,
+        "unmatched_links":     unmatched,
+        "invalid_links":       invalid,
+        "duplicate_link_urls": dup_links,
     }
+
+
+def manual_match_affiliate_link(
+    unmatched_id: int,
+    keyword: str,
+    table_name: str | None = None,
+) -> dict:
+    """Manually match an unmatched affiliate link to a product by keyword or URL.
+
+    Fetches the unmatched record, tries fuzzy title search, and if keyword
+    looks like a URL also tries extract_product_ids + _match_product_in_db.
+    On success: marks other links for the product as not-latest, inserts the
+    new affiliate link row, and marks the unmatched record as 'matched'.
+    """
+    table_name = table_name or config.default_table
+    if not config.db_path.exists():
+        return {"success": False, "error": "No database found."}
+
+    con = _connect(read_only=False)
+    try:
+        row = con.execute(
+            f"SELECT id, original_link, resolved_url FROM {UNMATCHED_TABLE} WHERE id = ?",
+            [unmatched_id],
+        ).fetchone()
+        if not row:
+            return {"success": False, "error": f"No unmatched record with id={unmatched_id}"}
+
+        _, original_link, resolved_url = row
+
+        product: dict | None = None
+
+        # Try fuzzy title match first
+        product = _fuzzy_match_by_title(con, keyword, table_name)
+
+        # If keyword looks like a URL, also try extract_product_ids
+        if product is None and ("http://" in keyword or "https://" in keyword):
+            ids = extract_product_ids(keyword)
+            if ids:
+                shopid, itemid = ids
+                product = _match_product_in_db(con, shopid, itemid, table_name)
+
+        if product is None:
+            return {"success": False, "error": f"No product found matching keyword: {keyword!r}"}
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        canonical = f"https://shopee.co.th/product/{product['shopid']}/{product['itemid']}"
+
+        # Mark existing links for this product as not-latest
+        con.execute(
+            f"UPDATE {AFFILIATE_TABLE} SET latest_link = false WHERE itemid = ? AND shopid = ?",
+            [product["itemid"], product["shopid"]],
+        )
+
+        # Insert new affiliate link row
+        max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {AFFILIATE_TABLE}").fetchone()[0]
+        con.execute(f"""
+            INSERT INTO {AFFILIATE_TABLE}
+            (id, created_at, itemid, shopid, product_link, affiliate_link,
+             sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, campaign, platform, notes,
+             latest_link, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            max_id + 1, now_str,
+            product["itemid"], product["shopid"],
+            canonical, original_link,
+            "", "", "", "", "",
+            "", "", "",
+            True, "matched",
+        ])
+
+        # Mark unmatched record as matched
+        con.execute(
+            f"UPDATE {UNMATCHED_TABLE} SET status = 'matched' WHERE id = ?",
+            [unmatched_id],
+        )
+
+        return {
+            "success": True,
+            "product": product,
+            "affiliate_link": original_link,
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+    finally:
+        con.close()
 
 
 # ---------------------------------------------------------------------------
@@ -781,32 +1071,39 @@ def print_link_coverage(data: dict) -> None:
 def print_bulk_add_result(data: dict) -> None:
     total     = data["total"]
     imported  = data["imported"]
-    dupes     = data["duplicates"]
-    unmatched = data["unmatched"]
+    updated   = data.get("updated", 0)
+    unmatched = data.get("needs_manual_match", 0)
     invalid   = data["invalid"]
+    dup_links = data.get("duplicate_links", 0)
 
     color = "green" if imported > 0 else "yellow"
     console.print(Panel(
         f"[bold {color}]✅ Imported  : {imported}[/bold {color}]\n"
         f"Total       : {total}\n"
-        f"[yellow]Duplicates  : {dupes}[/yellow]\n"
-        f"[red]Unmatched   : {unmatched}[/red]\n"
+        f"[cyan]Updated     : {updated}[/cyan]\n"
+        f"[yellow]Needs match : {unmatched}[/yellow]\n"
+        f"[yellow]Duplicates  : {dup_links}[/yellow]\n"
         f"[red]Invalid     : {invalid}[/red]",
         title="[bold]Bulk Affiliate Link Import[/]",
         expand=False,
     ))
 
-    if data["matched_products"]:
+    if data.get("imported_products"):
         tbl = Table(show_lines=False, expand=False)
         tbl.add_column("#",       width=4, style="dim", justify="right")
         tbl.add_column("Product", max_width=55)
         tbl.add_column("Link",    max_width=42)
-        for i, p in enumerate(data["matched_products"], 1):
+        for i, p in enumerate(data["imported_products"], 1):
             tbl.add_row(str(i), str(p["title"])[:55], str(p["link"])[:42])
         console.print(tbl)
 
+    if data.get("updated_products"):
+        console.print("\n[cyan]🔄 Updated (additional links):[/]")
+        for p in data["updated_products"][:5]:
+            console.print(f"  [dim]{p['title'][:60]}[/]")
+
     if data["unmatched_links"]:
-        console.print("\n[red]⚠ Unmatched (saved to affiliate_links_unmatched for review):[/]")
+        console.print("\n[red]⚠ Needs manual match (saved to affiliate_links_unmatched for review):[/]")
         for u in data["unmatched_links"][:10]:
             console.print(f"  [dim]{u['original'][:60]}[/]  → [red]{u['reason']}[/]")
 

@@ -77,48 +77,52 @@ def _missing_links_embeds(data: dict) -> list[discord.Embed]:
 
 
 def _bulk_add_embed(data: dict) -> discord.Embed:
-    imported  = data["imported"]
-    total     = data["total"]
-    dupes     = data["duplicates"]
-    unmatched = data["unmatched"]
-    invalid   = data["invalid"]
+    imported   = data["imported"]
+    updated    = data.get("updated", 0)
+    total      = data["total"]
+    unmatched  = data.get("needs_manual_match", 0)
+    invalid    = data["invalid"]
+    dup_links  = data.get("duplicate_links", 0)
 
     color = (
         discord.Color.green()  if imported > 0 and unmatched == 0 and invalid == 0
-        else discord.Color.yellow() if imported > 0
+        else discord.Color.yellow() if imported > 0 or updated > 0
+        else discord.Color.orange() if unmatched > 0 and invalid == 0
         else discord.Color.red()
     )
     embed = discord.Embed(title="🔗 Bulk Affiliate Links — Import Summary", color=color)
-    embed.add_field(name="📥 Received",    value=str(total),    inline=True)
-    embed.add_field(name="✅ Imported",    value=str(imported), inline=True)
-    embed.add_field(name="♻️ Duplicates",  value=str(dupes),    inline=True)
-    embed.add_field(name="⚠️ Unmatched",   value=str(unmatched), inline=True)
-    embed.add_field(name="❌ Invalid",     value=str(invalid),  inline=True)
+    embed.add_field(name="📥 Received",           value=str(total),     inline=True)
+    embed.add_field(name="✅ Saved (new)",         value=str(imported),  inline=True)
+    embed.add_field(name="🔄 Updated (new link)",  value=str(updated),   inline=True)
+    embed.add_field(name="🔍 Needs manual match",  value=str(unmatched), inline=True)
+    embed.add_field(name="♻️ Duplicate link",      value=str(dup_links), inline=True)
+    embed.add_field(name="❌ Invalid",             value=str(invalid),   inline=True)
 
-    if data["matched_products"]:
+    if data.get("imported_products"):
         lines = "\n".join(
             f"`{i:>2}.` {p['title'][:50]}"
-            for i, p in enumerate(data["matched_products"][:10], 1)
+            for i, p in enumerate(data["imported_products"][:10], 1)
         )
-        embed.add_field(name="Matched products", value=lines, inline=False)
+        embed.add_field(name="✅ Saved products", value=lines, inline=False)
 
-    if data["unmatched_links"]:
+    if data.get("updated_products"):
+        lines = "\n".join(
+            f"`{i:>2}.` {p['title'][:50]}"
+            for i, p in enumerate(data["updated_products"][:5], 1)
+        )
+        embed.add_field(name="🔄 Updated products", value=lines, inline=False)
+
+    if data.get("unmatched_links"):
         parts = []
         for u in data["unmatched_links"][:5]:
             resolved = u.get("resolved") or ""
+            uid = u.get("unmatched_id", "?")
             parts.append(
                 f"• `{u['original'][:35]}`\n"
                 f"  → `{resolved[:50] or 'no response'}`\n"
-                f"  ↳ {u['reason']}"
+                f"  ↳ Use `/affiliate-link-match {uid} <keyword>`"
             )
-        embed.add_field(name="⚠️ Unmatched links", value="\n".join(parts), inline=False)
-
-    if data["duplicate_products"]:
-        lines = "\n".join(
-            f"• {p['title'][:45]}"
-            for p in data["duplicate_products"][:5]
-        )
-        embed.add_field(name="♻️ Already have links", value=lines, inline=False)
+        embed.add_field(name="🔍 Needs manual match", value="\n".join(parts), inline=False)
 
     return embed
 
@@ -243,6 +247,41 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             await interaction.followup.send(embed=embed)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed("Import Links Status", str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-link-match  — manually match an unmatched link
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-link-match",
+        description="Manually match an unmatched affiliate link to a product by keyword",
+    )
+    @app_commands.describe(
+        unmatched_id="ID shown in the 'Needs manual match' section",
+        product_keyword="Product keyword or title to search for",
+    )
+    async def cmd_affiliate_link_match(
+        self,
+        interaction: discord.Interaction,
+        unmatched_id: int,
+        product_keyword: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            import asyncio
+            from shopee_engine.affiliate_link_engine import manual_match_affiliate_link
+            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
+            result = await asyncio.to_thread(manual_match_affiliate_link, unmatched_id, product_keyword)
+            if result["success"]:
+                product = result["product"]
+                embed = discord.Embed(title="✅ Manual Match Successful", color=discord.Color.green())
+                embed.add_field(name="Unmatched ID", value=str(unmatched_id), inline=True)
+                embed.add_field(name="Matched Product", value=product["title"][:80], inline=False)
+                embed.add_field(name="Affiliate Link", value=f"`{result['affiliate_link'][:80]}`", inline=False)
+            else:
+                embed = discord.Embed(title="❌ Manual Match Failed", description=result["error"], color=discord.Color.red())
+            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed("Affiliate Link Match", str(exc)))
 
     # ------------------------------------------------------------------
     # /affiliate-link-add  — bulk paste affiliate short links

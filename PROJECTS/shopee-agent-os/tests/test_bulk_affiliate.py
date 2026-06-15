@@ -2,8 +2,11 @@
 
 Covers:
 - valid link that resolves to a known product → imported
-- duplicate link (product already has a stored link) → skipped
-- link that resolves to an unknown product → unmatched, saved for review
+- two different links for same product → first imported, second updated
+- exact same link submitted twice → second is duplicate_links
+- link resolves OK but no product IDs / no metadata → needs_manual_match
+- network error → invalid
+- link pointing to an unknown product → needs_manual_match, saved for review
 """
 
 from __future__ import annotations
@@ -82,37 +85,81 @@ class TestBulkAffiliateLinks(unittest.TestCase):
 
         self.assertEqual(result["total"],    1)
         self.assertEqual(result["imported"], 1)
-        self.assertEqual(result["unmatched"], 0)
+        self.assertEqual(result["needs_manual_match"], 0)
         self.assertEqual(result["invalid"],   0)
-        self.assertEqual(result["duplicates"], 0)
-        self.assertEqual(len(result["matched_products"]), 1)
-        self.assertIn("Dr.PONG", result["matched_products"][0]["title"])
+        self.assertEqual(result["duplicate_links"], 0)
+        self.assertEqual(len(result["imported_products"]), 1)
+        self.assertIn("Dr.PONG", result["imported_products"][0]["title"])
 
     # ------------------------------------------------------------------
-    # 2. Duplicate link
+    # 2. Two different short links for same product (updated, not duplicate)
     # ------------------------------------------------------------------
-    def test_duplicate_link(self) -> None:
-        """A second link for the same product must be skipped as a duplicate."""
-        s1, s2 = "https://s.shopee.co.th/First111", "https://s.shopee.co.th/Second222"
+    def test_same_product_two_different_links(self) -> None:
+        """Two different short links for the same product: first→imported, second→updated."""
+        s1, s2 = "https://s.shopee.co.th/Link001", "https://s.shopee.co.th/Link002"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
             mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL])
-            # First import succeeds
-            _run_bulk(self.db, [s1])
+            r1 = _run_bulk(self.db, [s1])
             mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL])
-            # Second import for the same product → duplicate
-            result = _run_bulk(self.db, [s2])
+            r2 = _run_bulk(self.db, [s2])
 
-        self.assertEqual(result["total"],      1)
-        self.assertEqual(result["imported"],   0)
-        self.assertEqual(result["duplicates"], 1)
-        self.assertEqual(result["unmatched"],  0)
-        self.assertIn("Dr.PONG", result["duplicate_products"][0]["title"])
+        self.assertEqual(r1["imported"], 1)
+        self.assertEqual(r1["updated"], 0)
+        self.assertEqual(r2["imported"], 0)
+        self.assertEqual(r2["updated"], 1)
+        self.assertEqual(r2["duplicate_links"], 0)
 
     # ------------------------------------------------------------------
-    # 3. Unmatched link
+    # 3. Exact same link submitted twice → second is duplicate_links
+    # ------------------------------------------------------------------
+    def test_same_link_repeated(self) -> None:
+        """Submitting the exact same short link twice → second submission is a duplicate_link."""
+        short = "https://s.shopee.co.th/SameLink"
+        with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
+            mock_res.return_value = (KNOWN_URL, [short, KNOWN_URL])
+            _run_bulk(self.db, [short])
+            result = _run_bulk(self.db, [short])
+
+        self.assertEqual(result["duplicate_links"], 1)
+        self.assertEqual(result["imported"], 0)
+        self.assertEqual(result["updated"], 0)
+
+    # ------------------------------------------------------------------
+    # 4. Link resolves OK but no product IDs / no metadata → needs_manual_match
+    # ------------------------------------------------------------------
+    def test_valid_link_no_product_id(self) -> None:
+        """Link resolves to a URL with no product IDs and no page metadata → needs_manual_match."""
+        short = "https://s.shopee.co.th/NoIdLink"
+        no_id_url = "https://shopee.co.th/search?keyword=something"
+        with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res, \
+             patch("shopee_engine.affiliate_link_engine._fetch_page_metadata") as mock_meta:
+            mock_res.return_value = (no_id_url, [short, no_id_url])
+            mock_meta.return_value = {}   # no og:url, no title
+            result = _run_bulk(self.db, [short])
+
+        self.assertEqual(result["needs_manual_match"], 1)
+        self.assertEqual(result["invalid"], 0)
+        self.assertEqual(result["imported"], 0)
+
+    # ------------------------------------------------------------------
+    # 5. Network error → invalid (not unmatched)
+    # ------------------------------------------------------------------
+    def test_broken_link(self) -> None:
+        """Network error → invalid (not unmatched)."""
+        short = "https://s.shopee.co.th/BrokenLink"
+        with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
+            mock_res.return_value = (None, [short])
+            result = _run_bulk(self.db, [short])
+
+        self.assertEqual(result["invalid"], 1)
+        self.assertEqual(result["needs_manual_match"], 0)
+        self.assertEqual(result["imported"], 0)
+
+    # ------------------------------------------------------------------
+    # 6. Link pointing to an unknown product → needs_manual_match
     # ------------------------------------------------------------------
     def test_unmatched_link(self) -> None:
-        """A link pointing to an unknown product must land in unmatched, not imported."""
+        """A link pointing to an unknown product must land in needs_manual_match, not imported."""
         short = "https://s.shopee.co.th/Unknown999"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
             mock_res.return_value = (UNKNOWN_URL, [short, UNKNOWN_URL])
@@ -120,9 +167,9 @@ class TestBulkAffiliateLinks(unittest.TestCase):
 
         self.assertEqual(result["total"],     1)
         self.assertEqual(result["imported"],  0)
-        self.assertEqual(result["unmatched"], 1)
+        self.assertEqual(result["needs_manual_match"], 1)
         self.assertEqual(result["invalid"],   0)
-        self.assertEqual(result["unmatched_links"][0]["reason"], "product_not_found")
+        self.assertEqual(result["unmatched_links"][0]["reason"], "product_not_identified")
 
         # Verify the unmatched entry was persisted to the DB
         import duckdb
@@ -132,6 +179,23 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         con.close()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], "https://s.shopee.co.th/Unknown999")
+
+    # ------------------------------------------------------------------
+    # 7. (Legacy name alias) duplicate_link — different links same product → updated
+    # ------------------------------------------------------------------
+    def test_duplicate_link(self) -> None:
+        """Two DIFFERENT short links for the same product: first→imported, second→updated."""
+        s1, s2 = "https://s.shopee.co.th/First111", "https://s.shopee.co.th/Second222"
+        with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
+            mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL])
+            r1 = _run_bulk(self.db, [s1])
+            mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL])
+            r2 = _run_bulk(self.db, [s2])
+
+        self.assertEqual(r1["imported"], 1)
+        self.assertEqual(r2["updated"], 1)
+        self.assertEqual(r2["duplicate_links"], 0)
+        self.assertIn("Dr.PONG", r2["updated_products"][0]["title"])
 
 
 if __name__ == "__main__":
