@@ -72,7 +72,7 @@ class ShopeeScheduler:
                 kwargs={"bot": self.bot},
                 replace_existing=True,
                 max_instances=1,
-                misfire_grace_time=300,
+                misfire_grace_time=3600,
                 coalesce=True,
             )
             logger.debug("[scheduler] registered: %s", job_id)
