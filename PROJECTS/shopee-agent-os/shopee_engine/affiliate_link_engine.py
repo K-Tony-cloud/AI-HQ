@@ -7,6 +7,7 @@ this module exports the task list, imports the results, and tracks coverage.
 from __future__ import annotations
 
 import csv as csv_mod
+import http.client
 import http.cookiejar
 import logging
 import re
@@ -96,66 +97,62 @@ def _init_unmatched_table(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[str]]:
-    """Follow HTTP and JS redirects for a Shopee short link.
+    """Resolve a Shopee short link to its canonical product URL.
+
+    Uses raw http.client (not urllib) to capture 301 Location headers directly.
+    urllib's redirect-following internally loses the intermediate redirect URL
+    because Shopee's CDN returns 200 on the final hop of its redirect chain
+    but the intermediate product URL is only visible in the Location header.
 
     Returns (final_url, redirect_chain). final_url is None only on network error.
-    Uses a mobile User-Agent so Shopee issues clean HTTP 301/302 redirects instead
-    of JS-redirect pages that urllib cannot follow automatically.
     """
     chain: list[str] = [url]
     current = url
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-            "Version/17.0 Mobile/15E148 Safari/604.1"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8",
-    }
-    jar = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    _ua = (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/17.0 Mobile/15E148 Safari/604.1"
+    )
 
     for _ in range(8):
+        parsed = urlparse(current)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
         try:
-            req = urllib.request.Request(current, headers=headers)
-            with opener.open(req, timeout=timeout) as resp:
-                landed = resp.url
-                body = resp.read(8192).decode("utf-8", errors="ignore")
+            conn = http.client.HTTPSConnection(parsed.netloc, timeout=timeout)
+            conn.request("GET", path, headers={
+                "Host": parsed.netloc,
+                "User-Agent": _ua,
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8",
+            })
+            resp = conn.getresponse()
+            status = resp.status
+            location = resp.getheader("Location") or ""
+            resp.read()  # drain body
+            conn.close()
         except Exception as exc:
             logger.debug("[resolve] %s → error: %s", current, exc)
             return None, chain
 
-        if landed != current:
-            chain.append(landed)
-            current = landed
+        if status in (301, 302, 303, 307, 308) and location:
+            # Resolve relative Location headers
+            if location.startswith("/"):
+                location = f"{parsed.scheme}://{parsed.netloc}{location}"
+            if location not in chain:
+                chain.append(location)
+            current = location
+            if extract_product_ids(current):
+                return current, chain
+            continue
 
+        # Non-redirect (200 / other) — check if current URL already has IDs
         if extract_product_ids(current):
             return current, chain
 
-        # JS redirect: window.location.href = "..." or location.replace("...")
-        js_m = re.search(
-            r'(?:window\.location(?:\.href)?\s*=\s*|location\.replace\s*\()\s*["\']([^"\']+)["\']',
-            body,
-        )
-        if js_m:
-            nxt = js_m.group(1).strip()
-            if nxt and nxt not in chain:
-                chain.append(nxt)
-                current = nxt
-                continue
-
-        # Meta-refresh
-        meta_m = re.search(
-            r'content=["\'][^"\']*url=([^"\'&\s>]+)', body, re.IGNORECASE
-        )
-        if meta_m:
-            nxt = meta_m.group(1).strip()
-            if nxt and nxt not in chain:
-                chain.append(nxt)
-                current = nxt
-                continue
-
+        # No more redirects — return wherever we landed
         break
 
     return current, chain
@@ -165,8 +162,9 @@ def extract_product_ids(url: str) -> tuple[int, int] | None:
     """Extract (shopid, itemid) from a Shopee product URL.
 
     Handles:
-      /product/<shopid>/<itemid>
-      <name>-i.<shopid>.<itemid>
+      /product/<shopid>/<itemid>          — canonical product page
+      <name>-i.<shopid>.<itemid>          — SEO slug format
+      shopee.co.th/<shop_slug>/<shopid>/<itemid>  — affiliate redirect target
     """
     if not url:
         return None
@@ -174,6 +172,10 @@ def extract_product_ids(url: str) -> tuple[int, int] | None:
     if m:
         return int(m.group(1)), int(m.group(2))
     m = re.search(r'-i\.(\d+)\.(\d+)', url)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    # Affiliate redirect format: shopee.co.th/<slug>/<shopid(5+d)>/<itemid(8+d)>
+    m = re.search(r'shopee\.co\.th/[^/?#]+/(\d{5,})/(\d{8,})', url)
     if m:
         return int(m.group(1)), int(m.group(2))
     return None
