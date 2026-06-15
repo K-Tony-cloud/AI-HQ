@@ -849,6 +849,14 @@ def get_control_center_stats() -> dict:
     # Category coverage (fast — top 10 per bucket)
     cat_cov = get_category_coverage(top_n=10)
 
+    # Asset coverage (Phase 10.5B)
+    asset_cov: dict = {}
+    try:
+        from shopee_engine.asset_engine import get_asset_coverage
+        asset_cov = get_asset_coverage([20, 50, 100])
+    except Exception:
+        pass
+
     return {
         "total":            dash["total"],
         "with_link":        dash["with_link"],
@@ -858,6 +866,7 @@ def get_control_center_stats() -> dict:
         "recent":           recent,
         "issues":           len(health.get("issues", [])),
         "category_coverage": cat_cov.get("categories", []),
+        "asset_coverage":   asset_cov,
     }
 
 

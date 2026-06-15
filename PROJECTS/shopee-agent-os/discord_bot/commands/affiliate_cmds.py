@@ -1123,6 +1123,7 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             n_issues     = stats["issues"]
             recent       = stats.get("recent", [])
             cat_cov      = stats.get("category_coverage", [])
+            asset_cov    = stats.get("asset_coverage", {})
 
             health_emoji  = "🟢" if health    >= 80 else "🟡" if health    >= 50 else "🔴"
             top10_emoji   = "🟢" if top10_pct >= 80 else "🟡" if top10_pct >= 40 else "🔴"
@@ -1174,13 +1175,38 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
                 )
                 embed.add_field(name="🕐 Recent Activity", value=lines, inline=False)
 
+            # Asset coverage section (Phase 10.5B)
+            if asset_cov:
+                def _a_emoji(pct: float) -> str:
+                    return "🟢" if pct >= 80 else "🟡" if pct >= 40 else "🔴"
+                def _a_bar(pct: float, w: int = 8) -> str:
+                    f = int(pct / 100 * w)
+                    return "█" * f + "░" * (w - f)
+
+                asset_lines = []
+                for n in [20, 50, 100]:
+                    d   = asset_cov.get(n, {})
+                    cv  = d.get("covered", 0)
+                    tot = d.get("total", n)
+                    p   = d.get("pct", 0.0)
+                    asset_lines.append(
+                        f"{_a_emoji(p)} **Top {n}** {cv}/{tot} ({p}%)  `{_a_bar(p)}`"
+                    )
+                pct50 = asset_cov.get(50, {}).get("pct", 0.0)
+                target_note = "✅ Target met" if pct50 >= 80 else f"⚠️ Target: 80% (need {round(50*0.8 - asset_cov.get(50,{}).get('covered',0))} more)"
+                embed.add_field(
+                    name="🖼️ Asset Coverage",
+                    value="\n".join(asset_lines) + f"\n{target_note}",
+                    inline=False,
+                )
+
             embed.add_field(
                 name="Quick Commands",
                 value=(
-                    "`/affiliate-category-report` — full category breakdown\n"
-                    "`/affiliate-missing-category <cat>` — missing per category\n"
+                    "`/asset-coverage` — image asset tiers\n"
+                    "`/asset-missing` — products needing images\n"
+                    "`/affiliate-category-report` — affiliate link breakdown\n"
                     "`/affiliate-missing` — top opportunities missing links\n"
-                    "`/affiliate-list` — browse all products\n"
                     "`/affiliate-health` — data quality check"
                 ),
                 inline=False,
