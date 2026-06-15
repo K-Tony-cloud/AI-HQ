@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 AFFILIATE_TABLE   = "affiliate_links"
 UNMATCHED_TABLE   = "affiliate_links_unmatched"
+PENDING_TABLE = "affiliate_links_pending"
+AUDIT_TABLE   = "affiliate_link_audit"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -101,6 +103,45 @@ def _init_unmatched_table(con: duckdb.DuckDBPyConnection) -> None:
         )
     """)
     con.execute(f"ALTER TABLE {UNMATCHED_TABLE} ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'needs_manual_match'")
+
+
+def _init_pending_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {PENDING_TABLE} (
+            id               INTEGER PRIMARY KEY,
+            session_id       VARCHAR NOT NULL,
+            created_at       VARCHAR,
+            affiliate_link   VARCHAR,
+            resolved_url     VARCHAR DEFAULT '',
+            http_status      INTEGER,
+            detected_shopid  BIGINT,
+            detected_itemid  BIGINT,
+            detected_title   VARCHAR DEFAULT '',
+            confidence       INTEGER DEFAULT 0,
+            confidence_label VARCHAR DEFAULT 'NOT_FOUND',
+            existing_link    VARCHAR DEFAULT '',
+            campaign         VARCHAR DEFAULT '',
+            platform         VARCHAR DEFAULT '',
+            status           VARCHAR DEFAULT 'pending'
+        )
+    """)
+
+def _init_audit_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {AUDIT_TABLE} (
+            id              INTEGER PRIMARY KEY,
+            session_id      VARCHAR,
+            created_at      VARCHAR,
+            affiliate_link  VARCHAR,
+            detected_shopid BIGINT,
+            detected_itemid BIGINT,
+            detected_title  VARCHAR DEFAULT '',
+            confidence      INTEGER DEFAULT 0,
+            confirmed_by    VARCHAR DEFAULT '',
+            confirmed_at    VARCHAR DEFAULT '',
+            action          VARCHAR
+        )
+    """)
 
 
 def _fetch_page_metadata(url: str, timeout: int = 8) -> dict:
@@ -250,6 +291,18 @@ def _fuzzy_match_by_title(
     return None
 
 
+def _confidence_score(identity: dict) -> tuple[int, str]:
+    """Return (score 0-100, label) based on how the product was identified."""
+    method = identity.get("method", "none")
+    if method in ("ids", "ids_from_chain"):
+        return 90, "HIGH"
+    if method == "og_url":
+        return 70, "REVIEW"
+    if method == "title":
+        return 40, "REVIEW"
+    return 0, "NOT_FOUND"
+
+
 def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[str], int | None]:
     """Resolve a Shopee short link by following HTTP redirects.
 
@@ -386,6 +439,294 @@ def _match_product_in_db(
         pass
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Phase 9.2 — Confirm-before-save review flow
+# ---------------------------------------------------------------------------
+
+def stage_affiliate_links(
+    links:      list[str],
+    campaign:   str = "",
+    platform:   str = "",
+    sub_ids:    tuple[str, str, str, str, str] = ("", "", "", "", ""),
+    table_name: str | None = None,
+) -> dict:
+    """Resolve links and store in pending table for user review. No auto-save.
+
+    Returns session dict:
+    {
+        session_id: str,
+        items: list[dict],  # one per link
+        counts: {high, review, not_found, total},
+    }
+    Each item: {
+        id, affiliate_link, resolved_url, http_status,
+        shopid, itemid, title, confidence, confidence_label,
+        existing_link, status
+    }
+    """
+    import uuid
+    table_name  = table_name or config.default_table
+    session_id  = str(uuid.uuid4())[:8]
+    raw_links   = [lnk.strip() for lnk in links if lnk.strip()]
+    if not raw_links:
+        return {"session_id": session_id, "items": [], "counts": {"high": 0, "review": 0, "not_found": 0, "total": 0}}
+
+    # Phase 1: resolve concurrently
+    resolved: list[tuple[str, str | None, list[str], int | None]] = [("", None, [], None)] * len(raw_links)
+    with ThreadPoolExecutor(max_workers=min(10, len(raw_links))) as pool:
+        future_map = {pool.submit(resolve_shopee_link, url): i for i, url in enumerate(raw_links)}
+        for fut in as_completed(future_map):
+            idx = future_map[fut]
+            final_url, chain, http_status = fut.result()
+            resolved[idx] = (raw_links[idx], final_url, chain, http_status)
+
+    # Phase 2: identify and score
+    if not config.db_path.exists():
+        raise RuntimeError("No database found. Run import-datafeed first.")
+    con = _connect(read_only=False)
+    _init_affiliate_table(con)
+    _init_pending_table(con)
+    _init_audit_table(con)
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    items: list[dict] = []
+
+    try:
+        for original, final_url, chain, http_status in resolved:
+            logger.info("[stage] 🔗 %s  http=%s", original, http_status)
+
+            # Network error or 4xx/5xx
+            if final_url is None or (http_status and http_status >= 400):
+                score, label = 0, "NOT_FOUND"
+                shopid_val = itemid_val = None
+                title_val  = ""
+                resolved_url = final_url or ""
+            else:
+                identity = _identify_product(final_url, chain)
+                score, label = _confidence_score(identity)
+                shopid_val = identity.get("shopid")
+                itemid_val = identity.get("itemid")
+                title_val  = ""
+                resolved_url = final_url
+
+                if shopid_val and itemid_val:
+                    product = _match_product_in_db(con, shopid_val, itemid_val, table_name)
+                    if product:
+                        title_val = product["title"]
+                    else:
+                        score, label = 0, "NOT_FOUND"
+                        shopid_val = itemid_val = None
+                elif identity.get("title"):
+                    product = _fuzzy_match_by_title(con, identity["title"], table_name)
+                    if product:
+                        shopid_val = product["shopid"]
+                        itemid_val = product["itemid"]
+                        title_val  = product["title"]
+                    else:
+                        score, label = 0, "NOT_FOUND"
+
+            # Check if product already has an affiliate link
+            existing_link = ""
+            if shopid_val and itemid_val:
+                row = con.execute(
+                    f"SELECT affiliate_link FROM {AFFILIATE_TABLE} "
+                    f"WHERE itemid = ? AND shopid = ? AND latest_link = true LIMIT 1",
+                    [itemid_val, shopid_val],
+                ).fetchone()
+                if row:
+                    existing_link = row[0] or ""
+
+            max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {PENDING_TABLE}").fetchone()[0]
+            item_id = max_id + 1
+            con.execute(f"""
+                INSERT INTO {PENDING_TABLE}
+                (id, session_id, created_at, affiliate_link, resolved_url, http_status,
+                 detected_shopid, detected_itemid, detected_title,
+                 confidence, confidence_label, existing_link, campaign, platform, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                item_id, session_id, now_str,
+                original, resolved_url, http_status,
+                shopid_val, itemid_val, title_val,
+                score, label, existing_link,
+                campaign, platform, "pending",
+            ])
+
+            items.append({
+                "id":               item_id,
+                "affiliate_link":   original,
+                "resolved_url":     resolved_url,
+                "http_status":      http_status,
+                "shopid":           shopid_val,
+                "itemid":           itemid_val,
+                "title":            title_val,
+                "confidence":       score,
+                "confidence_label": label,
+                "existing_link":    existing_link,
+                "status":           "pending",
+            })
+            logger.info("[stage]    %s score=%d title=%s", label, score, title_val[:40] if title_val else "—")
+
+    finally:
+        con.close()
+
+    counts = {
+        "high":      sum(1 for it in items if it["confidence_label"] == "HIGH"),
+        "review":    sum(1 for it in items if it["confidence_label"] == "REVIEW"),
+        "not_found": sum(1 for it in items if it["confidence_label"] == "NOT_FOUND"),
+        "total":     len(items),
+    }
+    return {"session_id": session_id, "items": items, "counts": counts}
+
+
+def confirm_pending_items(
+    session_id:   str,
+    item_ids:     list[int],
+    confirmed_by: str = "discord",
+    table_name:   str | None = None,
+) -> dict:
+    """Save confirmed pending items to affiliate_links and write audit log.
+
+    Returns {saved, updated, errors, saved_items}
+    """
+    table_name = table_name or config.default_table
+    con = _connect(read_only=False)
+    _init_affiliate_table(con)
+    _init_audit_table(con)
+
+    now_str  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved    = 0
+    updated  = 0
+    errors: list[str] = []
+    saved_items: list[dict] = []
+
+    try:
+        placeholders = ",".join("?" * len(item_ids))
+        rows = con.execute(
+            f"SELECT id, affiliate_link, detected_shopid, detected_itemid, "
+            f"detected_title, confidence, campaign, platform "
+            f"FROM {PENDING_TABLE} "
+            f"WHERE session_id = ? AND id IN ({placeholders}) AND status = 'pending'",
+            [session_id, *item_ids],
+        ).fetchall()
+
+        for row in rows:
+            (item_id, affiliate_link, shopid_val, itemid_val,
+             title_val, confidence, campaign, platform) = row
+
+            if not shopid_val or not itemid_val:
+                errors.append(f"item {item_id}: missing shopid/itemid")
+                continue
+
+            canonical = f"https://shopee.co.th/product/{shopid_val}/{itemid_val}"
+
+            # Check if exact affiliate_link already stored
+            dup = con.execute(
+                f"SELECT id FROM {AFFILIATE_TABLE} WHERE affiliate_link = ?",
+                [affiliate_link],
+            ).fetchone()
+            if dup:
+                con.execute(
+                    f"UPDATE {PENDING_TABLE} SET status='confirmed' WHERE id=?", [item_id]
+                )
+                errors.append(f"item {item_id}: exact link already stored")
+                continue
+
+            existing_count = con.execute(
+                f"SELECT COUNT(*) FROM {AFFILIATE_TABLE} WHERE itemid=? AND shopid=?",
+                [itemid_val, shopid_val],
+            ).fetchone()[0]
+
+            con.execute(
+                f"UPDATE {AFFILIATE_TABLE} SET latest_link=false WHERE itemid=? AND shopid=?",
+                [itemid_val, shopid_val],
+            )
+            max_id = con.execute(f"SELECT COALESCE(MAX(id),0) FROM {AFFILIATE_TABLE}").fetchone()[0]
+            con.execute(f"""
+                INSERT INTO {AFFILIATE_TABLE}
+                (id, created_at, itemid, shopid, product_link, affiliate_link,
+                 sub_id1, sub_id2, sub_id3, sub_id4, sub_id5,
+                 campaign, platform, notes, latest_link, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                max_id + 1, now_str,
+                itemid_val, shopid_val,
+                canonical, affiliate_link,
+                campaign, platform, "", "", "",
+                campaign, platform,
+                f"confirmed by {confirmed_by} session={session_id}",
+                True, "matched",
+            ])
+
+            # Audit
+            max_aud = con.execute(f"SELECT COALESCE(MAX(id),0) FROM {AUDIT_TABLE}").fetchone()[0]
+            con.execute(f"""
+                INSERT INTO {AUDIT_TABLE}
+                (id, session_id, created_at, affiliate_link,
+                 detected_shopid, detected_itemid, detected_title,
+                 confidence, confirmed_by, confirmed_at, action)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                max_aud + 1, session_id, now_str, affiliate_link,
+                shopid_val, itemid_val, title_val or "",
+                confidence, confirmed_by, now_str, "confirmed",
+            ])
+
+            con.execute(
+                f"UPDATE {PENDING_TABLE} SET status='confirmed' WHERE id=?", [item_id]
+            )
+
+            entry = {"title": title_val, "link": affiliate_link, "shopid": shopid_val, "itemid": itemid_val}
+            if existing_count > 0:
+                updated += 1
+            else:
+                saved += 1
+            saved_items.append(entry)
+            logger.info("[confirm] ✅ saved: %s", title_val[:50] if title_val else affiliate_link)
+
+    finally:
+        con.close()
+
+    return {"saved": saved, "updated": updated, "errors": errors, "saved_items": saved_items}
+
+
+def reject_pending_items(
+    session_id: str,
+    item_ids:   list[int],
+    rejected_by: str = "discord",
+) -> int:
+    """Mark items as rejected in pending table and audit log. Returns count rejected."""
+    con = _connect(read_only=False)
+    _init_audit_table(con)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    count = 0
+    try:
+        placeholders = ",".join("?" * len(item_ids))
+        rows = con.execute(
+            f"SELECT id, affiliate_link, detected_shopid, detected_itemid, detected_title, confidence "
+            f"FROM {PENDING_TABLE} "
+            f"WHERE session_id=? AND id IN ({placeholders}) AND status='pending'",
+            [session_id, *item_ids],
+        ).fetchall()
+        for row in rows:
+            item_id, aff_link, shopid_v, itemid_v, title_v, conf = row
+            con.execute(f"UPDATE {PENDING_TABLE} SET status='rejected' WHERE id=?", [item_id])
+            max_aud = con.execute(f"SELECT COALESCE(MAX(id),0) FROM {AUDIT_TABLE}").fetchone()[0]
+            con.execute(f"""
+                INSERT INTO {AUDIT_TABLE}
+                (id, session_id, created_at, affiliate_link,
+                 detected_shopid, detected_itemid, detected_title,
+                 confidence, confirmed_by, confirmed_at, action)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [max_aud+1, session_id, now_str, aff_link,
+                  shopid_v, itemid_v, title_v or "", conf or 0,
+                  rejected_by, now_str, "rejected"])
+            count += 1
+    finally:
+        con.close()
+    return count
 
 
 # ---------------------------------------------------------------------------

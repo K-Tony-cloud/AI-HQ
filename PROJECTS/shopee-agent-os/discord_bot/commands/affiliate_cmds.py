@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import discord
@@ -185,6 +186,144 @@ def _import_status_embed(import_path: str) -> discord.Embed:
             color=discord.Color.red(),
         )
     return embed
+
+
+def _review_summary_embed(session: dict, stage: str = "pending") -> discord.Embed:
+    """Summary embed for a staging session."""
+    counts = session["counts"]
+    total  = counts["total"]
+    high   = counts["high"]
+    review = counts["review"]
+    nf     = counts["not_found"]
+
+    color = (
+        discord.Color.green()  if high == total
+        else discord.Color.yellow() if high > 0
+        else discord.Color.orange()
+    )
+    embed = discord.Embed(
+        title=f"📋 Affiliate Link Review — Session `{session['session_id']}`",
+        color=color,
+    )
+    embed.add_field(name="📥 Total",              value=str(total),  inline=True)
+    embed.add_field(name="✅ High confidence",    value=str(high),   inline=True)
+    embed.add_field(name="⚠️ Needs review",       value=str(review), inline=True)
+    embed.add_field(name="❌ Not found",          value=str(nf),     inline=True)
+
+    if stage == "confirmed":
+        embed.description = "✅ **Confirmed items have been saved.**"
+    elif stage == "cancelled":
+        embed.description = "❌ **Session cancelled. Nothing was saved.**"
+
+    return embed
+
+
+def _review_items_embed(session: dict, page: int = 0, page_size: int = 10) -> discord.Embed:
+    """Detail embed showing pending items for a session page."""
+    items = session["items"]
+    start = page * page_size
+    chunk = items[start:start + page_size]
+    total_pages = max(1, (len(items) + page_size - 1) // page_size)
+
+    embed = discord.Embed(
+        title=f"🔍 Review Items (page {page+1}/{total_pages})",
+        color=discord.Color.blue(),
+    )
+    lines = []
+    for it in chunk:
+        label = it["confidence_label"]
+        emoji = {"HIGH": "✅", "REVIEW": "⚠️", "NOT_FOUND": "❌"}.get(label, "❓")
+        link_short = it["affiliate_link"][-15:]
+        score = it["confidence"]
+        title = (it["title"] or "—")[:45]
+        existing = f"\n    ⚠️ Has existing link" if it["existing_link"] else ""
+        if it["shopid"]:
+            lines.append(
+                f"{emoji} `...{link_short}` → **{title}**\n"
+                f"    shopid=`{it['shopid']}` itemid=`{it['itemid']}` score={score}{existing}"
+            )
+        else:
+            lines.append(f"{emoji} `...{link_short}` → *{label}*")
+    embed.description = "\n\n".join(lines) or "No items."
+    embed.set_footer(text=f"Session {session['session_id']} • IDs {[it['id'] for it in chunk]}")
+    return embed
+
+
+class AffiliateReviewView(discord.ui.View):
+    """Buttons for confirm-before-save affiliate link review."""
+
+    def __init__(self, session: dict, invoker_name: str) -> None:
+        super().__init__(timeout=600)
+        self.session      = session
+        self.invoker_name = invoker_name
+        self.done         = False
+        high_ids = [it["id"] for it in session["items"] if it["confidence_label"] == "HIGH"]
+        if not high_ids:
+            self.confirm_high.disabled = True
+
+    @discord.ui.button(label="✅ Confirm All High Confidence", style=discord.ButtonStyle.green, row=0)
+    async def confirm_high(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self.done:
+            await interaction.response.defer()
+            return
+        self.done = True
+        for child in self.children:
+            child.disabled = True
+
+        from shopee_engine.affiliate_link_engine import confirm_pending_items
+        high_ids = [it["id"] for it in self.session["items"] if it["confidence_label"] == "HIGH"]
+        result   = await asyncio.to_thread(
+            confirm_pending_items, self.session["session_id"], high_ids, self.invoker_name
+        )
+
+        summary  = _review_summary_embed(self.session, stage="confirmed")
+        saved    = result["saved"]
+        updated  = result["updated"]
+        summary.add_field(name="✅ Saved (new)",        value=str(saved),   inline=True)
+        summary.add_field(name="🔄 Updated (new link)", value=str(updated), inline=True)
+        if result["errors"]:
+            summary.add_field(name="⚠️ Skipped", value="\n".join(result["errors"][:5]), inline=False)
+        if result["saved_items"]:
+            lines = "\n".join(f"• {p['title'][:55]}" for p in result["saved_items"][:10])
+            summary.add_field(name="Saved products", value=lines, inline=False)
+
+        review_ids = [it["id"] for it in self.session["items"] if it["confidence_label"] in ("REVIEW", "NOT_FOUND")]
+        if review_ids:
+            lines = []
+            for it in self.session["items"]:
+                if it["confidence_label"] in ("REVIEW", "NOT_FOUND"):
+                    lines.append(
+                        f"• `...{it['affiliate_link'][-15:]}` (id={it['id']}) "
+                        f"→ `/affiliate-link-match {it['id']} <keyword>`"
+                    )
+            summary.add_field(
+                name="🔍 Needs manual match",
+                value="\n".join(lines[:8]),
+                inline=False,
+            )
+
+        await interaction.response.edit_message(embeds=[summary], view=self)
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red, row=0)
+    async def cancel_session(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self.done:
+            await interaction.response.defer()
+            return
+        self.done = True
+        for child in self.children:
+            child.disabled = True
+
+        from shopee_engine.affiliate_link_engine import reject_pending_items
+        all_ids = [it["id"] for it in self.session["items"]]
+        await asyncio.to_thread(
+            reject_pending_items, self.session["session_id"], all_ids, self.invoker_name
+        )
+        summary = _review_summary_embed(self.session, stage="cancelled")
+        await interaction.response.edit_message(embeds=[summary], view=self)
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
 
 
 class AffiliateCog(commands.Cog, name="Affiliate Links"):
@@ -473,14 +612,14 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             await interaction.followup.send(embed=error_embed("Affiliate Link Debug", str(exc)))
 
     # ------------------------------------------------------------------
-    # /affiliate-link-add  — bulk paste affiliate short links
+    # /affiliate-link-add  — stage links for review before saving
     # ------------------------------------------------------------------
     @app_commands.command(
         name="affiliate-link-add",
-        description="Bulk-add affiliate links — paste multiple Shopee short links (one per line)",
+        description="Stage affiliate links for review before saving — paste one or many links",
     )
     @app_commands.describe(
-        links="Paste affiliate links separated by newlines or spaces",
+        links="Affiliate links separated by newlines, commas, or spaces",
         campaign="Campaign tag e.g. daily-picks (optional)",
         platform="Platform tag e.g. tiktok (optional)",
     )
@@ -493,10 +632,8 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
     ) -> None:
         await interaction.response.defer(thinking=True)
         try:
-            import asyncio
-            from shopee_engine.affiliate_link_engine import bulk_add_affiliate_links
+            from shopee_engine.affiliate_link_engine import stage_affiliate_links
 
-            # Accept newline, comma, or space-separated links
             link_list = [
                 lnk.strip()
                 for lnk in links.replace(",", "\n").splitlines()
@@ -504,15 +641,20 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             ]
             if not link_list:
                 await interaction.followup.send(
-                    embed=error_embed("Affiliate Link Add", "No valid links found in input.")
+                    embed=error_embed("No valid links found in input.")
                 )
                 return
 
-            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
-            data = await asyncio.to_thread(
-                bulk_add_affiliate_links, link_list, campaign, platform
+            session = await asyncio.to_thread(
+                stage_affiliate_links, link_list, campaign, platform
             )
-            embed = _bulk_add_embed(data)
-            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+
+            invoker = str(interaction.user)
+            view    = AffiliateReviewView(session, invoker_name=invoker)
+            summary = _review_summary_embed(session)
+            detail  = _review_items_embed(session)
+
+            await interaction.followup.send(embeds=[summary, detail], view=view)
+
         except Exception as exc:
-            await interaction.followup.send(embed=error_embed("Affiliate Link Add", str(exc)))
+            await interaction.followup.send(embed=error_embed(str(exc)))
