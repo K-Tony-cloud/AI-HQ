@@ -20,6 +20,7 @@ class ShopeeBot(commands.Bot):
         from .commands.operator       import OperatorCog
         from .commands.scheduler_cmds import SchedulerCog
         from .commands.affiliate_cmds import AffiliateCog
+        from .commands.creative_cmds  import CreativeCog
 
         await self.add_cog(DiscoveryCog(self))
         await self.add_cog(PerformanceCog(self))
@@ -27,6 +28,7 @@ class ShopeeBot(commands.Bot):
         await self.add_cog(OperatorCog(self))
         await self.add_cog(SchedulerCog(self))
         await self.add_cog(AffiliateCog(self))
+        await self.add_cog(CreativeCog(self))
 
         if DISCORD_GUILD_ID:
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
