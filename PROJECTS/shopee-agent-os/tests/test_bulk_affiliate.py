@@ -80,7 +80,7 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         """A short link that resolves to a known product must be imported."""
         short = "https://s.shopee.co.th/Abc123"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = (KNOWN_URL, [short, KNOWN_URL])
+            mock_res.return_value = (KNOWN_URL, [short, KNOWN_URL], 200)
             result = _run_bulk(self.db, [short])
 
         self.assertEqual(result["total"],    1)
@@ -98,9 +98,9 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         """Two different short links for the same product: first→imported, second→updated."""
         s1, s2 = "https://s.shopee.co.th/Link001", "https://s.shopee.co.th/Link002"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL])
+            mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL], 200)
             r1 = _run_bulk(self.db, [s1])
-            mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL])
+            mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL], 200)
             r2 = _run_bulk(self.db, [s2])
 
         self.assertEqual(r1["imported"], 1)
@@ -116,7 +116,7 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         """Submitting the exact same short link twice → second submission is a duplicate_link."""
         short = "https://s.shopee.co.th/SameLink"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = (KNOWN_URL, [short, KNOWN_URL])
+            mock_res.return_value = (KNOWN_URL, [short, KNOWN_URL], 200)
             _run_bulk(self.db, [short])
             result = _run_bulk(self.db, [short])
 
@@ -133,7 +133,7 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         no_id_url = "https://shopee.co.th/search?keyword=something"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res, \
              patch("shopee_engine.affiliate_link_engine._fetch_page_metadata") as mock_meta:
-            mock_res.return_value = (no_id_url, [short, no_id_url])
+            mock_res.return_value = (no_id_url, [short, no_id_url], 200)
             mock_meta.return_value = {}   # no og:url, no title
             result = _run_bulk(self.db, [short])
 
@@ -148,7 +148,7 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         """Network error → invalid (not unmatched)."""
         short = "https://s.shopee.co.th/BrokenLink"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = (None, [short])
+            mock_res.return_value = (None, [short], None)
             result = _run_bulk(self.db, [short])
 
         self.assertEqual(result["invalid"], 1)
@@ -162,7 +162,7 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         """A link pointing to an unknown product must land in needs_manual_match, not imported."""
         short = "https://s.shopee.co.th/Unknown999"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = (UNKNOWN_URL, [short, UNKNOWN_URL])
+            mock_res.return_value = (UNKNOWN_URL, [short, UNKNOWN_URL], 200)
             result = _run_bulk(self.db, [short])
 
         self.assertEqual(result["total"],     1)
@@ -187,9 +187,9 @@ class TestBulkAffiliateLinks(unittest.TestCase):
         """Two DIFFERENT short links for the same product: first→imported, second→updated."""
         s1, s2 = "https://s.shopee.co.th/First111", "https://s.shopee.co.th/Second222"
         with patch("shopee_engine.affiliate_link_engine.resolve_shopee_link") as mock_res:
-            mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL])
+            mock_res.return_value = (KNOWN_URL, [s1, KNOWN_URL], 200)
             r1 = _run_bulk(self.db, [s1])
-            mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL])
+            mock_res.return_value = (KNOWN_URL, [s2, KNOWN_URL], 200)
             r2 = _run_bulk(self.db, [s2])
 
         self.assertEqual(r1["imported"], 1)

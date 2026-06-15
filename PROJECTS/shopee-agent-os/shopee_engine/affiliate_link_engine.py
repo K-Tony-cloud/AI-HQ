@@ -169,27 +169,27 @@ def _identify_product(final_url: str, chain: list[str]) -> dict:
     ids = extract_product_ids(final_url)
     if ids:
         shopid, itemid = ids
-        return {"shopid": shopid, "itemid": itemid, "method": "ids"}
+        return {"shopid": shopid, "itemid": itemid, "method": "ids", "og_url": None, "title": None}
 
     # 2. IDs from redirect chain (skip last element which is final_url)
     for hop in reversed(chain[:-1]):
         ids = extract_product_ids(hop)
         if ids:
             shopid, itemid = ids
-            return {"shopid": shopid, "itemid": itemid, "method": "ids_from_chain"}
+            return {"shopid": shopid, "itemid": itemid, "method": "ids_from_chain", "og_url": None, "title": None}
 
     # 3. Fetch page metadata and try og:url
     meta = _fetch_page_metadata(final_url)
     og_url = meta.get("og_url")
+    title = meta.get("title")
     if og_url:
         ids = extract_product_ids(og_url)
         if ids:
             shopid, itemid = ids
-            return {"shopid": shopid, "itemid": itemid, "method": "og_url", "og_url": og_url}
+            return {"shopid": shopid, "itemid": itemid, "method": "og_url", "og_url": og_url, "title": title}
 
     # 4. Fall back to title
-    title = meta.get("title")
-    return {"title": title, "method": "title" if title else "none"}
+    return {"title": title, "method": "title" if title else "none", "og_url": og_url}
 
 
 def _fuzzy_match_by_title(
@@ -250,15 +250,13 @@ def _fuzzy_match_by_title(
     return None
 
 
-def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[str]]:
-    """Resolve a Shopee short link to its canonical product URL.
+def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[str], int | None]:
+    """Resolve a Shopee short link by following HTTP redirects.
 
-    Uses raw http.client (not urllib) to capture 301 Location headers directly.
-    urllib's redirect-following internally loses the intermediate redirect URL
-    because Shopee's CDN returns 200 on the final hop of its redirect chain
-    but the intermediate product URL is only visible in the Location header.
-
-    Returns (final_url, redirect_chain). final_url is None only on network error.
+    Returns (final_url, chain, http_status).
+    final_url is None only on network/connection error.
+    HTTP 200 with no redirect means the link serves a SPA — it is VALID
+    even if no product IDs can be extracted from it.
     """
     chain: list[str] = [url]
     current = url
@@ -289,7 +287,7 @@ def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[s
             conn.close()
         except Exception as exc:
             logger.debug("[resolve] %s → error: %s", current, exc)
-            return None, chain
+            return None, chain, None
 
         if status in (301, 302, 303, 307, 308) and location:
             # Resolve relative Location headers
@@ -298,18 +296,12 @@ def resolve_shopee_link(url: str, timeout: int = 10) -> tuple[str | None, list[s
             if location not in chain:
                 chain.append(location)
             current = location
-            if extract_product_ids(current):
-                return current, chain
             continue
 
-        # Non-redirect (200 / other) — check if current URL already has IDs
-        if extract_product_ids(current):
-            return current, chain
+        # Non-redirect response — return wherever we landed
+        return current, chain, status
 
-        # No more redirects — return wherever we landed
-        break
-
-    return current, chain
+    return current, chain, status
 
 
 def extract_product_ids(url: str) -> tuple[int, int] | None:
@@ -444,13 +436,13 @@ def bulk_add_affiliate_links(
         }
 
     # Phase 1: resolve all links concurrently
-    resolved: list[tuple[str, str | None, list[str]]] = [("", None, [])] * len(raw_links)
+    resolved: list[tuple[str, str | None, list[str], int | None]] = [("", None, [], None)] * len(raw_links)
     with ThreadPoolExecutor(max_workers=min(10, len(raw_links))) as pool:
         future_map = {pool.submit(resolve_shopee_link, url): i for i, url in enumerate(raw_links)}
         for fut in as_completed(future_map):
             idx = future_map[fut]
-            final_url, chain = fut.result()
-            resolved[idx] = (raw_links[idx], final_url, chain)
+            final_url, chain, http_status = fut.result()
+            resolved[idx] = (raw_links[idx], final_url, chain, http_status)
 
     # Phase 2: classify and store
     con = _connect(read_only=False)
@@ -467,16 +459,24 @@ def bulk_add_affiliate_links(
     dup_links:  list[str]  = []
 
     try:
-        for original, final_url, chain in resolved:
-            if not final_url:
+        for original, final_url, chain, http_status in resolved:
+            logger.info("[affiliate] 🔗 %s", original)
+
+            if final_url is None:
                 invalid.append(original)
-                logger.info("[affiliate] ❌ network error  %s", original)
+                logger.info("[affiliate]    ❌ network error (unreachable)")
                 continue
 
-            logger.info("[affiliate] 🔗 %s", original)
+            logger.info("[affiliate]    HTTP %s | final: %s", http_status, final_url)
             if len(chain) > 1:
                 for hop in chain[1:]:
                     logger.info("[affiliate]    → %s", hop)
+
+            # 4xx/5xx = broken link
+            if http_status and http_status >= 400:
+                invalid.append(original)
+                logger.info("[affiliate]    ❌ HTTP %d — broken", http_status)
+                continue
 
             # Check for exact duplicate affiliate link URL already in DB
             dup_row = con.execute(
@@ -493,6 +493,9 @@ def bulk_add_affiliate_links(
             itemid = identity.get("itemid")
             product: dict | None = None
 
+            logger.info("[affiliate]    identity: method=%s og_url=%s title=%s",
+                        identity.get("method"), identity.get("og_url"), identity.get("title"))
+
             if shopid is not None and itemid is not None:
                 logger.info("[affiliate]    shopid=%d  itemid=%d  (via %s)", shopid, itemid, identity.get("method"))
                 product = _match_product_in_db(con, shopid, itemid, table_name)
@@ -501,12 +504,8 @@ def bulk_add_affiliate_links(
                 product = _fuzzy_match_by_title(con, identity["title"], table_name)
 
             if product is None:
-                logger.info("[affiliate]    ⚠️  product not identified → needs_manual_match")
-                unmatched_entry: dict = {
-                    "original": original,
-                    "resolved": final_url,
-                    "reason": "product_not_identified",
-                }
+                status_label = f"HTTP {http_status}" if http_status else "reachable"
+                logger.info("[affiliate]    🔍 VALID_NEEDS_MANUAL_MATCH (%s) — product not identified", status_label)
                 max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {UNMATCHED_TABLE}").fetchone()[0]
                 con.execute(f"""
                     INSERT INTO {UNMATCHED_TABLE}
@@ -516,8 +515,14 @@ def bulk_add_affiliate_links(
                     max_id + 1, now_str, original, final_url,
                     "product_not_identified", campaign, platform, "needs_manual_match",
                 ])
-                unmatched_entry["unmatched_id"] = max_id + 1
-                unmatched.append(unmatched_entry)
+                unmatched.append({
+                    "original": original,
+                    "resolved": final_url or "",
+                    "http_status": http_status,
+                    "reason": "product_not_identified",
+                    "identity_method": identity.get("method", "none"),
+                    "unmatched_id": max_id + 1,
+                })
                 continue
 
             logger.info("[affiliate]    ✅ %s", product["title"])
@@ -577,6 +582,145 @@ def bulk_add_affiliate_links(
         "invalid_links":       invalid,
         "duplicate_link_urls": dup_links,
     }
+
+
+def debug_affiliate_link(url: str) -> dict:
+    """Full diagnostic trace for one affiliate link. No DB writes.
+
+    Returns a dict with: original, http_status, reachable, chain, final_url,
+    identity_method, shopid, itemid, og_url, page_title, status.
+    """
+    final_url, chain, http_status = resolve_shopee_link(url)
+
+    reachable = (final_url is not None) and (http_status is None or http_status < 400)
+    out = {
+        "original":   url,
+        "http_status": http_status,
+        "reachable":  reachable,
+        "chain":      chain,
+        "final_url":  final_url,
+        "shopid":     None,
+        "itemid":     None,
+        "og_url":     None,
+        "page_title": None,
+        "identity_method": "none",
+        "status": "INVALID_UNREACHABLE",
+    }
+
+    if not reachable:
+        if final_url is not None and http_status and http_status >= 400:
+            out["status"] = f"INVALID_HTTP_{http_status}"
+        return out
+
+    identity = _identify_product(final_url, chain)
+    out["identity_method"] = identity.get("method", "none")
+    out["shopid"]     = identity.get("shopid")
+    out["itemid"]     = identity.get("itemid")
+    out["og_url"]     = identity.get("og_url")
+    out["page_title"] = identity.get("title")
+    out["status"]     = "IDS_FOUND" if identity.get("shopid") else "VALID_NEEDS_MANUAL_MATCH"
+    return out
+
+
+def search_products_by_keyword(
+    keyword: str,
+    limit: int = 5,
+    table_name: str | None = None,
+) -> list[dict]:
+    """Return up to `limit` products whose title contains `keyword` (ILIKE)."""
+    table_name = table_name or config.default_table
+    if not config.db_path.exists():
+        return []
+    con = _connect(read_only=True)
+    try:
+        cols = [r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            [table_name],
+        ).fetchall()]
+        if not cols:
+            return []
+        lm = {c.lower(): c for c in cols}
+        itemid_col = lm.get("itemid") or lm.get("item_id")
+        shopid_col = lm.get("shopid") or lm.get("shop_id")
+        title_col  = lm.get("title") or lm.get("name") or lm.get("product_name")
+        if not all([itemid_col, shopid_col, title_col]):
+            return []
+        rows = con.execute(
+            f'SELECT CAST("{itemid_col}" AS BIGINT), CAST("{shopid_col}" AS BIGINT), "{title_col}" '
+            f'FROM "{table_name}" WHERE "{title_col}" ILIKE ? LIMIT ?',
+            [f"%{keyword}%", limit],
+        ).fetchall()
+        return [
+            {
+                "itemid": r[0],
+                "shopid": r[1],
+                "title": r[2],
+                "product_link": f"https://shopee.co.th/product/{r[1]}/{r[0]}",
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+def confirm_affiliate_link(
+    unmatched_id: int,
+    itemid: int,
+    table_name: str | None = None,
+) -> dict:
+    """Confirm a manual match: associate unmatched link with product by itemid."""
+    table_name = table_name or config.default_table
+    if not config.db_path.exists():
+        return {"success": False, "error": "No database found."}
+    con = _connect(read_only=False)
+    try:
+        row = con.execute(
+            f"SELECT original_link, resolved_url, campaign, platform "
+            f"FROM {UNMATCHED_TABLE} WHERE id = ?",
+            [unmatched_id],
+        ).fetchone()
+        if not row:
+            return {"success": False, "error": f"No unmatched record with id={unmatched_id}"}
+        original_link, resolved_url, campaign, platform = row
+
+        product = _match_product_in_db(con, 0, itemid, table_name)  # shopid=0 triggers itemid-only fallback
+        if not product:
+            return {"success": False, "error": f"No product found with itemid={itemid}"}
+
+        shopid_val = product["shopid"]
+        itemid_val = product["itemid"]
+        canonical  = f"https://shopee.co.th/product/{shopid_val}/{itemid_val}"
+        now_str    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        con.execute(
+            f"UPDATE {AFFILIATE_TABLE} SET latest_link = false WHERE itemid = ? AND shopid = ?",
+            [itemid_val, shopid_val],
+        )
+        max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {AFFILIATE_TABLE}").fetchone()[0]
+        con.execute(f"""
+            INSERT INTO {AFFILIATE_TABLE}
+            (id, created_at, itemid, shopid, product_link, affiliate_link,
+             sub_id1, sub_id2, sub_id3, sub_id4, sub_id5,
+             campaign, platform, notes, latest_link, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            max_id + 1, now_str,
+            itemid_val, shopid_val,
+            canonical, original_link,
+            campaign, platform, "", "", "",
+            campaign, platform,
+            f"manual confirm: unmatched_id={unmatched_id} itemid={itemid}",
+            True, "matched",
+        ])
+        con.execute(
+            f"UPDATE {UNMATCHED_TABLE} SET status = 'matched' WHERE id = ?",
+            [unmatched_id],
+        )
+        return {"success": True, "product": product, "affiliate_link": original_link}
+    finally:
+        con.close()
 
 
 def manual_match_affiliate_link(

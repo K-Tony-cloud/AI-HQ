@@ -249,15 +249,15 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             await interaction.followup.send(embed=error_embed("Import Links Status", str(exc)))
 
     # ------------------------------------------------------------------
-    # /affiliate-link-match  — manually match an unmatched link
+    # /affiliate-link-match  — search products by keyword to match an unmatched link
     # ------------------------------------------------------------------
     @app_commands.command(
         name="affiliate-link-match",
-        description="Manually match an unmatched affiliate link to a product by keyword",
+        description="Search products by keyword to match an unmatched affiliate link",
     )
     @app_commands.describe(
         unmatched_id="ID shown in the 'Needs manual match' section",
-        product_keyword="Product keyword or title to search for",
+        product_keyword="Keyword to search products (Thai or English)",
     )
     async def cmd_affiliate_link_match(
         self,
@@ -267,21 +267,210 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
     ) -> None:
         await interaction.response.defer(thinking=True)
         try:
-            import asyncio
-            from shopee_engine.affiliate_link_engine import manual_match_affiliate_link
-            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
-            result = await asyncio.to_thread(manual_match_affiliate_link, unmatched_id, product_keyword)
-            if result["success"]:
-                product = result["product"]
-                embed = discord.Embed(title="✅ Manual Match Successful", color=discord.Color.green())
-                embed.add_field(name="Unmatched ID", value=str(unmatched_id), inline=True)
-                embed.add_field(name="Matched Product", value=product["title"][:80], inline=False)
-                embed.add_field(name="Affiliate Link", value=f"`{result['affiliate_link'][:80]}`", inline=False)
+            from shopee_engine.affiliate_link_engine import search_products_by_keyword
+            candidates = search_products_by_keyword(product_keyword, limit=5)
+            if not candidates:
+                embed = discord.Embed(
+                    title="🔍 No Products Found",
+                    description=f"No products matching `{product_keyword[:50]}`.\nTry a different keyword.",
+                    color=discord.Color.orange(),
+                )
             else:
-                embed = discord.Embed(title="❌ Manual Match Failed", description=result["error"], color=discord.Color.red())
-            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+                embed = discord.Embed(
+                    title=f"🔍 Top {len(candidates)} matches for `{product_keyword[:30]}`",
+                    description=(
+                        f"**Unmatched link ID: `{unmatched_id}`**\n"
+                        "Use `/affiliate-link-confirm` with one of these itemids:\n\n"
+                        + "\n".join(
+                            f"`{i}.` itemid=`{c['itemid']}` shopid=`{c['shopid']}`\n    {c['title'][:60]}"
+                            for i, c in enumerate(candidates, 1)
+                        )
+                    ),
+                    color=discord.Color.blue(),
+                )
+                embed.set_footer(text=f"/affiliate-link-confirm {unmatched_id} <itemid>")
+            await interaction.followup.send(embed=embed)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed("Affiliate Link Match", str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-link-confirm  — confirm a manual match by itemid
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-link-confirm",
+        description="Confirm a manual match between an unmatched link and a product by itemid",
+    )
+    @app_commands.describe(
+        unmatched_id="ID from the 'Needs manual match' section",
+        itemid="Product itemid from /affiliate-link-match results",
+    )
+    async def cmd_affiliate_link_confirm(
+        self,
+        interaction: discord.Interaction,
+        unmatched_id: int,
+        itemid: int,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            import asyncio
+            from shopee_engine.affiliate_link_engine import confirm_affiliate_link
+            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
+            result = await asyncio.to_thread(confirm_affiliate_link, unmatched_id, itemid)
+            if result["success"]:
+                product = result["product"]
+                embed = discord.Embed(title="✅ Match Confirmed", color=discord.Color.green())
+                embed.add_field(name="Unmatched ID", value=str(unmatched_id), inline=True)
+                embed.add_field(name="itemid", value=str(itemid), inline=True)
+                embed.add_field(name="Product", value=product["title"][:80], inline=False)
+                embed.add_field(name="Affiliate Link", value=f"`{result['affiliate_link'][:80]}`", inline=False)
+            else:
+                embed = discord.Embed(
+                    title="❌ Confirm Failed",
+                    description=result["error"],
+                    color=discord.Color.red(),
+                )
+            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed("Affiliate Link Confirm", str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-link-add-product  — add one link by searching product keyword
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-link-add-product",
+        description="Add one affiliate link by searching for its product by keyword",
+    )
+    @app_commands.describe(
+        link="Shopee affiliate short link",
+        product_keyword="Keyword to identify the product",
+    )
+    async def cmd_affiliate_link_add_product(
+        self,
+        interaction: discord.Interaction,
+        link: str,
+        product_keyword: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            import asyncio
+            from shopee_engine.affiliate_link_engine import (
+                search_products_by_keyword,
+                bulk_add_affiliate_links,
+            )
+            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
+
+            candidates = search_products_by_keyword(product_keyword, limit=5)
+
+            if not candidates:
+                embed = discord.Embed(
+                    title="🔍 No Products Found",
+                    description=f"No products matching `{product_keyword[:50]}`.",
+                    color=discord.Color.orange(),
+                )
+                await interaction.followup.send(embed=embed)
+                return
+
+            if len(candidates) == 1:
+                # One strong match — save directly using its product URL as the proxy
+                product = candidates[0]
+                data = await asyncio.to_thread(
+                    bulk_add_affiliate_links, [link],
+                )
+                # Override: if needs_manual_match, force-match to the found product
+                if data["needs_manual_match"] > 0 and data["unmatched_links"]:
+                    uid = data["unmatched_links"][0].get("unmatched_id")
+                    if uid:
+                        from shopee_engine.affiliate_link_engine import confirm_affiliate_link
+                        result = await asyncio.to_thread(confirm_affiliate_link, uid, product["itemid"])
+                        if result["success"]:
+                            embed = discord.Embed(title="✅ Saved", color=discord.Color.green())
+                            embed.add_field(name="Product", value=product["title"][:80], inline=False)
+                            embed.add_field(name="Link", value=f"`{link[:80]}`", inline=False)
+                            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+                            return
+                embed = _bulk_add_embed(data)
+                await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+            else:
+                # Multiple matches — show choices
+                embed = discord.Embed(
+                    title=f"🔍 {len(candidates)} matches — pick one",
+                    description=(
+                        f"Link: `{link[:60]}`\n\n"
+                        "Run `/affiliate-link-add` first, then use `/affiliate-link-confirm`:\n\n"
+                        + "\n".join(
+                            f"`{i}.` itemid=`{c['itemid']}`  {c['title'][:55]}"
+                            for i, c in enumerate(candidates, 1)
+                        )
+                    ),
+                    color=discord.Color.blue(),
+                )
+                await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed("Affiliate Link Add Product", str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-link-debug  — full redirect trace and extraction diagnostic
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-link-debug",
+        description="Show the full redirect trace and extraction result for an affiliate link",
+    )
+    @app_commands.describe(link="Shopee affiliate short link to diagnose")
+    async def cmd_affiliate_link_debug(
+        self,
+        interaction: discord.Interaction,
+        link: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            import asyncio
+            from shopee_engine.affiliate_link_engine import debug_affiliate_link
+
+            info = await asyncio.to_thread(debug_affiliate_link, link)
+
+            status_emoji = {
+                "IDS_FOUND":              "✅",
+                "VALID_NEEDS_MANUAL_MATCH": "🔍",
+                "INVALID_UNREACHABLE":    "❌",
+            }.get(info["status"], "⚠️")
+
+            color = {
+                "IDS_FOUND":              discord.Color.green(),
+                "VALID_NEEDS_MANUAL_MATCH": discord.Color.blue(),
+                "INVALID_UNREACHABLE":    discord.Color.red(),
+            }.get(info["status"], discord.Color.orange())
+
+            embed = discord.Embed(
+                title=f"{status_emoji} Affiliate Link Debug",
+                color=color,
+            )
+            embed.add_field(name="Original",    value=f"`{info['original'][:80]}`",  inline=False)
+            embed.add_field(name="HTTP Status", value=str(info["http_status"] or "error"), inline=True)
+            embed.add_field(name="Reachable",   value="✅ Yes" if info["reachable"] else "❌ No", inline=True)
+            embed.add_field(name="Status",      value=info["status"], inline=True)
+
+            chain = info.get("chain", [])
+            if len(chain) > 1:
+                embed.add_field(
+                    name="Redirect Chain",
+                    value="\n".join(f"→ `{u[:70]}`" for u in chain),
+                    inline=False,
+                )
+            else:
+                embed.add_field(name="Final URL", value=f"`{(info['final_url'] or 'none')[:80]}`", inline=False)
+
+            if info.get("og_url"):
+                embed.add_field(name="og:url", value=f"`{info['og_url'][:80]}`", inline=False)
+            if info.get("page_title"):
+                embed.add_field(name="Page title", value=info["page_title"][:100], inline=False)
+            if info.get("shopid"):
+                embed.add_field(name="shopid", value=str(info["shopid"]), inline=True)
+                embed.add_field(name="itemid", value=str(info["itemid"]), inline=True)
+                embed.add_field(name="Identity method", value=info["identity_method"], inline=True)
+
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed("Affiliate Link Debug", str(exc)))
 
     # ------------------------------------------------------------------
     # /affiliate-link-add  — bulk paste affiliate short links
