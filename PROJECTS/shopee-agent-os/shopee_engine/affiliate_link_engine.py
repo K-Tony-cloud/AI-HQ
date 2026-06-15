@@ -1446,22 +1446,31 @@ def link_coverage_report(
 # ---------------------------------------------------------------------------
 
 def get_all_affiliate_links() -> dict[str, str]:
-    """Return {normalized_product_link: affiliate_link} for all stored links."""
+    """Return {normalized_product_link: affiliate_link} for all stored links.
+
+    Merges affiliate_links (old table) + affiliate_products (new table).
+    affiliate_products takes precedence when both have the same key.
+    """
     if not config.db_path.exists():
         return {}
+    result: dict[str, str] = {}
     try:
         con = _connect(read_only=True)
-        if not _has_table(con):
-            con.close()
-            return {}
-        rows = con.execute(
-            f"SELECT product_link, affiliate_link FROM {AFFILIATE_TABLE} "
-            f"WHERE affiliate_link IS NOT NULL AND affiliate_link != ''"
-        ).fetchall()
+        if _has_table(con):
+            rows = con.execute(
+                f"SELECT product_link, affiliate_link FROM {AFFILIATE_TABLE} "
+                f"WHERE affiliate_link IS NOT NULL AND affiliate_link != ''"
+            ).fetchall()
+            result.update({r[0]: r[1] for r in rows})
         con.close()
-        return {r[0]: r[1] for r in rows}
     except Exception:
-        return {}
+        pass
+    try:
+        from .affiliate_products_engine import get_all_affiliate_products
+        result.update(get_all_affiliate_products())
+    except Exception:
+        pass
+    return result
 
 
 def get_affiliate_link(product_link_or_short: str) -> str | None:

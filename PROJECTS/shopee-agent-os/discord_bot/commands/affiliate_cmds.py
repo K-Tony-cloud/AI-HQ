@@ -612,6 +612,150 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             await interaction.followup.send(embed=error_embed("Affiliate Link Debug", str(exc)))
 
     # ------------------------------------------------------------------
+    # /affiliate-product-add  — add product from long URL + short link
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-product-add",
+        description="Add a product using its long affiliate URL + short link",
+    )
+    @app_commands.describe(
+        long_url="Long Shopee affiliate URL (contains product IDs in the path)",
+        short_url="Short affiliate URL used for posting",
+        campaign="Campaign tag e.g. daily-picks (optional)",
+        platform="Platform tag e.g. tiktok (optional)",
+    )
+    async def cmd_affiliate_product_add(
+        self,
+        interaction: discord.Interaction,
+        long_url:  str,
+        short_url: str,
+        campaign:  str = "daily-picks",
+        platform:  str = "tiktok",
+    ) -> None:
+        from discord_bot.config import CHANNEL_AFFILIATE_LINKS
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import add_affiliate_product
+            result = await asyncio.to_thread(
+                add_affiliate_product, long_url, short_url, campaign, platform
+            )
+            if not result["success"]:
+                await interaction.followup.send(
+                    embed=error_embed("Add Product Failed", result["error"])
+                )
+                return
+
+            action = result["action"]
+            embed  = discord.Embed(
+                title="✅ Product Added" if action == "added" else "🔄 Product Updated",
+                color=discord.Color.green() if action == "added" else discord.Color.blue(),
+            )
+            embed.add_field(name="Title",      value=result["title"] or "—",    inline=False)
+            embed.add_field(name="ItemID",     value=str(result["itemid"]),      inline=True)
+            embed.add_field(name="ShopID",     value=str(result["shopid"]),      inline=True)
+            embed.add_field(name="Short Link", value=f"`{short_url[:80]}`",      inline=False)
+            embed.add_field(name="Status",     value="Saved" if action == "added" else "Updated", inline=True)
+            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-link-update  — replace short URL for existing product
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-link-update",
+        description="Update the short affiliate link for an existing product",
+    )
+    @app_commands.describe(
+        product="Product keyword or itemid",
+        new_short_url="New short affiliate URL",
+    )
+    async def cmd_affiliate_link_update(
+        self,
+        interaction: discord.Interaction,
+        product:      str,
+        new_short_url: str,
+    ) -> None:
+        from discord_bot.config import CHANNEL_AFFILIATE_LINKS
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import update_affiliate_short_url
+            result = await asyncio.to_thread(update_affiliate_short_url, product, new_short_url)
+
+            if not result["success"]:
+                if result.get("candidates"):
+                    lines = "\n".join(
+                        f"`{c['itemid']}` — {c['title'][:55]}\n  → `{(c['current_link'] or '—')[:60]}`"
+                        for c in result["candidates"]
+                    )
+                    embed = discord.Embed(
+                        title="🔍 Multiple matches — be more specific",
+                        description=f"{result['error']}\n\n{lines}",
+                        color=discord.Color.orange(),
+                    )
+                else:
+                    embed = error_embed("Update Failed", result["error"])
+                await interaction.followup.send(embed=embed)
+                return
+
+            p = result["product"]
+            embed = discord.Embed(title="🔄 Affiliate Link Updated", color=discord.Color.blue())
+            embed.add_field(name="Product",     value=p["title"][:80],                        inline=False)
+            embed.add_field(name="Old Link",    value=f"`{result['old_link'][:80] or '—'}`",  inline=False)
+            embed.add_field(name="New Link",    value=f"`{result['new_link'][:80]}`",          inline=False)
+            embed.add_field(name="Latest Link", value="YES",                                   inline=True)
+            await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-search  — search products in affiliate_products table
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-search",
+        description="Search affiliate products by title, keyword, itemid or shopid",
+    )
+    @app_commands.describe(query="Title keyword, itemid, or shopid")
+    async def cmd_affiliate_search(
+        self,
+        interaction: discord.Interaction,
+        query: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import search_affiliate_products
+            results = await asyncio.to_thread(search_affiliate_products, query)
+
+            if not results:
+                embed = discord.Embed(
+                    title="🔍 No Products Found",
+                    description=f"No affiliate products matching `{query[:50]}`.",
+                    color=discord.Color.orange(),
+                )
+            else:
+                embed = discord.Embed(
+                    title=f"🔍 Affiliate Products — {len(results)} result(s)",
+                    color=discord.Color.blue(),
+                )
+                lines = []
+                for p in results:
+                    link    = p["affiliate_short_url"] or "—"
+                    updated = (p["updated_at"] or "")[:10]
+                    cat     = p["category"] or "—"
+                    lines.append(
+                        f"**{p['title'][:55]}**\n"
+                        f"  itemid=`{p['itemid']}` | {cat} | Updated: {updated}\n"
+                        f"  Link: `{link[:70]}`"
+                    )
+                embed.description = "\n\n".join(lines[:8])
+            await interaction.followup.send(embed=embed)
+
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
     # /affiliate-link-add  — stage links for review before saving
     # ------------------------------------------------------------------
     @app_commands.command(
