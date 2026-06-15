@@ -42,6 +42,36 @@ async def run_morning_brief(bot=None) -> None:
         picks_result = get_daily_picks(top=5)
         if picks_result["success"]:
             picks_embeds = build_daily_picks_embed(picks_result["data"])
+
+            # Part 7 — validate affiliate coverage before sending
+            try:
+                from shopee_engine.affiliate_products_engine import validate_daily_picks_coverage
+                coverage = validate_daily_picks_coverage(picks_result["data"])
+                if coverage["missing"] > 0:
+                    import discord as _discord
+                    warn_embed = _discord.Embed(
+                        title="⚠️ Missing Affiliate Links in Daily Picks",
+                        color=_discord.Color.orange(),
+                    )
+                    warn_embed.add_field(
+                        name="Coverage",
+                        value=f"{coverage['covered']}/{coverage['total']} products have links",
+                        inline=False,
+                    )
+                    missing_lines = "\n".join(
+                        f"• [{m['bucket']}] `{m['itemid']}` {m['title'][:45]}"
+                        for m in coverage["missing_items"][:10]
+                    )
+                    warn_embed.add_field(
+                        name="Missing Links",
+                        value=missing_lines or "—",
+                        inline=False,
+                    )
+                    warn_embed.set_footer(text="Use /affiliate-product-add to add missing links")
+                    picks_embeds = [warn_embed] + list(picks_embeds)
+            except Exception as val_exc:
+                logger.warning("[job:morning_brief] Affiliate validation error: %s", val_exc)
+
             await send_to_channel(bot, CHANNEL_DAILY_PICKS, picks_embeds)
             logger.info("[job:morning_brief] Daily picks sent (%d buckets)", len(picks_embeds))
     except Exception as exc:

@@ -802,3 +802,350 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
 
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-dashboard
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-dashboard",
+        description="Summary of all affiliate products: coverage, categories, recently added",
+    )
+    async def cmd_affiliate_dashboard(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import (
+                get_dashboard_stats, fix_bad_titles,
+            )
+            # Auto-fix bad titles silently
+            await asyncio.to_thread(fix_bad_titles)
+            stats = await asyncio.to_thread(get_dashboard_stats)
+
+            total       = stats["total"]
+            with_link   = stats["with_link"]
+            without_link = stats["without_link"]
+            pct         = round(with_link / total * 100, 1) if total else 0.0
+
+            bar_n    = int(pct / 5)
+            bar      = "█" * bar_n + "░" * (20 - bar_n)
+            color    = (discord.Color.green()  if pct >= 80
+                        else discord.Color.yellow() if pct >= 40
+                        else discord.Color.orange())
+
+            embed = discord.Embed(title="📊 Affiliate Products Dashboard", color=color)
+            embed.add_field(name="Total Products",        value=str(total),       inline=True)
+            embed.add_field(name="✅ With Affiliate Link", value=str(with_link),   inline=True)
+            embed.add_field(name="⚠️ Missing Link",       value=str(without_link), inline=True)
+            embed.add_field(name="Link Coverage",
+                            value=f"{pct}%  {bar}", inline=False)
+
+            # Category breakdown
+            cat_bd = stats.get("category_breakdown", {})
+            if cat_bd:
+                cat_lines = "\n".join(
+                    f"• {k}: **{v}**" for k, v in sorted(cat_bd.items(), key=lambda x: -x[1])
+                )
+                embed.add_field(name="Category Breakdown", value=cat_lines, inline=False)
+
+            # Recently added
+            recent = stats.get("recently_added", [])
+            if recent:
+                lines = "\n".join(
+                    f"`{r['itemid']}` {r['title'][:45] or '—'} ({r['created_at']})"
+                    for r in recent[:5]
+                )
+                embed.add_field(name="🕐 Recently Added (last 5)", value=lines, inline=False)
+
+            embed.set_footer(text="Use /affiliate-missing for missing details • /affiliate-coverage for top-N breakdown")
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-missing
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-missing",
+        description="Show products in Daily Picks / Viral / Opportunities that need affiliate links",
+    )
+    async def cmd_affiliate_missing(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import get_missing_by_section
+            data = await asyncio.to_thread(get_missing_by_section)
+
+            embeds = []
+
+            # Opportunities
+            opp = data.get("opportunities", [])
+            e1  = discord.Embed(title="🎯 Missing — Top Opportunities", color=discord.Color.red())
+            if opp:
+                lines = "\n".join(
+                    f"`{i:>2}.` **{p['title'][:50] or '—'}**\n"
+                    f"      itemid=`{p['itemid']}` | {p['category'][:25]}"
+                    for i, p in enumerate(opp[:10], 1)
+                )
+                e1.description = lines
+            else:
+                e1.description = "✅ All top opportunities have affiliate links!"
+                e1.color = discord.Color.green()
+            embeds.append(e1)
+
+            # Viral
+            viral = data.get("viral", [])
+            e2    = discord.Embed(title="🔥 Missing — Top Viral", color=discord.Color.orange())
+            if viral:
+                lines = "\n".join(
+                    f"`{i:>2}.` **{p['title'][:50] or '—'}**\n"
+                    f"      itemid=`{p['itemid']}` | {p['category'][:25]}"
+                    for i, p in enumerate(viral[:10], 1)
+                )
+                e2.description = lines
+            else:
+                e2.description = "✅ All top viral products have affiliate links!"
+                e2.color = discord.Color.green()
+            embeds.append(e2)
+
+            # Daily Picks by bucket
+            dp = data.get("daily_picks", {})
+            if dp:
+                e3 = discord.Embed(title="📅 Missing — Daily Picks by Category", color=discord.Color.yellow())
+                for bucket, items in dp.items():
+                    if items:
+                        lines = "\n".join(
+                            f"• `{p['itemid']}` {p['title'][:45] or '—'}"
+                            for p in items[:3]
+                        )
+                        e3.add_field(name=f"{bucket.title()} ({len(items)} missing)",
+                                     value=lines, inline=False)
+                if e3.fields:
+                    embeds.append(e3)
+
+            embed_footer = "Use /affiliate-product-add to add missing links"
+            for e in embeds:
+                e.set_footer(text=embed_footer)
+
+            await interaction.followup.send(embeds=embeds[:4])
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-coverage
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-coverage",
+        description="Affiliate link coverage for top 10 / 20 / 50 / 100 products",
+    )
+    async def cmd_affiliate_coverage(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import get_coverage_report
+            report = await asyncio.to_thread(get_coverage_report)
+
+            embed = discord.Embed(title="📈 Affiliate Coverage Report", color=discord.Color.blue())
+
+            for tier in report.get("tiers", []):
+                n    = tier["n"]
+                pct  = tier["pct"]
+                cov  = tier["covered"]
+                tot  = tier["total"]
+                bar_n = int(pct / 5)
+                bar  = "█" * bar_n + "░" * (20 - bar_n)
+                col  = "🟢" if pct >= 80 else "🟡" if pct >= 40 else "🔴"
+                embed.add_field(
+                    name=f"{col} Top {n}",
+                    value=f"{pct}%  `{bar}`\n{cov}/{tot} products",
+                    inline=False,
+                )
+
+            # Show a few uncovered top products
+            uncovered = [d for d in report.get("top100_details", [])[:20]
+                         if not d["has_affiliate"]][:5]
+            if uncovered:
+                lines = "\n".join(
+                    f"`{i:>2}.` {d['title'][:50] or '—'} (`{d['itemid']}`)"
+                    for i, d in enumerate(uncovered, 1)
+                )
+                embed.add_field(name="⚠️ Top products missing link", value=lines, inline=False)
+
+            embed.set_footer(text="/affiliate-missing for full breakdown • /affiliate-product-add to add links")
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-list
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-list",
+        description="Browse affiliate products with optional category filter",
+    )
+    @app_commands.describe(
+        filter="Filter: recent / beauty / gadget / home / baby / health / fashion / camping / missing",
+        page="Page number (starts at 1)",
+    )
+    @app_commands.choices(filter=[
+        app_commands.Choice(name="Recent",   value="recent"),
+        app_commands.Choice(name="Missing",  value="missing"),
+        app_commands.Choice(name="Beauty",   value="beauty"),
+        app_commands.Choice(name="Gadget",   value="gadget"),
+        app_commands.Choice(name="Home",     value="home"),
+        app_commands.Choice(name="Baby",     value="baby"),
+        app_commands.Choice(name="Health",   value="health"),
+        app_commands.Choice(name="Fashion",  value="fashion"),
+        app_commands.Choice(name="Camping",  value="camping"),
+    ])
+    async def cmd_affiliate_list(
+        self,
+        interaction: discord.Interaction,
+        filter: str = "recent",
+        page: int = 1,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import list_affiliate_products
+            page_idx = max(0, page - 1)
+            data = await asyncio.to_thread(list_affiliate_products, filter, page_idx)
+
+            items       = data["items"]
+            total       = data["total"]
+            total_pages = data["total_pages"]
+            cur_page    = data["page"] + 1
+
+            color = discord.Color.blue() if items else discord.Color.orange()
+            embed = discord.Embed(
+                title=f"📋 Affiliate Products — {filter.title()} (Page {cur_page}/{total_pages})",
+                color=color,
+            )
+            embed.set_footer(text=f"Total: {total} products • Use page: param to navigate")
+
+            if not items:
+                embed.description = "No products found for this filter."
+            else:
+                lines = []
+                for p in items:
+                    link_str = f"`{p['link'][:50]}`" if p["link"] else "⚠️ No link"
+                    lines.append(
+                        f"**{p['title'][:52] or '—'}**\n"
+                        f"  itemid=`{p['itemid']}` | {p['category'][:22] or '—'} | {p['updated_at']}\n"
+                        f"  {link_str}"
+                    )
+                embed.description = "\n\n".join(lines)
+
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /affiliate-health
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="affiliate-health",
+        description="Health check for affiliate products data quality",
+    )
+    async def cmd_affiliate_health(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import get_health_report, fix_bad_titles
+            fixed = await asyncio.to_thread(fix_bad_titles)
+            report = await asyncio.to_thread(get_health_report)
+
+            score  = report["health_score"]
+            total  = report["total"]
+            issues = report.get("issues", [])
+
+            color = (discord.Color.green()  if score >= 80
+                     else discord.Color.yellow() if score >= 50
+                     else discord.Color.red())
+            bar_n = int(score / 5)
+            bar   = "█" * bar_n + "░" * (20 - bar_n)
+
+            embed = discord.Embed(title="🩺 Affiliate Health Check", color=color)
+            embed.add_field(name="Health Score", value=f"{score}%  `{bar}`", inline=False)
+            embed.add_field(name="Total Records", value=str(total), inline=True)
+            embed.add_field(name="Issues Found",  value=str(len(issues)), inline=True)
+            if fixed:
+                embed.add_field(name="🔧 Auto-fixed Titles", value=str(fixed), inline=True)
+
+            for issue in issues:
+                examples = ", ".join(issue.get("examples", [])[:2])
+                val = f"Count: **{issue['count']}**"
+                if examples:
+                    val += f"\nExamples: {examples[:80]}"
+                embed.add_field(name=f"⚠️ {issue['label']}", value=val, inline=False)
+
+            if not issues:
+                embed.description = "✅ No issues found. All records look healthy."
+
+            embed.set_footer(text="Run /affiliate-list filter:missing to see products without links")
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /control-center
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="control-center",
+        description="Operational home screen — products, coverage, missing, health",
+    )
+    async def cmd_control_center(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.affiliate_products_engine import get_control_center_stats
+            stats = await asyncio.to_thread(get_control_center_stats)
+
+            if not stats:
+                await interaction.followup.send(
+                    embed=error_embed("No database found. Run import-datafeed first.")
+                )
+                return
+
+            total        = stats["total"]
+            with_link    = stats["with_link"]
+            without_link = stats["without_link"]
+            top10_pct    = stats["top10_coverage"]
+            health       = stats["health_score"]
+            n_issues     = stats["issues"]
+            recent       = stats.get("recent", [])
+
+            health_emoji  = "🟢" if health  >= 80 else "🟡" if health  >= 50 else "🔴"
+            top10_emoji   = "🟢" if top10_pct >= 80 else "🟡" if top10_pct >= 40 else "🔴"
+            overall_color = (discord.Color.green()  if health >= 80 and top10_pct >= 80
+                             else discord.Color.yellow() if health >= 50
+                             else discord.Color.orange())
+
+            embed = discord.Embed(
+                title="🏠 Shopee Affiliate — Control Center",
+                color=overall_color,
+            )
+            embed.add_field(name="📦 Total Products",    value=str(total),       inline=True)
+            embed.add_field(name="✅ With Link",          value=str(with_link),   inline=True)
+            embed.add_field(name="⚠️ Missing Link",       value=str(without_link), inline=True)
+            embed.add_field(name=f"{top10_emoji} Top-10 Coverage",
+                            value=f"{top10_pct}%", inline=True)
+            embed.add_field(name=f"{health_emoji} Health Score",
+                            value=f"{health}%", inline=True)
+            embed.add_field(name="🔍 Issues",
+                            value=str(n_issues) if n_issues else "None", inline=True)
+
+            if recent:
+                lines = "\n".join(
+                    f"• {r['title'][:48] or '—'} ({r['created_at']})"
+                    for r in recent
+                )
+                embed.add_field(name="🕐 Recent Activity", value=lines, inline=False)
+
+            embed.add_field(
+                name="Quick Commands",
+                value=(
+                    "`/affiliate-dashboard` — full summary\n"
+                    "`/affiliate-missing` — what needs links\n"
+                    "`/affiliate-coverage` — top-N breakdown\n"
+                    "`/affiliate-list` — browse all products\n"
+                    "`/affiliate-health` — data quality check"
+                ),
+                inline=False,
+            )
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
