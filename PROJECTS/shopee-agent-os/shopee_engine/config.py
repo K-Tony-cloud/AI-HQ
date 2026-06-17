@@ -1,10 +1,13 @@
 """Central configuration — paths, column mappings, defaults."""
 
+import os
 from pathlib import Path
 from dataclasses import dataclass, field
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+
+# On Render: set DATA_DIR=/data (persistent disk mount). Locally: data/ subfolder.
+DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data")))
 DB_PATH = DATA_DIR / "shopee.duckdb"
 
 # Shopee affiliate datafeeds use different column names across partners/regions.

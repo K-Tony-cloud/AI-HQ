@@ -1,0 +1,67 @@
+services:
+  - type: worker
+    name: shopee-agent-os
+    runtime: python
+    region: singapore
+    plan: starter
+    buildCommand: pip install -e .
+    startCommand: python -m discord_bot
+    envVars:
+      # ── Data Storage ─────────────────────────────────────────────────────────
+      - key: DATA_DIR
+        value: /data
+      # ── Discord (set in Render dashboard — never commit tokens) ───────────────
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      # ── Optional AI Key ───────────────────────────────────────────────────────
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # ── Channel IDs (copy from your .env) ────────────────────────────────────
+      - key: CHANNEL_CONTROL_CENTER
+        sync: false
+      - key: CHANNEL_BOT_COMMANDS
+        sync: false
+      - key: CHANNEL_MORNING_BRIEF
+        sync: false
+      - key: CHANNEL_DAILY_PICKS
+        sync: false
+      - key: CHANNEL_TREND_WATCH
+        sync: false
+      - key: CHANNEL_VIRAL
+        sync: false
+      - key: CHANNEL_CONTENT_QUEUE
+        sync: false
+      - key: CHANNEL_APPROVED_CONTENT
+        sync: false
+      - key: CHANNEL_AFFILIATE_LINKS
+        sync: false
+      - key: CHANNEL_MISSING_LINKS
+        sync: false
+      - key: CHANNEL_LINK_COVERAGE
+        sync: false
+      - key: CHANNEL_REVENUE
+        sync: false
+      - key: CHANNEL_TOP_EARNERS
+        sync: false
+      - key: CHANNEL_LEARNING_REPORTS
+        sync: false
+      - key: CHANNEL_PROFIT
+        sync: false
+      - key: CHANNEL_ANALYTICS
+        sync: false
+      - key: CHANNEL_EXECUTIVE_SUMMARY
+        sync: false
+      - key: CHANNEL_WEEKLY_REPORT
+        sync: false
+      - key: CHANNEL_SYSTEM_LOG
+        sync: false
+      - key: CHANNEL_SCHEDULER_LOG
+        sync: false
+      - key: CHANNEL_BOT_STATUS
+        sync: false
+    disk:
+      name: shopee-data
+      mountPath: /data
+      sizeGB: 1
