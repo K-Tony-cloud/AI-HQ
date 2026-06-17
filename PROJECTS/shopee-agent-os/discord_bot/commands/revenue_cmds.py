@@ -263,3 +263,111 @@ class RevenueCog(commands.Cog):
         except Exception as exc:
             logger.error("cmd_revenue_category: %s", exc)
             await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ── /import-commission-report ─────────────────────────────────────────────
+
+    @app_commands.command(
+        name="import-commission-report",
+        description="Import Shopee TH commission report (ค่าคอมมิชชั่น) — CSV or Excel",
+    )
+    @app_commands.describe(file="Commission report file from Shopee affiliate portal")
+    async def cmd_import_commission_th(
+        self,
+        interaction: discord.Interaction,
+        file: discord.Attachment,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        tmp_path: str | None = None
+        try:
+            _allowed = (".csv", ".xlsx", ".xls")
+            if not any(file.filename.lower().endswith(ext) for ext in _allowed):
+                await interaction.followup.send(
+                    embed=make_embed("❌ Invalid File", color_key="error",
+                                    description="Upload a `.csv` or `.xlsx` file."),
+                    ephemeral=True,
+                )
+                return
+
+            content = await file.read()
+            _suffix = "." + file.filename.rsplit(".", 1)[-1].lower()
+            with tempfile.NamedTemporaryFile(suffix=_suffix, delete=False) as f:
+                f.write(content)
+                tmp_path = f.name
+
+            from shopee_engine.feedback_engine import import_commission_report_th
+            from discord_bot.config import CHANNEL_REVENUE
+
+            result = await asyncio.to_thread(import_commission_report_th, tmp_path)
+            embed  = build_import_result_embed(result, "commission_th", file.filename)
+
+            # Show extra stats for commission report
+            if result.get("rows_imported", 0) > 0:
+                rev = result.get("total_revenue", 0)
+                com = result.get("total_commission", 0)
+                embed.add_field(
+                    name="📊 Totals",
+                    value=f"Revenue: ฿{rev:,.2f} | Commission: ฿{com:,.2f}",
+                    inline=False,
+                )
+
+            await send_and_confirm(interaction, [embed], CHANNEL_REVENUE)
+        except Exception as exc:
+            logger.error("cmd_import_commission_th: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    # ── /import-click-report ──────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="import-click-report",
+        description="Import Shopee TH click report (รหัสคลิก / เวลาคลิก) — CSV or Excel",
+    )
+    @app_commands.describe(file="Click report file from Shopee affiliate portal")
+    async def cmd_import_click_th(
+        self,
+        interaction: discord.Interaction,
+        file: discord.Attachment,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        tmp_path: str | None = None
+        try:
+            _allowed = (".csv", ".xlsx", ".xls")
+            if not any(file.filename.lower().endswith(ext) for ext in _allowed):
+                await interaction.followup.send(
+                    embed=make_embed("❌ Invalid File", color_key="error",
+                                    description="Upload a `.csv` or `.xlsx` file."),
+                    ephemeral=True,
+                )
+                return
+
+            content = await file.read()
+            _suffix = "." + file.filename.rsplit(".", 1)[-1].lower()
+            with tempfile.NamedTemporaryFile(suffix=_suffix, delete=False) as f:
+                f.write(content)
+                tmp_path = f.name
+
+            from shopee_engine.feedback_engine import import_click_report_th
+            from discord_bot.config import CHANNEL_REVENUE
+
+            result = await asyncio.to_thread(import_click_report_th, tmp_path)
+            embed  = build_import_result_embed(result, "click_th", file.filename)
+
+            if result.get("total_clicks", 0) > 0:
+                embed.add_field(
+                    name="📊 Totals",
+                    value=(
+                        f"Total clicks: **{result['total_clicks']:,}** "
+                        f"across **{result.get('days_covered', 0)}** days"
+                    ),
+                    inline=False,
+                )
+
+            await send_and_confirm(interaction, [embed], CHANNEL_REVENUE)
+        except Exception as exc:
+            logger.error("cmd_import_click_th: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)

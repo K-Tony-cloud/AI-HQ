@@ -33,15 +33,30 @@ PREDICT_TABLE = "prediction_log"
 WEIGHT_TABLE  = "learning_weights"
 
 REVENUE_ALIASES: dict[str, list[str]] = {
-    "report_date":   ["date", "order_date", "report_date", "day", "click_date"],
-    "product_name":  ["product_name", "item_name", "name", "title", "item name", "product"],
-    "product_id":    ["item_id", "itemid", "product_id", "sku_id"],
-    "clicks":        ["clicks", "click", "total_clicks", "click_count"],
-    "orders":        ["orders", "order", "total_orders", "conversions"],
-    "revenue":       ["revenue", "gmv", "total_revenue", "order_amount", "sales_amount", "amount"],
-    "commission":    ["commission", "total_commission", "affiliate_commission", "my_commission"],
+    "report_date":   ["date", "order_date", "report_date", "day", "click_date",
+                      "วันที่", "เวลาคลิก", "เวลาที่สั่งซื้อ"],
+    "product_name":  ["product_name", "item_name", "name", "title", "item name", "product",
+                      "ชื่อรายการสินค้า"],
+    "product_id":    ["item_id", "itemid", "product_id", "sku_id",
+                      "รหัสรายการสินค้า"],
+    "clicks":        ["clicks", "click", "total_clicks", "click_count",
+                      "คลิก", "จำนวนคลิก"],
+    "orders":        ["orders", "order", "total_orders", "conversions",
+                      "คำสั่งซื้อ", "จำนวนคำสั่งซื้อ"],
+    "revenue":       ["revenue", "gmv", "total_revenue", "order_amount", "sales_amount", "amount",
+                      "มูลค่าซื้อ(฿)", "มูลค่าซื้อ"],
+    "commission":    ["commission", "total_commission", "affiliate_commission", "my_commission",
+                      "ค่าคอมมิชชั่นสุทธิ(฿)", "ค่าคอมมิชชั่นสุทธิ"],
     "category":      ["category", "cat_name", "category_name"],
-    "shop_name":     ["shop_name", "shopname", "seller_name"],
+    "shop_name":     ["shop_name", "shopname", "seller_name",
+                      "ชื่อร้านค้า"],
+    "sub_id":        ["sub_id", "Sub_id"],
+    "sub_id1":       ["sub_id1", "Sub_id1"],
+    "sub_id2":       ["sub_id2", "Sub_id2"],
+    "sub_id3":       ["sub_id3", "Sub_id3"],
+    "sub_id4":       ["sub_id4", "Sub_id4"],
+    "sub_id5":       ["sub_id5", "Sub_id5"],
+    "channel":       ["channel", "ช่องทาง", "อ้างอิง"],
 }
 
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -81,6 +96,22 @@ def _has_table(con: duckdb.DuckDBPyConnection, name: str) -> bool:
     return name in [r[0] for r in con.execute("SHOW TABLES").fetchall()]
 
 
+def _parse_date(s: str) -> str:
+    """Normalise Shopee TH date strings to YYYY-MM-DD."""
+    s = str(s or "").strip()
+    if not s:
+        return ""
+    date_part = s.split(" ")[0].split("T")[0]
+    if "/" in date_part:
+        parts = date_part.split("/")
+        if len(parts) == 3:
+            if len(parts[0]) == 4:          # YYYY/MM/DD
+                return f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+            if len(parts[2]) == 4:          # DD/MM/YYYY
+                return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+    return date_part
+
+
 def _detect_revenue_cols(actual_cols: list[str]) -> dict[str, str | None]:
     lower_map = {c.lower(): c for c in actual_cols}
     result: dict[str, str | None] = {}
@@ -107,9 +138,22 @@ def _init_feedback_tables(con: duckdb.DuckDBPyConnection) -> None:
             commission    DOUBLE,
             category      TEXT,
             shop_name     TEXT,
-            source        TEXT
+            source        TEXT,
+            sub_id        TEXT,
+            sub_id1       TEXT,
+            sub_id2       TEXT,
+            sub_id3       TEXT,
+            sub_id4       TEXT,
+            sub_id5       TEXT,
+            channel       TEXT
         )
     """)
+    # Migration: add new columns to existing tables that were created before these fields
+    for _col in ("sub_id", "sub_id1", "sub_id2", "sub_id3", "sub_id4", "sub_id5", "channel"):
+        try:
+            con.execute(f"ALTER TABLE {REVENUE_TABLE} ADD COLUMN IF NOT EXISTS {_col} TEXT")
+        except Exception:
+            pass
 
     con.execute(f"""
         CREATE TABLE IF NOT EXISTS {PREDICT_TABLE} (
@@ -228,7 +272,7 @@ def _import_feedback_csv(csv_path: Path, source: str) -> dict:
 
         rows.append({
             "imported_at":  now_str,
-            "report_date":  _g("report_date"),
+            "report_date":  _parse_date(_g("report_date")),
             "product_name": _g("product_name"),
             "product_id":   _g("product_id"),
             "clicks":       _gf("clicks"),
@@ -238,6 +282,13 @@ def _import_feedback_csv(csv_path: Path, source: str) -> dict:
             "category":     _g("category"),
             "shop_name":    _g("shop_name"),
             "source":       source,
+            "sub_id":       _g("sub_id"),
+            "sub_id1":      _g("sub_id1"),
+            "sub_id2":      _g("sub_id2"),
+            "sub_id3":      _g("sub_id3"),
+            "sub_id4":      _g("sub_id4"),
+            "sub_id5":      _g("sub_id5"),
+            "channel":      _g("channel"),
         })
 
     if not rows:
@@ -263,11 +314,15 @@ def _import_feedback_csv(csv_path: Path, source: str) -> dict:
         con.execute(
             f"""INSERT INTO {REVENUE_TABLE}
                 (id, imported_at, report_date, product_name, product_id,
-                 clicks, orders, revenue, commission, category, shop_name, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 clicks, orders, revenue, commission, category, shop_name, source,
+                 sub_id, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [next_id + i, r["imported_at"], r["report_date"], r["product_name"],
              r["product_id"], r["clicks"], r["orders"], r["revenue"],
-             r["commission"], r["category"], r["shop_name"], r["source"]],
+             r["commission"], r["category"], r["shop_name"], r["source"],
+             r.get("sub_id",""), r.get("sub_id1",""), r.get("sub_id2",""),
+             r.get("sub_id3",""), r.get("sub_id4",""), r.get("sub_id5",""),
+             r.get("channel","")],
         )
 
     con.close()
@@ -287,6 +342,183 @@ def import_click_report(csv_path: str | Path) -> dict:
 def import_order_report(csv_path: str | Path) -> dict:
     """Import order-level report CSV."""
     return _import_feedback_csv(Path(csv_path), source="orders")
+
+
+# ---------------------------------------------------------------------------
+# Shopee TH dedicated importers
+# ---------------------------------------------------------------------------
+
+_TH_COMMISSION_COLS: dict[str, list[str]] = {
+    "product_name": ["ชื่อรายการสินค้า"],
+    "product_id":   ["รหัสรายการสินค้า"],
+    "shop_name":    ["ชื่อร้านค้า"],
+    "revenue":      ["มูลค่าซื้อ(฿)", "มูลค่าซื้อ"],
+    "commission":   ["ค่าคอมมิชชั่นสุทธิ(฿)", "ค่าคอมมิชชั่นสุทธิ"],
+    "report_date":  ["เวลาที่สั่งซื้อ", "เวลาคลิก", "วันที่", "date"],
+    "sub_id1":      ["Sub_id1", "sub_id1"],
+    "sub_id2":      ["Sub_id2", "sub_id2"],
+    "sub_id3":      ["Sub_id3", "sub_id3"],
+    "sub_id4":      ["Sub_id4", "sub_id4"],
+    "sub_id5":      ["Sub_id5", "sub_id5"],
+    "channel":      ["ช่องทาง", "channel"],
+}
+
+
+def import_commission_report_th(path: str | Path) -> dict:
+    """Import Shopee TH commission report. Each row = 1 completed order."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+
+    actual_cols, raw_rows = _read_rows(path)
+    lower_map = {c.lower(): c for c in actual_cols}
+
+    def _col(canonical: str) -> str | None:
+        for alias in _TH_COMMISSION_COLS.get(canonical, []):
+            if alias.lower() in lower_map:
+                return lower_map[alias.lower()]
+        return None
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows: list[dict] = []
+
+    for raw in raw_rows:
+        def _g(canonical: str, default: str = "") -> str:
+            c = _col(canonical)
+            return str(raw.get(c, default)).strip() if c else default
+
+        def _gf(canonical: str) -> float:
+            v = _g(canonical, "0")
+            try:
+                return float(str(v).replace(",", "").replace("฿", "").strip() or 0)
+            except ValueError:
+                return 0.0
+
+        rows.append({
+            "imported_at":  now_str,
+            "report_date":  _parse_date(_g("report_date")),
+            "product_name": _g("product_name"),
+            "product_id":   _g("product_id"),
+            "clicks":       0.0,
+            "orders":       1.0,
+            "revenue":      _gf("revenue"),
+            "commission":   _gf("commission"),
+            "category":     "",
+            "shop_name":    _g("shop_name"),
+            "source":       "commission_th",
+            "sub_id":       "",
+            "sub_id1":      _g("sub_id1"),
+            "sub_id2":      _g("sub_id2"),
+            "sub_id3":      _g("sub_id3"),
+            "sub_id4":      _g("sub_id4"),
+            "sub_id5":      _g("sub_id5"),
+            "channel":      _g("channel"),
+        })
+
+    if not rows:
+        return {"rows_imported": 0, "source": "commission_th", "path": str(path)}
+
+    con = _connect(read_only=False)
+    _init_feedback_tables(con)
+
+    dates = list({r["report_date"] for r in rows if r["report_date"]})
+    for d in dates:
+        con.execute(
+            f"DELETE FROM {REVENUE_TABLE} WHERE source='commission_th' AND report_date=?", [d]
+        )
+
+    max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {REVENUE_TABLE}").fetchone()[0]
+    next_id = (max_id or 0) + 1
+
+    for i, r in enumerate(rows):
+        con.execute(f"""
+            INSERT INTO {REVENUE_TABLE}
+            (id, imported_at, report_date, product_name, product_id,
+             clicks, orders, revenue, commission, category, shop_name, source,
+             sub_id, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            next_id + i, r["imported_at"], r["report_date"], r["product_name"],
+            r["product_id"], r["clicks"], r["orders"], r["revenue"],
+            r["commission"], r["category"], r["shop_name"], r["source"],
+            r["sub_id"], r["sub_id1"], r["sub_id2"], r["sub_id3"],
+            r["sub_id4"], r["sub_id5"], r["channel"],
+        ])
+
+    con.close()
+    return {
+        "rows_imported": len(rows),
+        "source": "commission_th",
+        "path": str(path),
+        "total_revenue":    sum(r["revenue"]    for r in rows),
+        "total_commission": sum(r["commission"] for r in rows),
+    }
+
+
+def import_click_report_th(path: str | Path) -> dict:
+    """Import Shopee TH click report. Aggregates by date (each raw row = 1 click)."""
+    from collections import defaultdict
+
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+
+    actual_cols, raw_rows = _read_rows(path)
+    lower_map = {c.lower(): c for c in actual_cols}
+
+    date_candidates = ["เวลาคลิก", "วันที่", "date", "click_date"]
+    date_col = next(
+        (lower_map[c.lower()] for c in date_candidates if c.lower() in lower_map), None
+    )
+    ref_col  = lower_map.get("อ้างอิง") or lower_map.get("channel")
+    sub_col  = lower_map.get("sub_id")
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_clicks: dict[str, int]  = defaultdict(int)
+    date_channel: dict[str, str] = {}
+
+    for raw in raw_rows:
+        raw_date = str(raw.get(date_col, "")).strip() if date_col else ""
+        parsed = _parse_date(raw_date) or "unknown"
+        date_clicks[parsed] += 1
+        if ref_col and parsed not in date_channel:
+            date_channel[parsed] = str(raw.get(ref_col, "")).strip()
+
+    if not date_clicks:
+        return {"rows_imported": 0, "source": "click_th", "path": str(path), "total_clicks": 0}
+
+    con = _connect(read_only=False)
+    _init_feedback_tables(con)
+
+    for d in date_clicks:
+        con.execute(
+            f"DELETE FROM {REVENUE_TABLE} WHERE source='click_th' AND report_date=?", [d]
+        )
+
+    max_id  = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {REVENUE_TABLE}").fetchone()[0]
+    next_id = (max_id or 0) + 1
+
+    for i, (date, count) in enumerate(sorted(date_clicks.items())):
+        con.execute(f"""
+            INSERT INTO {REVENUE_TABLE}
+            (id, imported_at, report_date, product_name, product_id,
+             clicks, orders, revenue, commission, category, shop_name, source,
+             sub_id, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            next_id + i, now_str, date, "", "", float(count), 0.0, 0.0, 0.0,
+            "", "", "click_th",
+            "", "", "", "", "", "", date_channel.get(date, ""),
+        ])
+
+    con.close()
+    return {
+        "rows_imported":  len(date_clicks),
+        "source":         "click_th",
+        "path":           str(path),
+        "total_clicks":   sum(date_clicks.values()),
+        "days_covered":   len(date_clicks),
+    }
 
 
 # ---------------------------------------------------------------------------
