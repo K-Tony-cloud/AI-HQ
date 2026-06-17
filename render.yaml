@@ -4,6 +4,7 @@ services:
     runtime: python
     region: singapore
     plan: starter
+    rootDir: PROJECTS/shopee-agent-os
     buildCommand: pip install -e .
     startCommand: python -m discord_bot
     envVars:
