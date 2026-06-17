@@ -157,6 +157,101 @@ def build_import_result_embed(result: dict, report_type: str, filename: str) -> 
     return e
 
 
+def build_revenue_summary_embed(data: dict) -> discord.Embed:
+    """Single embed for /revenue-summary."""
+    if data.get("error"):
+        return make_embed("❌ Revenue Summary", color_key="error", description=data["error"])
+
+    cr  = data.get("conversion_rate", 0)
+    epc = data.get("epc", 0)
+    e = make_embed(
+        "💰 Revenue Summary",
+        color_key="profit",
+        description=(
+            f"Period: **{data.get('date_from','—')}** → **{data.get('date_to','—')}**  "
+            f"({data.get('total_days', 0)} days)"
+        ),
+    )
+    e.add_field(name="👆 Clicks",        value=f"**{_fi(data.get('total_clicks',0))}**",      inline=True)
+    e.add_field(name="📦 Orders",        value=f"**{_fi(data.get('total_orders',0))}**",      inline=True)
+    e.add_field(name="💳 Conv Rate",     value=f"**{cr:.2f}%**",                              inline=True)
+    e.add_field(name="💵 Revenue",       value=f"**{_fp(data.get('total_revenue',0))}**",     inline=True)
+    e.add_field(name="🏦 Commission",    value=f"**{_fp(data.get('total_commission',0))}**",  inline=True)
+    e.add_field(name="📈 EPC/100",       value=f"**{_fp(epc)}**",                             inline=True)
+    e.add_field(name="🛍 Products",      value=str(data.get("total_products", 0)),            inline=True)
+    e.add_field(name="📂 Categories",    value=str(data.get("total_categories", 0)),          inline=True)
+    return e
+
+
+def build_revenue_products_embed(items: list[dict], keyword: str = "") -> discord.Embed:
+    """Per-product table for /revenue-products."""
+    title = f"🛍 Revenue Products" + (f" — '{keyword}'" if keyword else "")
+    if not items:
+        return make_embed(title, color_key="info",
+                          description="No data found. Import a report first.")
+    e = make_embed(title, color_key="content")
+    lines = []
+    for i, p in enumerate(items, 1):
+        lines.append(
+            f"`{i:>2}.` **{_trunc(p['name'], 40)}**\n"
+            f"      Clicks: {_fi(p['clicks'])} | Orders: {_fi(p['orders'])} | "
+            f"CR: {p['cr']:.1f}% | Commission: **{_fp(p['commission'])}**"
+        )
+    # Discord field limit 1024 chars — chunk into pages of ~8 items
+    chunk: list[str] = []
+    field_n = 1
+    for line in lines:
+        chunk.append(line)
+        if len("\n".join(chunk)) > 900:
+            e.add_field(name=f"Products (cont.)" if field_n > 1 else "Products",
+                        value="\n".join(chunk[:-1])[:1024], inline=False)
+            chunk = [chunk[-1]]
+            field_n += 1
+    if chunk:
+        e.add_field(name="Products" if field_n == 1 else "Products (cont.)",
+                    value="\n".join(chunk)[:1024], inline=False)
+    return e
+
+
+def build_revenue_top_embed(items: list[dict], metric: str) -> discord.Embed:
+    """Top N products by metric for /revenue-top."""
+    icons = {"clicks": "👆", "orders": "📦", "revenue": "💵", "commission": "🏦"}
+    icon = icons.get(metric, "📊")
+    if not items:
+        return make_embed(f"{icon} Top by {metric.title()}", color_key="info",
+                          description="No data. Import a report first.")
+    e = make_embed(f"{icon} Top by {metric.title()}", color_key="opportunity")
+    lines = []
+    for p in items:
+        val = p.get(metric, 0)
+        val_str = _fp(val) if metric in ("revenue", "commission") else _fi(val)
+        lines.append(
+            f"`{p['rank']:>2}.` **{_trunc(p['name'], 42)}**\n"
+            f"      {metric.title()}: **{val_str}** | "
+            f"CR: {p['cr']:.1f}% | Commission: {_fp(p['commission'])}"
+        )
+    e.add_field(name=f"Top {len(items)} by {metric.title()}",
+                value="\n".join(lines)[:1024], inline=False)
+    return e
+
+
+def build_revenue_category_embed(items: list[dict]) -> discord.Embed:
+    """Category revenue breakdown for /revenue-category."""
+    if not items:
+        return make_embed("📂 Revenue by Category", color_key="info",
+                          description="No data. Import a report first.")
+    e = make_embed("📂 Revenue by Category", color_key="trend")
+    lines = []
+    for i, c in enumerate(items, 1):
+        lines.append(
+            f"`{i:>2}.` **{_trunc(c['category'], 30)}** ({c['products']} products)\n"
+            f"      Clicks: {_fi(c['clicks'])} | Orders: {_fi(c['orders'])} | "
+            f"CR: {c['cr']:.1f}% | Commission: **{_fp(c['commission'])}**"
+        )
+    e.add_field(name="Categories", value="\n".join(lines)[:1024], inline=False)
+    return e
+
+
 def build_revenue_winners_embed(data: dict) -> discord.Embed:
     """Compact embed for morning brief — top 3 commission earners."""
     if data.get("error"):

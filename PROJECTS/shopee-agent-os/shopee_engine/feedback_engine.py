@@ -179,51 +179,66 @@ def _accuracy_pct(r: float) -> float:
 # 1. import-revenue-report
 # ---------------------------------------------------------------------------
 
-def _import_feedback_csv(csv_path: Path, source: str) -> dict:
-    """Generic CSV import into revenue_feedback with auto column detection."""
-    if not csv_path.exists():
-        raise FileNotFoundError(f"File not found: {csv_path}")
+def _read_rows(path: Path) -> tuple[list[str], list[dict]]:
+    """Read CSV or Excel file. Returns (column_names, rows_as_dicts)."""
+    suffix = path.suffix.lower()
+    if suffix in (".xlsx", ".xls", ".xlsm"):
+        import pandas as pd
+        df = pd.read_excel(path, dtype=str)
+        cols = list(df.columns)
+        rows = df.fillna("").to_dict("records")
+        return cols, rows
 
-    with open(csv_path, "r", encoding="utf-8-sig") as fh:
+    # CSV — sniff delimiter
+    with open(path, "r", encoding="utf-8-sig") as fh:
         sample = fh.read(8192)
     try:
-        dialect = csv_mod.Sniffer().sniff(sample)
-        delimiter = dialect.delimiter
+        delimiter = csv_mod.Sniffer().sniff(sample).delimiter
     except csv_mod.Error:
         delimiter = ","
 
-    rows: list[dict] = []
-    with open(csv_path, "r", encoding="utf-8-sig", newline="") as fh:
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
         reader = csv_mod.DictReader(fh, delimiter=delimiter)
-        actual_cols = reader.fieldnames or []
-        col_map = _detect_revenue_cols(actual_cols)
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cols = list(reader.fieldnames or [])
+        rows = [dict(r) for r in reader]
+    return cols, rows
 
-        for raw in reader:
-            def _g(canonical: str, default="") -> str:
-                col = col_map.get(canonical)
-                return raw.get(col, default) if col else default
 
-            def _gf(canonical: str) -> float:
-                v = _g(canonical, "0")
-                try:
-                    return float(str(v).replace(",", "").strip() or 0)
-                except ValueError:
-                    return 0.0
+def _import_feedback_csv(csv_path: Path, source: str) -> dict:
+    """Import CSV or Excel report into revenue_feedback."""
+    if not csv_path.exists():
+        raise FileNotFoundError(f"File not found: {csv_path}")
 
-            rows.append({
-                "imported_at":  now_str,
-                "report_date":  _g("report_date"),
-                "product_name": _g("product_name"),
-                "product_id":   _g("product_id"),
-                "clicks":       _gf("clicks"),
-                "orders":       _gf("orders"),
-                "revenue":      _gf("revenue"),
-                "commission":   _gf("commission"),
-                "category":     _g("category"),
-                "shop_name":    _g("shop_name"),
-                "source":       source,
-            })
+    actual_cols, raw_rows = _read_rows(csv_path)
+    col_map = _detect_revenue_cols(actual_cols)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    rows: list[dict] = []
+    for raw in raw_rows:
+        def _g(canonical: str, default="") -> str:
+            col = col_map.get(canonical)
+            return raw.get(col, default) if col else default
+
+        def _gf(canonical: str) -> float:
+            v = _g(canonical, "0")
+            try:
+                return float(str(v).replace(",", "").strip() or 0)
+            except ValueError:
+                return 0.0
+
+        rows.append({
+            "imported_at":  now_str,
+            "report_date":  _g("report_date"),
+            "product_name": _g("product_name"),
+            "product_id":   _g("product_id"),
+            "clicks":       _gf("clicks"),
+            "orders":       _gf("orders"),
+            "revenue":      _gf("revenue"),
+            "commission":   _gf("commission"),
+            "category":     _g("category"),
+            "shop_name":    _g("shop_name"),
+            "source":       source,
+        })
 
     if not rows:
         return {"rows_imported": 0, "source": source, "path": str(csv_path)}
@@ -800,6 +815,194 @@ def get_revenue_dashboard(top_n: int = 5) -> dict:
         }
     except Exception as exc:
         return {"error": str(exc)}
+    finally:
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# 6b. Revenue summary / products / top / category  (new commands)
+# ---------------------------------------------------------------------------
+
+def get_revenue_summary() -> dict:
+    """Overall totals with conversion rate and EPC — for /revenue-summary."""
+    if not config.db_path.exists():
+        return {"error": "Database not found"}
+    con = _connect(read_only=True)
+    try:
+        if not _has_table(con, REVENUE_TABLE):
+            return {"error": "No revenue data. Use /affiliate-import-report first."}
+        row = con.execute(f"""
+            SELECT
+                COALESCE(SUM(clicks),     0),
+                COALESCE(SUM(orders),     0),
+                COALESCE(SUM(revenue),    0),
+                COALESCE(SUM(commission), 0),
+                COUNT(DISTINCT product_name),
+                COUNT(DISTINCT report_date),
+                MIN(report_date),
+                MAX(report_date),
+                COUNT(DISTINCT category)
+            FROM {REVENUE_TABLE}
+        """).fetchone()
+        clicks, orders, revenue, commission, products, days, d_from, d_to, cats = row
+        clicks     = float(clicks or 0)
+        orders     = float(orders or 0)
+        revenue    = float(revenue or 0)
+        commission = float(commission or 0)
+        cr  = round(orders / clicks * 100, 2) if clicks else 0.0
+        epc = round(commission / clicks * 100, 4) if clicks else 0.0
+        return {
+            "total_clicks":     clicks,
+            "total_orders":     orders,
+            "total_revenue":    revenue,
+            "total_commission": commission,
+            "total_products":   int(products or 0),
+            "total_days":       int(days or 0),
+            "total_categories": int(cats or 0),
+            "date_from":        d_from or "—",
+            "date_to":          d_to or "—",
+            "conversion_rate":  cr,
+            "epc":              epc,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+    finally:
+        con.close()
+
+
+def get_revenue_products(keyword: str = "", limit: int = 20) -> list[dict]:
+    """Per-product breakdown with all metrics, optionally filtered by keyword."""
+    if not config.db_path.exists():
+        return []
+    con = _connect(read_only=True)
+    try:
+        if not _has_table(con, REVENUE_TABLE):
+            return []
+        where = f"AND LOWER(product_name) LIKE '%{keyword.lower()}%'" if keyword else ""
+        rows = con.execute(f"""
+            SELECT
+                product_name,
+                SUM(clicks)     AS clicks,
+                SUM(orders)     AS orders,
+                SUM(revenue)    AS revenue,
+                SUM(commission) AS commission,
+                MAX(report_date) AS last_date
+            FROM {REVENUE_TABLE}
+            WHERE 1=1 {where}
+            GROUP BY product_name
+            ORDER BY commission DESC
+            LIMIT {limit}
+        """).fetchall()
+        result = []
+        for r in rows:
+            clicks = float(r[1] or 0)
+            orders = float(r[2] or 0)
+            commission = float(r[4] or 0)
+            epc = round(commission / clicks * 100, 4) if clicks else 0.0
+            cr  = round(orders / clicks * 100, 2) if clicks else 0.0
+            result.append({
+                "name":       (r[0] or "")[:55],
+                "clicks":     clicks,
+                "orders":     orders,
+                "revenue":    float(r[3] or 0),
+                "commission": commission,
+                "epc":        epc,
+                "cr":         cr,
+                "last_date":  r[5] or "—",
+            })
+        return result
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+_METRIC_SQL = {
+    "clicks":     "SUM(clicks)",
+    "orders":     "SUM(orders)",
+    "revenue":    "SUM(revenue)",
+    "commission": "SUM(commission)",
+}
+
+
+def get_revenue_top(metric: str = "commission", top_n: int = 10) -> list[dict]:
+    """Top N products by chosen metric."""
+    if not config.db_path.exists():
+        return []
+    order_expr = _METRIC_SQL.get(metric, "SUM(commission)")
+    con = _connect(read_only=True)
+    try:
+        if not _has_table(con, REVENUE_TABLE):
+            return []
+        rows = con.execute(f"""
+            SELECT
+                product_name,
+                SUM(clicks)     AS clicks,
+                SUM(orders)     AS orders,
+                SUM(revenue)    AS revenue,
+                SUM(commission) AS commission
+            FROM {REVENUE_TABLE}
+            GROUP BY product_name
+            ORDER BY {order_expr} DESC
+            LIMIT {top_n}
+        """).fetchall()
+        result = []
+        for i, r in enumerate(rows, 1):
+            clicks = float(r[1] or 0)
+            orders = float(r[2] or 0)
+            result.append({
+                "rank":       i,
+                "name":       (r[0] or "")[:55],
+                "clicks":     clicks,
+                "orders":     orders,
+                "revenue":    float(r[3] or 0),
+                "commission": float(r[4] or 0),
+                "cr":         round(orders / clicks * 100, 2) if clicks else 0.0,
+            })
+        return result
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+def get_revenue_by_category(top_n: int = 10) -> list[dict]:
+    """Revenue aggregated by category."""
+    if not config.db_path.exists():
+        return []
+    con = _connect(read_only=True)
+    try:
+        if not _has_table(con, REVENUE_TABLE):
+            return []
+        rows = con.execute(f"""
+            SELECT
+                COALESCE(NULLIF(TRIM(category), ''), 'Uncategorized') AS cat,
+                COUNT(DISTINCT product_name) AS products,
+                SUM(clicks)     AS clicks,
+                SUM(orders)     AS orders,
+                SUM(revenue)    AS revenue,
+                SUM(commission) AS commission
+            FROM {REVENUE_TABLE}
+            GROUP BY cat
+            ORDER BY commission DESC
+            LIMIT {top_n}
+        """).fetchall()
+        result = []
+        for r in rows:
+            clicks = float(r[2] or 0)
+            orders = float(r[3] or 0)
+            result.append({
+                "category":   str(r[0])[:40],
+                "products":   int(r[1] or 0),
+                "clicks":     clicks,
+                "orders":     orders,
+                "revenue":    float(r[4] or 0),
+                "commission": float(r[5] or 0),
+                "cr":         round(orders / clicks * 100, 2) if clicks else 0.0,
+            })
+        return result
+    except Exception:
+        return []
     finally:
         con.close()
 
