@@ -1230,16 +1230,50 @@ def get_revenue_top(metric: str = "commission", top_n: int = 10) -> list[dict]:
         con.close()
 
 
-def get_revenue_by_category(top_n: int = 10) -> list[dict]:
-    """Revenue by category — joins commission_report with products table for category metadata."""
+def _category_rows(con, group_expr: str, top_n: int) -> list[dict]:
+    """Run the category aggregation SQL and return normalised dicts."""
+    sql = f"""
+        SELECT
+            {group_expr}                        AS category,
+            COUNT(DISTINCT product_name)        AS products,
+            COUNT(*)                            AS orders,
+            COALESCE(SUM(revenue), 0)           AS revenue,
+            COALESCE(SUM(commission), 0)        AS commission
+        FROM {COMMISSION_TABLE}
+        GROUP BY category
+        ORDER BY commission DESC
+        LIMIT {top_n}
+    """
+    rows = con.execute(sql).fetchall()
+    result = []
+    for r in rows:
+        orders = float(r[2] or 0)
+        commission = float(r[4] or 0)
+        result.append({
+            "category":                str(r[0] or "Unknown")[:40],
+            "products":                int(r[1] or 0),
+            "orders":                  orders,
+            "revenue":                 float(r[3] or 0),
+            "commission":              commission,
+            "avg_commission_per_order": round(commission / orders, 2) if orders else 0.0,
+        })
+    return result
+
+
+def get_revenue_by_category(top_n: int = 10) -> dict:
+    """
+    Revenue by category from commission_report.
+    Returns dict with three sorted views: by_commission, by_revenue, by_orders.
+    Falls back to shop_name grouping when no products table or no matching itemids.
+    """
     if not config.db_path.exists():
-        return []
+        return {}
     con = _connect(read_only=True)
     try:
         if not _has_table(con, COMMISSION_TABLE):
-            return []
+            return {}
 
-        # Detect available columns in products table
+        # Try to join with products table for real category names
         cat_col = id_col = None
         if _has_table(con, "products"):
             prod_cols = [r[0].lower() for r in con.execute(
@@ -1255,47 +1289,77 @@ def get_revenue_by_category(top_n: int = 10) -> list[dict]:
                     break
 
         if cat_col and id_col:
-            sql = f"""
+            # Check if join actually produces category data
+            matched = con.execute(f"""
+                SELECT COUNT(*) FROM {COMMISSION_TABLE} c
+                JOIN products p
+                  ON TRY_CAST(c.product_id AS BIGINT) = TRY_CAST(p.{id_col} AS BIGINT)
+                WHERE TRIM(p.{cat_col}) != ''
+            """).fetchone()[0]
+        else:
+            matched = 0
+
+        if matched and cat_col and id_col:
+            group_expr = f"""
+                COALESCE(NULLIF(TRIM(p.{cat_col}), ''), 'Uncategorized')
+                FROM {COMMISSION_TABLE} c
+                LEFT JOIN products p
+                  ON TRY_CAST(c.product_id AS BIGINT) = TRY_CAST(p.{id_col} AS BIGINT)
+                WHERE 1=1 -- placeholder
+                GROUP BY category
+                ORDER BY commission DESC LIMIT {top_n}
+            """
+            # Use dedicated SQL for the join case
+            sql_base = f"""
                 SELECT
                     COALESCE(NULLIF(TRIM(p.{cat_col}), ''), 'Uncategorized') AS category,
-                    COUNT(DISTINCT c.product_name) AS products,
-                    COUNT(*)         AS orders,
-                    SUM(c.revenue)   AS revenue,
-                    SUM(c.commission) AS commission
+                    COUNT(DISTINCT c.product_name)  AS products,
+                    COUNT(*)                        AS orders,
+                    COALESCE(SUM(c.revenue), 0)     AS revenue,
+                    COALESCE(SUM(c.commission), 0)  AS commission
                 FROM {COMMISSION_TABLE} c
                 LEFT JOIN products p
                   ON TRY_CAST(c.product_id AS BIGINT) = TRY_CAST(p.{id_col} AS BIGINT)
                 GROUP BY category
-                ORDER BY commission DESC
-                LIMIT {top_n}
             """
         else:
-            sql = f"""
+            sql_base = f"""
                 SELECT
                     COALESCE(NULLIF(TRIM(shop_name), ''), 'Unknown Shop') AS category,
-                    COUNT(DISTINCT product_name) AS products,
-                    COUNT(*)         AS orders,
-                    SUM(revenue)     AS revenue,
-                    SUM(commission)  AS commission
+                    COUNT(DISTINCT product_name)    AS products,
+                    COUNT(*)                        AS orders,
+                    COALESCE(SUM(revenue), 0)       AS revenue,
+                    COALESCE(SUM(commission), 0)    AS commission
                 FROM {COMMISSION_TABLE}
                 GROUP BY category
-                ORDER BY commission DESC
-                LIMIT {top_n}
             """
 
-        rows = con.execute(sql).fetchall()
-        return [
-            {
-                "category":   str(r[0])[:40],
-                "products":   int(r[1] or 0),
-                "orders":     float(r[2] or 0),
-                "revenue":    float(r[3] or 0),
-                "commission": float(r[4] or 0),
-            }
-            for r in rows
-        ]
+        def _fetch(order_col: str) -> list[dict]:
+            rows = con.execute(
+                f"SELECT * FROM ({sql_base}) t ORDER BY {order_col} DESC LIMIT {top_n}"
+            ).fetchall()
+            result = []
+            for r in rows:
+                orders = float(r[2] or 0)
+                commission = float(r[4] or 0)
+                result.append({
+                    "category":                str(r[0] or "Unknown")[:40],
+                    "products":                int(r[1] or 0),
+                    "orders":                  orders,
+                    "revenue":                 float(r[3] or 0),
+                    "commission":              commission,
+                    "avg_commission_per_order": round(commission / orders, 2) if orders else 0.0,
+                })
+            return result
+
+        return {
+            "by_commission": _fetch("commission"),
+            "by_revenue":    _fetch("revenue"),
+            "by_orders":     _fetch("orders"),
+        }
+
     except Exception:
-        return []
+        return {}
     finally:
         con.close()
 

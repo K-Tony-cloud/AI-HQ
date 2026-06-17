@@ -238,20 +238,46 @@ def build_revenue_top_embed(items: list[dict], metric: str) -> discord.Embed:
     return e
 
 
-def build_revenue_category_embed(items: list[dict]) -> discord.Embed:
-    """Category revenue breakdown for /revenue-category."""
-    if not items:
+def build_revenue_category_embed(data: dict) -> discord.Embed:
+    """Category revenue breakdown for /revenue-category — three ranked sections."""
+    if not data:
         return make_embed("📂 Revenue by Category", color_key="info",
-                          description="No data. Import a report first.")
+                          description="No data. Import a commission report first.")
+
     e = make_embed("📂 Revenue by Category", color_key="trend")
-    lines = []
-    for i, c in enumerate(items, 1):
-        lines.append(
-            f"`{i:>2}.` **{_trunc(c['category'], 30)}** ({c['products']} products)\n"
-            f"      Clicks: {_fi(c['clicks'])} | Orders: {_fi(c['orders'])} | "
-            f"CR: {c['cr']:.1f}% | Commission: **{_fp(c['commission'])}**"
-        )
-    e.add_field(name="Categories", value="\n".join(lines)[:1024], inline=False)
+
+    def _lines(items: list[dict], rank_key: str) -> str:
+        if not items:
+            return "—"
+        out = []
+        for i, c in enumerate(items, 1):
+            val = c[rank_key]
+            val_str = _fp(val) if rank_key in ("commission", "revenue") else _fi(val)
+            avg = c.get("avg_commission_per_order", 0)
+            out.append(
+                f"`{i:>2}.` **{_trunc(c['category'], 28)}**\n"
+                f"      {rank_key.title()}: **{val_str}** | "
+                f"Orders: {_fi(c['orders'])} | "
+                f"Avg/order: {_fp(avg)} | "
+                f"{c['products']} products"
+            )
+        return "\n".join(out)
+
+    e.add_field(
+        name="🏦 By Commission",
+        value=_lines(data.get("by_commission", []), "commission")[:1024],
+        inline=False,
+    )
+    e.add_field(
+        name="💵 By Revenue",
+        value=_lines(data.get("by_revenue", []), "revenue")[:1024],
+        inline=False,
+    )
+    e.add_field(
+        name="📦 By Orders",
+        value=_lines(data.get("by_orders", []), "orders")[:1024],
+        inline=False,
+    )
     return e
 
 
