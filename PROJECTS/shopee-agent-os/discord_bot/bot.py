@@ -39,11 +39,13 @@ class ShopeeBot(commands.Bot):
         if DISCORD_GUILD_ID:
             guild = discord.Object(id=int(DISCORD_GUILD_ID))
             self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            print(f"[bot] Commands synced to guild {DISCORD_GUILD_ID}")
+            synced = await self.tree.sync(guild=guild)
+            print(f"[bot] Commands synced to guild {DISCORD_GUILD_ID}: {len(synced)} commands")
+            for cmd in sorted(synced, key=lambda c: c.name):
+                print(f"  /{cmd.name}")
         else:
-            await self.tree.sync()
-            print("[bot] Commands synced globally (may take up to 1 hour)")
+            synced = await self.tree.sync()
+            print(f"[bot] Commands synced globally: {len(synced)} commands")
 
     async def on_ready(self) -> None:
         print(f"[bot] ✅ Logged in as {self.user}  |  {len(self.guilds)} guild(s)")

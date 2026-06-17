@@ -109,3 +109,77 @@ class SystemCog(commands.Cog, name="System"):
         embed = build_system_status_embed(status)
         await interaction.followup.send(embed=embed)
         logger.info("[SystemCog] /system-status called by %s", interaction.user)
+
+    # ── /force-sync ───────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="force-sync",
+        description="Force re-sync all slash commands to this guild (use after bot updates)",
+    )
+    async def cmd_force_sync(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            from discord_bot.config import DISCORD_GUILD_ID
+
+            if DISCORD_GUILD_ID:
+                guild = discord.Object(id=int(DISCORD_GUILD_ID))
+                self.bot.tree.copy_global_to(guild=guild)
+                synced = await self.bot.tree.sync(guild=guild)
+            else:
+                synced = await self.bot.tree.sync()
+
+            names = sorted(c.name for c in synced)
+            e = discord.Embed(
+                title=f"✅ Synced {len(synced)} Commands",
+                description="\n".join(f"`/{n}`" for n in names),
+                color=discord.Color.green(),
+            )
+            await interaction.followup.send(embed=e, ephemeral=True)
+            logger.info("[SystemCog] /force-sync by %s — %d commands", interaction.user, len(synced))
+        except Exception as exc:
+            await interaction.followup.send(f"❌ Sync failed: {exc}", ephemeral=True)
+            logger.error("[SystemCog] /force-sync error: %s", exc)
+
+    # ── /list-commands ────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="list-commands",
+        description="Show all registered Shopee Agent OS slash commands grouped by module",
+    )
+    async def cmd_list_commands(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
+        e = discord.Embed(
+            title="📋 Registered Slash Commands",
+            color=discord.Color.blurple(),
+        )
+
+        _cog_order = [
+            ("Discovery",  "Daily picks, opportunities, viral"),
+            ("Operator",   "Morning brief, executive summary"),
+            ("Affiliate",  "Links, products, coverage, dashboard"),
+            ("Revenue",    "Import reports, dashboard, analysis"),
+            ("Asset",      "Coverage, missing, health, backfill"),
+            ("Creative",   "AI content generation"),
+            ("Content",    "Content queue and pack"),
+            ("Scheduler",  "Scheduled jobs"),
+            ("System",     "Status, sync, commands"),
+            ("Performance","Top profit"),
+        ]
+
+        for cog_name, cog_desc in _cog_order:
+            cog = interaction.client.cogs.get(cog_name)
+            if not cog:
+                continue
+            cmds = sorted(c.name for c in cog.get_app_commands())
+            if cmds:
+                e.add_field(
+                    name=f"{cog_name} — {cog_desc}",
+                    value=" ".join(f"`/{c}`" for c in cmds),
+                    inline=False,
+                )
+
+        total = sum(len(list(c.get_app_commands())) for c in interaction.client.cogs.values())
+        e.set_footer(text=f"Total: {total} commands")
+        await interaction.followup.send(embed=e, ephemeral=True)
+        logger.info("[SystemCog] /list-commands called by %s", interaction.user)
