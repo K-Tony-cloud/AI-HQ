@@ -1300,6 +1300,130 @@ def get_revenue_by_category(top_n: int = 10) -> list[dict]:
         con.close()
 
 
+def migrate_legacy_revenue_data() -> dict:
+    """
+    One-time migration: move revenue_feedback rows written by old importers
+    (source='commission_th', source='click_th') into the dedicated tables.
+    Safe to call multiple times — deletes matching dates before re-inserting.
+    """
+    if not config.db_path.exists():
+        return {"migrated_commission": 0, "migrated_click_days": 0}
+
+    con = _connect(read_only=False)
+    migrated_commission = 0
+    migrated_click_days = 0
+    try:
+        if not _has_table(con, REVENUE_TABLE):
+            return {"migrated_commission": 0, "migrated_click_days": 0}
+
+        _init_commission_table(con)
+        _init_click_table(con)
+
+        # ── commission_th rows → commission_report ────────────────────────────
+        legacy_rows = con.execute(f"""
+            SELECT report_date, product_name, product_id, shop_name,
+                   revenue, commission,
+                   COALESCE(sub_id1,''), COALESCE(sub_id2,''),
+                   COALESCE(sub_id3,''), COALESCE(sub_id4,''),
+                   COALESCE(sub_id5,''), COALESCE(channel,''),
+                   imported_at
+            FROM {REVENUE_TABLE}
+            WHERE source = 'commission_th'
+        """).fetchall()
+
+        if legacy_rows:
+            dates = list({r[0] for r in legacy_rows if r[0]})
+            for d in dates:
+                con.execute(f"DELETE FROM {COMMISSION_TABLE} WHERE report_date=?", [d])
+            max_id = con.execute(
+                f"SELECT COALESCE(MAX(id), 0) FROM {COMMISSION_TABLE}"
+            ).fetchone()[0]
+            for i, r in enumerate(legacy_rows):
+                con.execute(f"""
+                    INSERT INTO {COMMISSION_TABLE}
+                    (id, imported_at, report_date, product_name, product_id, shop_name,
+                     revenue, commission, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [max_id + i + 1, r[12], r[0], r[1], r[2], r[3],
+                      float(r[4] or 0), float(r[5] or 0),
+                      r[6], r[7], r[8], r[9], r[10], r[11]])
+            migrated_commission = len(legacy_rows)
+
+        # ── click_th rows → click_report ──────────────────────────────────────
+        legacy_clicks = con.execute(f"""
+            SELECT report_date, COALESCE(SUM(clicks), COUNT(*)) AS clicks,
+                   COALESCE(MAX(sub_id),''), COALESCE(MAX(channel),''),
+                   MAX(imported_at)
+            FROM {REVENUE_TABLE}
+            WHERE source = 'click_th'
+            GROUP BY report_date
+        """).fetchall()
+
+        if legacy_clicks:
+            dates = [r[0] for r in legacy_clicks if r[0]]
+            for d in dates:
+                con.execute(f"DELETE FROM {CLICK_TABLE} WHERE report_date=?", [d])
+            max_id = con.execute(
+                f"SELECT COALESCE(MAX(id), 0) FROM {CLICK_TABLE}"
+            ).fetchone()[0]
+            for i, r in enumerate(legacy_clicks):
+                con.execute(f"""
+                    INSERT INTO {CLICK_TABLE}
+                    (id, imported_at, report_date, clicks, sub_id, channel)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, [max_id + i + 1, r[4], r[0], float(r[1] or 0), r[2], r[3]])
+            migrated_click_days = len(legacy_clicks)
+
+    finally:
+        con.close()
+
+    return {"migrated_commission": migrated_commission, "migrated_click_days": migrated_click_days}
+
+
+def get_revenue_debug() -> dict:
+    """Diagnostic: DB path, table list, row counts, latest rows, column names."""
+    result: dict = {"db_path": str(config.db_path), "db_exists": config.db_path.exists()}
+    if not config.db_path.exists():
+        return result
+
+    try:
+        con = _connect(read_only=False)
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        result["all_tables"] = tables
+
+        for tbl, key in [
+            (COMMISSION_TABLE, "commission"),
+            (CLICK_TABLE,      "click"),
+            (REVENUE_TABLE,    "revenue_feedback"),
+        ]:
+            if tbl in tables:
+                cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                cols = [r[0] for r in con.execute(f"DESCRIBE {tbl}").fetchall()]
+                latest = con.execute(
+                    f"SELECT * FROM {tbl} ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                result[f"{key}_rows"]   = cnt
+                result[f"{key}_cols"]   = cols
+                result[f"{key}_latest"] = latest
+            else:
+                result[f"{key}_rows"] = -1  # table missing
+
+        # legacy data check
+        if REVENUE_TABLE in tables:
+            legacy = con.execute(f"""
+                SELECT source, COUNT(*) FROM {REVENUE_TABLE}
+                WHERE source IN ('commission_th','click_th')
+                GROUP BY source
+            """).fetchall()
+            result["legacy_in_revenue_feedback"] = {r[0]: r[1] for r in legacy}
+
+        con.close()
+    except Exception as exc:
+        result["error"] = str(exc)
+
+    return result
+
+
 def get_revenue_data_source() -> dict:
     """Show real import status: table row counts, date ranges, data availability."""
     if not config.db_path.exists():

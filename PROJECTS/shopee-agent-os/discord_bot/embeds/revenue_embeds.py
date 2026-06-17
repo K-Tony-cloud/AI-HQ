@@ -315,6 +315,59 @@ def build_revenue_data_source_embed(data: dict) -> discord.Embed:
     return e
 
 
+def build_revenue_debug_embed(data: dict) -> discord.Embed:
+    """Full diagnostic embed for /revenue-debug."""
+    e = make_embed("🔍 Revenue Debug", color_key="info")
+    e.add_field(name="DB Path",   value=f"`{data.get('db_path','?')}`",         inline=False)
+    e.add_field(name="DB Exists", value="✅ Yes" if data.get("db_exists") else "❌ No", inline=True)
+
+    if data.get("error"):
+        e.add_field(name="Error", value=f"```{data['error'][:900]}```", inline=False)
+        return e
+
+    all_tables = data.get("all_tables", [])
+    e.add_field(
+        name="All Tables",
+        value=", ".join(f"`{t}`" for t in all_tables) or "none",
+        inline=False,
+    )
+
+    for key, label, icon in [
+        ("commission", "commission_report", "📄"),
+        ("click",      "click_report",      "👆"),
+        ("revenue_feedback", "revenue_feedback", "📦"),
+    ]:
+        rows = data.get(f"{key}_rows", -1)
+        if rows == -1:
+            e.add_field(name=f"{icon} {label}", value="❌ table missing", inline=True)
+        else:
+            cols   = data.get(f"{key}_cols", [])
+            latest = data.get(f"{key}_latest")
+            latest_str = str(latest)[:200] if latest else "—"
+            e.add_field(
+                name=f"{icon} {label}",
+                value=(
+                    f"Rows: **{rows:,}**\n"
+                    f"Cols: {len(cols)}\n"
+                    f"Latest: `{latest_str[:150]}`"
+                ),
+                inline=False,
+            )
+
+    legacy = data.get("legacy_in_revenue_feedback", {})
+    if legacy:
+        parts = [f"`{src}`: **{cnt}** rows" for src, cnt in legacy.items()]
+        e.add_field(
+            name="⚠️ Legacy data in revenue_feedback",
+            value="\n".join(parts) + "\nUse `/revenue-migrate` to move to correct tables.",
+            inline=False,
+        )
+    else:
+        e.add_field(name="Legacy data", value="✅ None (all data in correct tables)", inline=False)
+
+    return e
+
+
 def build_revenue_winners_embed(data: dict) -> discord.Embed:
     """Compact embed for morning brief — top 3 commission earners."""
     if data.get("error"):

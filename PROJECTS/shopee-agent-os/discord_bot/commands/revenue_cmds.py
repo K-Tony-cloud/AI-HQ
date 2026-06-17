@@ -17,6 +17,7 @@ from discord_bot.embeds.revenue_embeds import (
     build_revenue_category_embed,
     build_revenue_dashboard_embeds,
     build_revenue_data_source_embed,
+    build_revenue_debug_embed,
     build_revenue_products_embed,
     build_revenue_summary_embed,
     build_revenue_top_embed,
@@ -371,6 +372,48 @@ class RevenueCog(commands.Cog):
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    # ── /revenue-debug ────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="revenue-debug",
+        description="Show DB path, table row counts, column names, and latest rows for diagnosis",
+    )
+    async def cmd_revenue_debug(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            from shopee_engine.feedback_engine import get_revenue_debug
+
+            data  = await asyncio.to_thread(get_revenue_debug)
+            embed = build_revenue_debug_embed(data)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as exc:
+            logger.error("cmd_revenue_debug: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)
+
+    # ── /revenue-migrate ──────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="revenue-migrate",
+        description="Migrate old revenue_feedback data (source=commission_th/click_th) to dedicated tables",
+    )
+    async def cmd_revenue_migrate(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            from shopee_engine.feedback_engine import migrate_legacy_revenue_data
+
+            result = await asyncio.to_thread(migrate_legacy_revenue_data)
+            mc = result.get("migrated_commission", 0)
+            mk = result.get("migrated_click_days", 0)
+            msg = (
+                f"✅ Migration complete\n"
+                f"Commission rows → `commission_report`: **{mc}**\n"
+                f"Click days → `click_report`: **{mk}**"
+            )
+            await interaction.followup.send(msg, ephemeral=True)
+        except Exception as exc:
+            logger.error("cmd_revenue_migrate: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)
 
     # ── /revenue-data-source ──────────────────────────────────────────────────
 
