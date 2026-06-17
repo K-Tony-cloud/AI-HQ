@@ -185,25 +185,24 @@ def build_revenue_summary_embed(data: dict) -> discord.Embed:
 
 def build_revenue_products_embed(items: list[dict], keyword: str = "") -> discord.Embed:
     """Per-product table for /revenue-products."""
-    title = f"🛍 Revenue Products" + (f" — '{keyword}'" if keyword else "")
+    title = "🛍 Revenue Products" + (f" — '{keyword}'" if keyword else "")
     if not items:
         return make_embed(title, color_key="info",
-                          description="No data found. Import a report first.")
+                          description="No data found. Import a commission report first.")
     e = make_embed(title, color_key="content")
     lines = []
     for i, p in enumerate(items, 1):
         lines.append(
             f"`{i:>2}.` **{_trunc(p['name'], 40)}**\n"
-            f"      Clicks: {_fi(p['clicks'])} | Orders: {_fi(p['orders'])} | "
-            f"CR: {p['cr']:.1f}% | Commission: **{_fp(p['commission'])}**"
+            f"      Orders: {_fi(p['orders'])} | Revenue: {_fp(p['revenue'])} | "
+            f"Commission: **{_fp(p['commission'])}** | Last: {p.get('last_date', '—')}"
         )
-    # Discord field limit 1024 chars — chunk into pages of ~8 items
     chunk: list[str] = []
     field_n = 1
     for line in lines:
         chunk.append(line)
         if len("\n".join(chunk)) > 900:
-            e.add_field(name=f"Products (cont.)" if field_n > 1 else "Products",
+            e.add_field(name="Products (cont.)" if field_n > 1 else "Products",
                         value="\n".join(chunk[:-1])[:1024], inline=False)
             chunk = [chunk[-1]]
             field_n += 1
@@ -215,20 +214,24 @@ def build_revenue_products_embed(items: list[dict], keyword: str = "") -> discor
 
 def build_revenue_top_embed(items: list[dict], metric: str) -> discord.Embed:
     """Top N products by metric for /revenue-top."""
-    icons = {"clicks": "👆", "orders": "📦", "revenue": "💵", "commission": "🏦"}
+    icons = {"orders": "📦", "revenue": "💵", "commission": "🏦"}
     icon = icons.get(metric, "📊")
     if not items:
         return make_embed(f"{icon} Top by {metric.title()}", color_key="info",
-                          description="No data. Import a report first.")
+                          description="No data. Import a commission report first.")
     e = make_embed(f"{icon} Top by {metric.title()}", color_key="opportunity")
     lines = []
     for p in items:
         val = p.get(metric, 0)
         val_str = _fp(val) if metric in ("revenue", "commission") else _fi(val)
+        extra = ""
+        if metric != "commission":
+            extra = f" | Commission: {_fp(p['commission'])}"
+        elif metric != "revenue":
+            extra = f" | Revenue: {_fp(p['revenue'])}"
         lines.append(
             f"`{p['rank']:>2}.` **{_trunc(p['name'], 42)}**\n"
-            f"      {metric.title()}: **{val_str}** | "
-            f"CR: {p['cr']:.1f}% | Commission: {_fp(p['commission'])}"
+            f"      {metric.title()}: **{val_str}** | Orders: {_fi(p['orders'])}{extra}"
         )
     e.add_field(name=f"Top {len(items)} by {metric.title()}",
                 value="\n".join(lines)[:1024], inline=False)
@@ -249,6 +252,66 @@ def build_revenue_category_embed(items: list[dict]) -> discord.Embed:
             f"CR: {c['cr']:.1f}% | Commission: **{_fp(c['commission'])}**"
         )
     e.add_field(name="Categories", value="\n".join(lines)[:1024], inline=False)
+    return e
+
+
+def build_revenue_data_source_embed(data: dict) -> discord.Embed:
+    """Show real import table status for /revenue-data-source."""
+    if data.get("error"):
+        return make_embed("📊 Revenue Data Source", color_key="error", description=data["error"])
+
+    has_commission = data.get("has_commission", False)
+    has_clicks     = data.get("has_clicks", False)
+
+    if not has_commission and not has_clicks:
+        return make_embed(
+            "📊 Revenue Data Source",
+            color_key="info",
+            description=(
+                "**No real revenue data imported yet.**\n\n"
+                "Use `/import-commission-report` to import your Shopee TH commission report.\n"
+                "Use `/import-click-report` to import your Shopee TH click report."
+            ),
+        )
+
+    e = make_embed("📊 Revenue Data Source", color_key="success",
+                   description="Showing real Shopee affiliate import tables only.")
+
+    if has_commission:
+        e.add_field(
+            name="📄 Commission Report",
+            value=(
+                f"Rows: **{data.get('commission_rows', 0):,}** orders\n"
+                f"Products: **{data.get('commission_products', 0)}**\n"
+                f"Period: {data.get('commission_from','—')} → {data.get('commission_to','—')}\n"
+                f"Total Commission: **{_fp(data.get('commission_total', 0))}**"
+            ),
+            inline=True,
+        )
+    else:
+        e.add_field(
+            name="📄 Commission Report",
+            value="Not imported yet.\nUse `/import-commission-report`",
+            inline=True,
+        )
+
+    if has_clicks:
+        e.add_field(
+            name="👆 Click Report",
+            value=(
+                f"Days tracked: **{data.get('click_rows', 0)}**\n"
+                f"Total Clicks: **{_fi(data.get('total_clicks', 0))}**\n"
+                f"Period: {data.get('click_from','—')} → {data.get('click_to','—')}"
+            ),
+            inline=True,
+        )
+    else:
+        e.add_field(
+            name="👆 Click Report",
+            value="Not imported yet.\nUse `/import-click-report`",
+            inline=True,
+        )
+
     return e
 
 

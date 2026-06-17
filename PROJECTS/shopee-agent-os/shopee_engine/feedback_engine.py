@@ -28,9 +28,11 @@ console = Console()
 # Table / column constants
 # ---------------------------------------------------------------------------
 
-REVENUE_TABLE = "revenue_feedback"
-PREDICT_TABLE = "prediction_log"
-WEIGHT_TABLE  = "learning_weights"
+REVENUE_TABLE    = "revenue_feedback"   # generic / ML learning data
+PREDICT_TABLE    = "prediction_log"
+WEIGHT_TABLE     = "learning_weights"
+COMMISSION_TABLE = "commission_report"  # real Shopee TH affiliate commissions
+CLICK_TABLE      = "click_report"       # real Shopee TH affiliate clicks
 
 REVENUE_ALIASES: dict[str, list[str]] = {
     "report_date":   ["date", "order_date", "report_date", "day", "click_date",
@@ -180,6 +182,40 @@ def _init_feedback_tables(con: duckdb.DuckDBPyConnection) -> None:
             accuracy_score   DOUBLE,
             correlation_score DOUBLE,
             notes            TEXT
+        )
+    """)
+
+
+def _init_commission_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {COMMISSION_TABLE} (
+            id           INTEGER,
+            imported_at  TEXT,
+            report_date  TEXT,
+            product_name TEXT,
+            product_id   TEXT,
+            shop_name    TEXT,
+            revenue      DOUBLE,
+            commission   DOUBLE,
+            sub_id1      TEXT,
+            sub_id2      TEXT,
+            sub_id3      TEXT,
+            sub_id4      TEXT,
+            sub_id5      TEXT,
+            channel      TEXT
+        )
+    """)
+
+
+def _init_click_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {CLICK_TABLE} (
+            id          INTEGER,
+            imported_at TEXT,
+            report_date TEXT,
+            clicks      DOUBLE,
+            sub_id      TEXT,
+            channel     TEXT
         )
     """)
 
@@ -399,14 +435,9 @@ def import_commission_report_th(path: str | Path) -> dict:
             "report_date":  _parse_date(_g("report_date")),
             "product_name": _g("product_name"),
             "product_id":   _g("product_id"),
-            "clicks":       0.0,
-            "orders":       1.0,
+            "shop_name":    _g("shop_name"),
             "revenue":      _gf("revenue"),
             "commission":   _gf("commission"),
-            "category":     "",
-            "shop_name":    _g("shop_name"),
-            "source":       "commission_th",
-            "sub_id":       "",
             "sub_id1":      _g("sub_id1"),
             "sub_id2":      _g("sub_id2"),
             "sub_id3":      _g("sub_id3"),
@@ -419,37 +450,33 @@ def import_commission_report_th(path: str | Path) -> dict:
         return {"rows_imported": 0, "source": "commission_th", "path": str(path)}
 
     con = _connect(read_only=False)
-    _init_feedback_tables(con)
+    _init_commission_table(con)
 
     dates = list({r["report_date"] for r in rows if r["report_date"]})
     for d in dates:
-        con.execute(
-            f"DELETE FROM {REVENUE_TABLE} WHERE source='commission_th' AND report_date=?", [d]
-        )
+        con.execute(f"DELETE FROM {COMMISSION_TABLE} WHERE report_date=?", [d])
 
-    max_id = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {REVENUE_TABLE}").fetchone()[0]
+    max_id  = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {COMMISSION_TABLE}").fetchone()[0]
     next_id = (max_id or 0) + 1
 
     for i, r in enumerate(rows):
         con.execute(f"""
-            INSERT INTO {REVENUE_TABLE}
-            (id, imported_at, report_date, product_name, product_id,
-             clicks, orders, revenue, commission, category, shop_name, source,
-             sub_id, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO {COMMISSION_TABLE}
+            (id, imported_at, report_date, product_name, product_id, shop_name,
+             revenue, commission, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [
             next_id + i, r["imported_at"], r["report_date"], r["product_name"],
-            r["product_id"], r["clicks"], r["orders"], r["revenue"],
-            r["commission"], r["category"], r["shop_name"], r["source"],
-            r["sub_id"], r["sub_id1"], r["sub_id2"], r["sub_id3"],
-            r["sub_id4"], r["sub_id5"], r["channel"],
+            r["product_id"], r["shop_name"], r["revenue"], r["commission"],
+            r["sub_id1"], r["sub_id2"], r["sub_id3"], r["sub_id4"],
+            r["sub_id5"], r["channel"],
         ])
 
     con.close()
     return {
-        "rows_imported": len(rows),
-        "source": "commission_th",
-        "path": str(path),
+        "rows_imported":    len(rows),
+        "source":           "commission_th",
+        "path":             str(path),
         "total_revenue":    sum(r["revenue"]    for r in rows),
         "total_commission": sum(r["commission"] for r in rows),
     }
@@ -488,36 +515,30 @@ def import_click_report_th(path: str | Path) -> dict:
         return {"rows_imported": 0, "source": "click_th", "path": str(path), "total_clicks": 0}
 
     con = _connect(read_only=False)
-    _init_feedback_tables(con)
+    _init_click_table(con)
 
     for d in date_clicks:
-        con.execute(
-            f"DELETE FROM {REVENUE_TABLE} WHERE source='click_th' AND report_date=?", [d]
-        )
+        con.execute(f"DELETE FROM {CLICK_TABLE} WHERE report_date=?", [d])
 
-    max_id  = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {REVENUE_TABLE}").fetchone()[0]
+    max_id  = con.execute(f"SELECT COALESCE(MAX(id), 0) FROM {CLICK_TABLE}").fetchone()[0]
     next_id = (max_id or 0) + 1
 
     for i, (date, count) in enumerate(sorted(date_clicks.items())):
         con.execute(f"""
-            INSERT INTO {REVENUE_TABLE}
-            (id, imported_at, report_date, product_name, product_id,
-             clicks, orders, revenue, commission, category, shop_name, source,
-             sub_id, sub_id1, sub_id2, sub_id3, sub_id4, sub_id5, channel)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO {CLICK_TABLE}
+            (id, imported_at, report_date, clicks, sub_id, channel)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, [
-            next_id + i, now_str, date, "", "", float(count), 0.0, 0.0, 0.0,
-            "", "", "click_th",
-            "", "", "", "", "", "", date_channel.get(date, ""),
+            next_id + i, now_str, date, float(count), "", date_channel.get(date, ""),
         ])
 
     con.close()
     return {
-        "rows_imported":  len(date_clicks),
-        "source":         "click_th",
-        "path":           str(path),
-        "total_clicks":   sum(date_clicks.values()),
-        "days_covered":   len(date_clicks),
+        "rows_imported": len(date_clicks),
+        "source":        "click_th",
+        "path":          str(path),
+        "total_clicks":  sum(date_clicks.values()),
+        "days_covered":  len(date_clicks),
     }
 
 
@@ -1056,45 +1077,67 @@ def get_revenue_dashboard(top_n: int = 5) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_revenue_summary() -> dict:
-    """Overall totals with conversion rate and EPC — for /revenue-summary."""
+    """Summary from real Shopee TH imports: commission_report + click_report only."""
     if not config.db_path.exists():
         return {"error": "Database not found"}
     con = _connect(read_only=True)
     try:
-        if not _has_table(con, REVENUE_TABLE):
-            return {"error": "No revenue data. Use /affiliate-import-report first."}
-        row = con.execute(f"""
-            SELECT
-                COALESCE(SUM(clicks),     0),
-                COALESCE(SUM(orders),     0),
-                COALESCE(SUM(revenue),    0),
-                COALESCE(SUM(commission), 0),
-                COUNT(DISTINCT product_name),
-                COUNT(DISTINCT report_date),
-                MIN(report_date),
-                MAX(report_date),
-                COUNT(DISTINCT category)
-            FROM {REVENUE_TABLE}
-        """).fetchone()
-        clicks, orders, revenue, commission, products, days, d_from, d_to, cats = row
-        clicks     = float(clicks or 0)
-        orders     = float(orders or 0)
-        revenue    = float(revenue or 0)
-        commission = float(commission or 0)
-        cr  = round(orders / clicks * 100, 2) if clicks else 0.0
-        epc = round(commission / clicks * 100, 4) if clicks else 0.0
+        has_commission = _has_table(con, COMMISSION_TABLE)
+        has_clicks     = _has_table(con, CLICK_TABLE)
+
+        if not has_commission and not has_clicks:
+            return {
+                "no_data": True,
+                "error": (
+                    "No real revenue data imported yet.\n"
+                    "Use /import-commission-report and /import-click-report."
+                ),
+            }
+
+        orders = revenue = commission = 0.0
+        products = days = 0
+        d_from = d_to = "—"
+
+        if has_commission:
+            r = con.execute(f"""
+                SELECT COUNT(*), COALESCE(SUM(revenue), 0), COALESCE(SUM(commission), 0),
+                       COUNT(DISTINCT product_name), COUNT(DISTINCT report_date),
+                       MIN(report_date), MAX(report_date)
+                FROM {COMMISSION_TABLE}
+            """).fetchone()
+            orders, revenue, commission = float(r[0] or 0), float(r[1] or 0), float(r[2] or 0)
+            products = int(r[3] or 0)
+            days     = int(r[4] or 0)
+            d_from, d_to = r[5] or "—", r[6] or "—"
+
+        total_clicks = 0.0
+        click_from = click_to = "—"
+        if has_clicks:
+            r = con.execute(f"""
+                SELECT COALESCE(SUM(clicks), 0), MIN(report_date), MAX(report_date)
+                FROM {CLICK_TABLE}
+            """).fetchone()
+            total_clicks = float(r[0] or 0)
+            click_from, click_to = r[1] or "—", r[2] or "—"
+
+        cr  = round(orders / total_clicks * 100, 2) if total_clicks else 0.0
+        epc = round(commission / total_clicks * 100, 4) if total_clicks else 0.0
+
         return {
-            "total_clicks":     clicks,
+            "total_clicks":     total_clicks,
             "total_orders":     orders,
             "total_revenue":    revenue,
             "total_commission": commission,
-            "total_products":   int(products or 0),
-            "total_days":       int(days or 0),
-            "total_categories": int(cats or 0),
-            "date_from":        d_from or "—",
-            "date_to":          d_to or "—",
+            "total_products":   products,
+            "total_days":       days,
+            "date_from":        d_from,
+            "date_to":          d_to,
+            "click_date_from":  click_from,
+            "click_date_to":    click_to,
             "conversion_rate":  cr,
             "epc":              epc,
+            "has_commission":   has_commission,
+            "has_clicks":       has_clicks,
         }
     except Exception as exc:
         return {"error": str(exc)}
@@ -1103,46 +1146,41 @@ def get_revenue_summary() -> dict:
 
 
 def get_revenue_products(keyword: str = "", limit: int = 20) -> list[dict]:
-    """Per-product breakdown with all metrics, optionally filtered by keyword."""
+    """Per-product breakdown from commission_report only (real Shopee affiliate data)."""
     if not config.db_path.exists():
         return []
     con = _connect(read_only=True)
     try:
-        if not _has_table(con, REVENUE_TABLE):
+        if not _has_table(con, COMMISSION_TABLE):
             return []
-        where = f"AND LOWER(product_name) LIKE '%{keyword.lower()}%'" if keyword else ""
+        where = f"WHERE LOWER(product_name) LIKE '%{keyword.lower()}%'" if keyword else ""
         rows = con.execute(f"""
             SELECT
                 product_name,
-                SUM(clicks)     AS clicks,
-                SUM(orders)     AS orders,
-                SUM(revenue)    AS revenue,
-                SUM(commission) AS commission,
+                product_id,
+                shop_name,
+                COUNT(*)         AS orders,
+                SUM(revenue)     AS revenue,
+                SUM(commission)  AS commission,
                 MAX(report_date) AS last_date
-            FROM {REVENUE_TABLE}
-            WHERE 1=1 {where}
-            GROUP BY product_name
+            FROM {COMMISSION_TABLE}
+            {where}
+            GROUP BY product_name, product_id, shop_name
             ORDER BY commission DESC
             LIMIT {limit}
         """).fetchall()
-        result = []
-        for r in rows:
-            clicks = float(r[1] or 0)
-            orders = float(r[2] or 0)
-            commission = float(r[4] or 0)
-            epc = round(commission / clicks * 100, 4) if clicks else 0.0
-            cr  = round(orders / clicks * 100, 2) if clicks else 0.0
-            result.append({
+        return [
+            {
                 "name":       (r[0] or "")[:55],
-                "clicks":     clicks,
-                "orders":     orders,
-                "revenue":    float(r[3] or 0),
-                "commission": commission,
-                "epc":        epc,
-                "cr":         cr,
-                "last_date":  r[5] or "—",
-            })
-        return result
+                "product_id": r[1] or "",
+                "shop_name":  r[2] or "",
+                "orders":     float(r[3] or 0),
+                "revenue":    float(r[4] or 0),
+                "commission": float(r[5] or 0),
+                "last_date":  r[6] or "—",
+            }
+            for r in rows
+        ]
     except Exception:
         return []
     finally:
@@ -1150,48 +1188,42 @@ def get_revenue_products(keyword: str = "", limit: int = 20) -> list[dict]:
 
 
 _METRIC_SQL = {
-    "clicks":     "SUM(clicks)",
-    "orders":     "SUM(orders)",
+    "orders":     "COUNT(*)",
     "revenue":    "SUM(revenue)",
     "commission": "SUM(commission)",
 }
 
 
 def get_revenue_top(metric: str = "commission", top_n: int = 10) -> list[dict]:
-    """Top N products by chosen metric."""
+    """Top N products by commission/revenue/orders from real commission_report."""
     if not config.db_path.exists():
         return []
     order_expr = _METRIC_SQL.get(metric, "SUM(commission)")
     con = _connect(read_only=True)
     try:
-        if not _has_table(con, REVENUE_TABLE):
+        if not _has_table(con, COMMISSION_TABLE):
             return []
         rows = con.execute(f"""
             SELECT
                 product_name,
-                SUM(clicks)     AS clicks,
-                SUM(orders)     AS orders,
+                COUNT(*)        AS orders,
                 SUM(revenue)    AS revenue,
                 SUM(commission) AS commission
-            FROM {REVENUE_TABLE}
+            FROM {COMMISSION_TABLE}
             GROUP BY product_name
             ORDER BY {order_expr} DESC
             LIMIT {top_n}
         """).fetchall()
-        result = []
-        for i, r in enumerate(rows, 1):
-            clicks = float(r[1] or 0)
-            orders = float(r[2] or 0)
-            result.append({
+        return [
+            {
                 "rank":       i,
                 "name":       (r[0] or "")[:55],
-                "clicks":     clicks,
-                "orders":     orders,
-                "revenue":    float(r[3] or 0),
-                "commission": float(r[4] or 0),
-                "cr":         round(orders / clicks * 100, 2) if clicks else 0.0,
-            })
-        return result
+                "orders":     float(r[1] or 0),
+                "revenue":    float(r[2] or 0),
+                "commission": float(r[3] or 0),
+            }
+            for i, r in enumerate(rows, 1)
+        ]
     except Exception:
         return []
     finally:
@@ -1199,42 +1231,118 @@ def get_revenue_top(metric: str = "commission", top_n: int = 10) -> list[dict]:
 
 
 def get_revenue_by_category(top_n: int = 10) -> list[dict]:
-    """Revenue aggregated by category."""
+    """Revenue by category — joins commission_report with products table for category metadata."""
     if not config.db_path.exists():
         return []
     con = _connect(read_only=True)
     try:
-        if not _has_table(con, REVENUE_TABLE):
+        if not _has_table(con, COMMISSION_TABLE):
             return []
-        rows = con.execute(f"""
-            SELECT
-                COALESCE(NULLIF(TRIM(category), ''), 'Uncategorized') AS cat,
-                COUNT(DISTINCT product_name) AS products,
-                SUM(clicks)     AS clicks,
-                SUM(orders)     AS orders,
-                SUM(revenue)    AS revenue,
-                SUM(commission) AS commission
-            FROM {REVENUE_TABLE}
-            GROUP BY cat
-            ORDER BY commission DESC
-            LIMIT {top_n}
-        """).fetchall()
-        result = []
-        for r in rows:
-            clicks = float(r[2] or 0)
-            orders = float(r[3] or 0)
-            result.append({
+
+        # Detect available columns in products table
+        cat_col = id_col = None
+        if _has_table(con, "products"):
+            prod_cols = [r[0].lower() for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+            ).fetchall()]
+            for c in ["global_category1", "global_category2", "category_name", "category"]:
+                if c in prod_cols:
+                    cat_col = c
+                    break
+            for c in ["itemid", "item_id", "product_id"]:
+                if c in prod_cols:
+                    id_col = c
+                    break
+
+        if cat_col and id_col:
+            sql = f"""
+                SELECT
+                    COALESCE(NULLIF(TRIM(p.{cat_col}), ''), 'Uncategorized') AS category,
+                    COUNT(DISTINCT c.product_name) AS products,
+                    COUNT(*)         AS orders,
+                    SUM(c.revenue)   AS revenue,
+                    SUM(c.commission) AS commission
+                FROM {COMMISSION_TABLE} c
+                LEFT JOIN products p
+                  ON TRY_CAST(c.product_id AS BIGINT) = TRY_CAST(p.{id_col} AS BIGINT)
+                GROUP BY category
+                ORDER BY commission DESC
+                LIMIT {top_n}
+            """
+        else:
+            sql = f"""
+                SELECT
+                    COALESCE(NULLIF(TRIM(shop_name), ''), 'Unknown Shop') AS category,
+                    COUNT(DISTINCT product_name) AS products,
+                    COUNT(*)         AS orders,
+                    SUM(revenue)     AS revenue,
+                    SUM(commission)  AS commission
+                FROM {COMMISSION_TABLE}
+                GROUP BY category
+                ORDER BY commission DESC
+                LIMIT {top_n}
+            """
+
+        rows = con.execute(sql).fetchall()
+        return [
+            {
                 "category":   str(r[0])[:40],
                 "products":   int(r[1] or 0),
-                "clicks":     clicks,
-                "orders":     orders,
-                "revenue":    float(r[4] or 0),
-                "commission": float(r[5] or 0),
-                "cr":         round(orders / clicks * 100, 2) if clicks else 0.0,
-            })
-        return result
+                "orders":     float(r[2] or 0),
+                "revenue":    float(r[3] or 0),
+                "commission": float(r[4] or 0),
+            }
+            for r in rows
+        ]
     except Exception:
         return []
+    finally:
+        con.close()
+
+
+def get_revenue_data_source() -> dict:
+    """Show real import status: table row counts, date ranges, data availability."""
+    if not config.db_path.exists():
+        return {"error": "Database not found"}
+    con = _connect(read_only=True)
+    try:
+        result: dict = {}
+
+        if _has_table(con, COMMISSION_TABLE):
+            r = con.execute(f"""
+                SELECT COUNT(*), MIN(report_date), MAX(report_date),
+                       COALESCE(SUM(commission), 0), COUNT(DISTINCT product_name)
+                FROM {COMMISSION_TABLE}
+            """).fetchone()
+            result.update({
+                "has_commission":      int(r[0] or 0) > 0,
+                "commission_rows":     int(r[0] or 0),
+                "commission_from":     r[1] or "—",
+                "commission_to":       r[2] or "—",
+                "commission_total":    float(r[3] or 0),
+                "commission_products": int(r[4] or 0),
+            })
+        else:
+            result.update({"has_commission": False, "commission_rows": 0})
+
+        if _has_table(con, CLICK_TABLE):
+            r = con.execute(f"""
+                SELECT COUNT(*), MIN(report_date), MAX(report_date), COALESCE(SUM(clicks), 0)
+                FROM {CLICK_TABLE}
+            """).fetchone()
+            result.update({
+                "has_clicks":   int(r[0] or 0) > 0,
+                "click_rows":   int(r[0] or 0),
+                "click_from":   r[1] or "—",
+                "click_to":     r[2] or "—",
+                "total_clicks": float(r[3] or 0),
+            })
+        else:
+            result.update({"has_clicks": False, "click_rows": 0})
+
+        return result
+    except Exception as exc:
+        return {"error": str(exc)}
     finally:
         con.close()
 

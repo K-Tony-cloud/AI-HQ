@@ -16,6 +16,7 @@ from discord_bot.embeds.revenue_embeds import (
     build_import_result_embed,
     build_revenue_category_embed,
     build_revenue_dashboard_embeds,
+    build_revenue_data_source_embed,
     build_revenue_products_embed,
     build_revenue_summary_embed,
     build_revenue_top_embed,
@@ -218,7 +219,6 @@ class RevenueCog(commands.Cog):
         app_commands.Choice(name="Commission (default)", value="commission"),
         app_commands.Choice(name="Revenue",              value="revenue"),
         app_commands.Choice(name="Orders",               value="orders"),
-        app_commands.Choice(name="Clicks",               value="clicks"),
     ])
     async def cmd_revenue_top(
         self,
@@ -371,3 +371,21 @@ class RevenueCog(commands.Cog):
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    # ── /revenue-data-source ──────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="revenue-data-source",
+        description="Show import status: commission_report and click_report row counts, dates, totals",
+    )
+    async def cmd_revenue_data_source(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.feedback_engine import get_revenue_data_source
+
+            data  = await asyncio.to_thread(get_revenue_data_source)
+            embed = build_revenue_data_source_embed(data)
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            logger.error("cmd_revenue_data_source: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
