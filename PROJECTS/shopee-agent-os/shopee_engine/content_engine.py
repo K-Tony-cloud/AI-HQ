@@ -921,3 +921,285 @@ def print_queue(df: pd.DataFrame) -> None:
             str(row.get("created_at", ""))[:16],
         )
     console.print(tbl)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Content Intelligence — อะไรของมัน Facebook Page
+# ─────────────────────────────────────────────────────────────────────────────
+
+COMMISSION_TABLE = "commission_report"
+
+_PAGE_SYSTEM = dedent("""
+    คุณเป็น Admin เพจ Facebook "อะไรของมัน"
+    สไตล์เพจ: ตลก ชอบสังเกต sarcastic แบบไทยๆ พูดแบบคนธรรมดา ไม่ formal ไม่ corporate
+    Target: คนไทย 18-50 ปี ชอบของแปลก ชอบ viral
+    กฎเหล็ก:
+    - ห้ามฟังดู AI หรือ corporate
+    - ใช้ภาษาพูดธรรมดา คำสแลงไทยได้
+    - ต้องกระตุ้น comment/share
+    - ตอบเป็น JSON เท่านั้น
+""").strip()
+
+_ENGAGEMENT_TEMPLATES: dict[str, list[dict]] = {
+    "comment_bait": [
+        {"hook": "ถ้าได้เงิน 100,000 บาทพรุ่งนี้เช้า จะทำอะไรเป็นอย่างแรก? 👇", "caption": "บอกมาเลยนะ ไม่ตัดสิน 555", "cta": "comment ด้านล่างได้เลย"},
+        {"hook": "ของชิ้นไหนที่ซื้อแล้วไม่เคยเสียดายเงินเลยสักครั้ง?", "caption": "อยากรู้จริงๆ บางทีของราคาไม่แพงแต่เปลี่ยนชีวิตได้", "cta": "mention ชื่อสินค้าในคอมเม้นต์เลย"},
+        {"hook": "เงินเดือนเท่าไหร่ถึงเรียกว่าอยู่สบายในกรุงเทพ?", "caption": "แต่ละคนนิยามไม่เหมือนกัน ขึ้นอยู่กับ lifestyle ด้วย", "cta": "บอกตัวเลขในคอมเม้นต์ได้เลย"},
+    ],
+    "nostalgia": [
+        {"hook": "ใครทัน Tamagotchi บ้าง? 🐣", "caption": "เด็กยุค 90s-2000s ต้องรู้จัก ตอนนั้นเลี้ยงตายร้องไห้เลยนะ 😭", "cta": "comment ว่าเคยมีไหม"},
+        {"hook": "โรตีหน้าหมูยอ ขายข้างถนน ยังมีอยู่ไหมนะ?", "caption": "ของกินที่หายไปจากความทรงจำ แต่รสชาติไม่เคยลืม", "cta": "ของกินยุคเด็กที่อยากกินอีกมีอะไรบ้าง?"},
+    ],
+    "visual_curiosity": [
+        {"hook": "ทายราคาสิ่งของในรูปนี้ก่อนเลื่อนผ่าน 👀", "caption": "บางอย่างดูแพงแต่ไม่แพง บางอย่างดูถูกแต่แพงมาก", "cta": "ทายในคอมเม้นต์ได้เลย เดี๋ยวเฉลย"},
+        {"hook": "มีอะไรผิดปกติในรูปนี้ไหม? 🤔", "caption": "ดูดีๆ นะ ตอบถูกจะ surprise", "cta": "บอกในคอมเม้นต์"},
+    ],
+    "weird_product": [
+        {"hook": "อะไรของมันวะ 😂 เห็นครั้งแรกงงมาก", "caption": "แต่พอรู้ว่าทำอะไร... โอ้โห มันเจ๋งมากนะ ใช้ประโยชน์ได้จริงๆ", "cta": "คิดว่าใช้ทำอะไร? comment ก่อนเฉลย 👇"},
+        {"hook": "เห็นของนี้ครั้งแรก คิดว่าคนขายจะโกงเงิน 555", "caption": "แต่มันใช้งานได้จริง และคนซื้อไปเยอะมากด้วย", "cta": "เคยเห็นของแปลกๆ แบบนี้บ้างไหม?"},
+    ],
+    "trending": [
+        {"hook": "คนไทยกำลังเถียงกันว่า... ไปทำงานต่างจังหวัดดีกว่าอยู่กรุงเทพไหม?", "caption": "ต่างจังหวัด: ค่าครองชีพถูก สบายใจ | กรุงเทพ: โอกาสเยอะ เงินดี แต่เครียด", "cta": "คุณเลือกทางไหน? comment ได้เลย"},
+        {"hook": "ถ้าเลือกได้อย่างเดียว จะเลือก มีเงิน 10 ล้านแต่หน้าตาธรรมดา หรือ หน้าดีมากแต่เงินเดือน 20,000?", "caption": "คำถามนี้ไม่มีคำตอบถูกผิด แต่อยากรู้ว่าคุณคิดยังไง", "cta": "เลือกข้อไหน? บอกในคอมเม้นต์"},
+    ],
+}
+
+_CALENDAR_PATTERN = [
+    {"slot": 1,  "type": "comment_bait",     "category": "engagement"},
+    {"slot": 2,  "type": "weird_product",    "category": "product"},
+    {"slot": 3,  "type": "nostalgia",        "category": "engagement"},
+    {"slot": 4,  "type": "comment_bait",     "category": "engagement"},
+    {"slot": 5,  "type": "weird_product",    "category": "product"},
+    {"slot": 6,  "type": "trending",         "category": "engagement"},
+    {"slot": 7,  "type": "visual_curiosity", "category": "engagement"},
+    {"slot": 8,  "type": "comment_bait",     "category": "engagement"},
+    {"slot": 9,  "type": "affiliate",        "category": "affiliate"},
+    {"slot": 10, "type": "trending",         "category": "engagement"},
+]
+
+_CALENDAR_DESCRIPTIONS: dict[str, str] = {
+    "comment_bait":     "โพสต์คำถามเกี่ยวกับการเงินหรือการใช้ชีวิต",
+    "weird_product":    "โชว์ของแปลก ให้คนทาย ก่อนเฉลยว่าทำอะไร",
+    "nostalgia":        "พาไปหาความทรงจำยุค 90s-2000s ให้คนมา comment",
+    "trending":         "หยิบประเด็นที่คนกำลังเถียงมาให้เลือกข้าง",
+    "visual_curiosity": "โพสต์รูปที่ชวนทาย ดึงความสนใจ",
+    "affiliate":        "แนะนำสินค้าดีจาก Shopee แบบนุ่มๆ ไม่ขายตรง",
+}
+
+
+def get_content_picks(top_n: int = 5) -> list[dict]:
+    """Find best products to feature today based on real commission data or product popularity."""
+    if not config.db_path.exists():
+        return []
+
+    con = duckdb.connect(str(config.db_path), read_only=True)
+    try:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+
+        # Try commission_report first (real winner data)
+        if COMMISSION_TABLE in tables:
+            rows = con.execute(f"""
+                SELECT
+                    product_name,
+                    SUM(commission) AS commission,
+                    COUNT(*)        AS orders,
+                    SUM(revenue)    AS revenue
+                FROM {COMMISSION_TABLE}
+                GROUP BY product_name
+                ORDER BY commission DESC
+                LIMIT {top_n}
+            """).fetchall()
+            if rows:
+                return [
+                    {
+                        "name":       (r[0] or "")[:60],
+                        "commission": float(r[1] or 0),
+                        "orders":     float(r[2] or 0),
+                        "revenue":    float(r[3] or 0),
+                        "source":     "real",
+                    }
+                    for r in rows
+                ]
+
+        # Fallback: products table by item_sold
+        if "products" in tables:
+            prod_cols = [r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+            ).fetchall()]
+            lm = {c.lower(): c for c in prod_cols}
+            title_col = lm.get("title") or lm.get("name") or lm.get("product_name") or prod_cols[0]
+            sold_col  = lm.get("item_sold") or lm.get("sales") or lm.get("sold")
+            if sold_col:
+                rows = con.execute(f"""
+                    SELECT
+                        "{title_col}" AS name,
+                        0             AS commission,
+                        0             AS orders,
+                        0             AS revenue
+                    FROM products
+                    WHERE "{title_col}" IS NOT NULL
+                    ORDER BY COALESCE(TRY_CAST("{sold_col}" AS BIGINT), 0) DESC
+                    LIMIT {top_n}
+                """).fetchall()
+                return [
+                    {
+                        "name":       (r[0] or "")[:60],
+                        "commission": float(r[1] or 0),
+                        "orders":     float(r[2] or 0),
+                        "revenue":    float(r[3] or 0),
+                        "source":     "discovery",
+                    }
+                    for r in rows
+                ]
+    except Exception:
+        pass
+    finally:
+        con.close()
+
+    return []
+
+
+def generate_engagement_post(post_type: str = "comment_bait") -> dict:
+    """Generate a viral/engagement-only Facebook post for the อะไรของมัน page."""
+    post_type_map = {
+        "comment_bait":     "ถ้ามีเงิน 100,000 บาท จะเอาไปทำอะไรก่อน? style — open question that begs for comments",
+        "nostalgia":        "ใครทันของพวกนี้บ้าง? style — reference Thai 90s/2000s things",
+        "visual_curiosity": "ทายราคา / รูปนี้มีอะไรผิดปกติ style",
+        "weird_product":    "อะไรของมันวะ 😂 → reveal ว่ามันมีประโยชน์ยังไง — lead with confusion, reveal usefulness",
+        "trending":         "คนไทยกำลังเถียงกันเรื่อง... หรือ ถ้าเลือกได้ style",
+    }
+    style_hint = post_type_map.get(post_type, "engaging Thai Facebook post")
+
+    ai_text = call_ai(
+        system=_PAGE_SYSTEM,
+        user_prompt=dedent(f"""
+            สร้างโพสต์ Facebook สำหรับเพจ "อะไรของมัน" แบบ {post_type}
+            สไตล์: {style_hint}
+
+            ตอบ JSON:
+            {{"caption": "...", "hook": "...", "cta": "..."}}
+        """).strip(),
+        max_tokens=600,
+    )
+
+    data = _parse_json(ai_text) if ai_text else None
+    if isinstance(data, dict) and "hook" in data:
+        data["type"]     = post_type
+        data["provider"] = detect_provider()
+        return data
+
+    # Template fallback
+    templates = _ENGAGEMENT_TEMPLATES.get(post_type, _ENGAGEMENT_TEMPLATES["comment_bait"])
+    chosen = random.choice(templates)
+    return {
+        "type":     post_type,
+        "hook":     chosen["hook"],
+        "caption":  chosen["caption"],
+        "cta":      chosen["cta"],
+        "provider": "template",
+    }
+
+
+def _template_weird_product_post(p: dict) -> dict:
+    name = p.get("name") or p.get("title", "สินค้านี้")
+    return {
+        "hook":     "อะไรของมันวะ 😂 เห็นครั้งแรกงงมากเลย",
+        "post":     (
+            f"อะไรของมันวะ 😂\n\n"
+            f"เห็นครั้งแรกนึกว่าของแปลก แต่พอลองดูแล้ว...\n"
+            f"{str(name)[:60]}\n\n"
+            f"ปรากฏว่ามีคนซื้อไปเยอะมากแล้ว ใช้งานได้จริงด้วย\n\n"
+            f"คิดว่ามันคืออะไร? comment ก่อนเฉลย 👇"
+        ),
+        "hashtags": "#อะไรของมัน #ของแปลก #ของดีบนShopee",
+        "provider": "template",
+    }
+
+
+def generate_facebook_product_post(product: dict) -> dict:
+    """Generate a Facebook post for a specific product in the อะไรของมัน page voice."""
+    name  = product.get("name") or product.get("title", "สินค้านี้")
+    price = product.get("sale_price") or product.get("price") or 0
+    sold  = product.get("item_sold") or product.get("sold") or 0
+
+    ai_text = call_ai(
+        system=_PAGE_SYSTEM,
+        user_prompt=dedent(f"""
+            สร้างโพสต์ Facebook สำหรับเพจ "อะไรของมัน" โปรโมทสินค้านี้:
+            ชื่อ: {name}
+            ราคา: ฿{float(price):,.0f}
+            ยอดขาย: {int(float(sold)):,} ชิ้น
+
+            สไตล์: นำด้วยความแปลก/น่าสงสัย → reveal สินค้า → soft CTA
+            ห้ามขายตรงหรือฟังดู corporate
+
+            ตอบ JSON:
+            {{"post": "...", "hook": "...", "hashtags": "..."}}
+        """).strip(),
+        max_tokens=800,
+    )
+
+    data = _parse_json(ai_text) if ai_text else None
+    if isinstance(data, dict) and "post" in data:
+        data["provider"] = detect_provider()
+        return data
+
+    return _template_weird_product_post(product)
+
+
+def generate_content_calendar(days: int = 7) -> list[dict]:
+    """Build a posting calendar using the 70/20/10 content mix pattern."""
+    from datetime import timedelta
+
+    today  = datetime.now()
+    result = []
+
+    for day_num in range(1, days + 1):
+        slot_idx  = (day_num - 1) % len(_CALENDAR_PATTERN)
+        slot      = _CALENDAR_PATTERN[slot_idx]
+        post_date = today + timedelta(days=day_num - 1)
+        date_str  = post_date.strftime("%Y-%m-%d")
+        desc      = _CALENDAR_DESCRIPTIONS.get(slot["type"], "โพสต์ content")
+
+        result.append({
+            "day":         day_num,
+            "date":        date_str,
+            "type":        slot["type"],
+            "category":    slot["category"],
+            "time":        "19:00",
+            "description": desc,
+        })
+
+    return result
+
+
+def generate_content_mix(picks: list[dict] | None = None) -> dict:
+    """Daily content package: 1 engagement + 1 weird product + 1 affiliate soft."""
+    engagement = generate_engagement_post("comment_bait")
+
+    # Product post: use first pick if available, else create a generic one
+    if picks:
+        product_post = generate_facebook_product_post(picks[0])
+    else:
+        product_post = _template_weird_product_post({"name": "สินค้าแปลกประจำวัน"})
+
+    # Affiliate soft: use second pick or a template note
+    if picks and len(picks) > 1:
+        aff_name = picks[1].get("name", "สินค้า Shopee")
+    else:
+        aff_name = "สินค้าดีจาก Shopee"
+
+    affiliate = {
+        "type":     "affiliate",
+        "hook":     f"ของดีที่อยากบอก: {aff_name[:50]}",
+        "caption":  "ลองดูนะ คนซื้อเยอะ บอกตรงๆ ว่าใช้งานได้จริง",
+        "cta":      "ลิ้งค์ใน bio หรือ comment 'ต้องการ'",
+        "provider": "template",
+    }
+
+    return {
+        "engagement": engagement,
+        "product":    product_post,
+        "affiliate":  affiliate,
+        "date":       datetime.now().strftime("%Y-%m-%d"),
+    }
