@@ -55,6 +55,8 @@ class ShopeeBot(commands.Bot):
 
     async def on_ready(self) -> None:
         print(f"[bot] ✅ Logged in as {self.user}  |  {len(self.guilds)} guild(s)")
+        from shopee_engine.ai_status import log_ai_status
+        log_ai_status()
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,

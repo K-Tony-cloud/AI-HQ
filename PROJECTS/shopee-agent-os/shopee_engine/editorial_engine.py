@@ -16,8 +16,12 @@ import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import logging
+
 from .trend_engine import get_today_trends, _try_ai_trend_enrichment
 from .humanize_engine import humanize_caption
+
+logger = logging.getLogger(__name__)
 
 TZ = ZoneInfo("Asia/Bangkok")
 
@@ -413,9 +417,9 @@ def generate_today_content(for_date: datetime | None = None) -> dict:
         entry = _enrich_with_ai(entry, trends)
 
         # Step 2: humanize — make it sound like Thai people, not AI
-        raw_caption = entry.get("caption", "")
+        raw_caption   = entry.get("caption", "")
         human_caption = humanize_caption(raw_caption, post_type=entry.get("type", slot_type))
-        entry = {**entry, "caption": human_caption}
+        entry = {**entry, "caption": human_caption, "caption_raw": raw_caption}
 
         posts.append({
             "slot":        idx + 1,

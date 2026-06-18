@@ -16,7 +16,12 @@ async def run_facebook_generate(bot=None) -> None:
 
     from discord_bot.config import CHANNEL_CONTENT_QUEUE
     from scheduler.notifications.discord_notify import send_to_channel
+    from shopee_engine.ai_status import get_ai_status
     from shopee_engine.insights_engine import fb_generate_daily_schedule
+
+    ai = get_ai_status()
+    provider_label = f"Claude · {ai['model']}" if ai["active"] else "Fallback Templates"
+    logger.info("[job:facebook_generate] AI provider: %s", provider_label)
 
     result = fb_generate_daily_schedule()
 
@@ -40,6 +45,7 @@ async def run_facebook_generate(bot=None) -> None:
         return
 
     scheduled = result.get("scheduled", [])
+    posts     = result.get("posts", [])
     date      = result.get("date", "")
     override  = result.get("override", False)
 
@@ -50,13 +56,70 @@ async def run_facebook_generate(bot=None) -> None:
 
     try:
         import discord
-        lines = [f"• ID `{s['id']}` — **{s['post_type']}** @ `{s['publish_at'][11:16]}`" for s in scheduled]
+
+        # Main summary embed
+        lines = [
+            f"• ID `{s['id']}` — **{s['post_type']}** @ `{s['publish_at'][11:16]}`"
+            for s in scheduled
+        ]
         e = discord.Embed(
             title=f"📅 Facebook Content Queued — {date}",
             description="\n".join(lines) or "No posts queued",
-            color=0x00C853,
+            color=0x00C853 if ai["active"] else 0xFF9800,
         )
-        e.set_footer(text=f"{'⚡ Override mode active' if override else '🗓 Standard schedule'} | publishes at 08:00 / 13:00 / 20:00")
-        await send_to_channel(bot, CHANNEL_CONTENT_QUEUE, [e])
+        e.add_field(
+            name="🤖 AI Provider",
+            value=f"`{provider_label}`",
+            inline=True,
+        )
+        e.add_field(
+            name="🗣 Humanize",
+            value="`ENABLED`" if ai["active"] else "`DISABLED — add real ANTHROPIC_API_KEY`",
+            inline=True,
+        )
+        e.set_footer(
+            text=f"{'⚡ Override' if override else '🗓 Standard'} | 08:00 / 13:00 / 20:00"
+        )
+
+        embeds = [e]
+
+        # Per-post before/after embed (first post only, as proof)
+        if posts:
+            p = posts[0]
+            raw     = p.get("caption_raw", "")
+            human   = p.get("caption", "")
+            changed = raw and human and raw != human
+
+            proof = discord.Embed(
+                title=f"🔬 Content Proof — Post 1 ({p.get('type', '?')})",
+                color=0x1877F2,
+            )
+            if changed:
+                proof.add_field(
+                    name="📄 Raw Draft (before humanize)",
+                    value=f"```\n{raw[:400]}\n```",
+                    inline=False,
+                )
+                proof.add_field(
+                    name="🗣 Humanized (after Claude)",
+                    value=f"```\n{human[:400]}\n```",
+                    inline=False,
+                )
+            else:
+                proof.add_field(
+                    name="📄 Caption (rule-based only)",
+                    value=f"```\n{human[:400]}\n```",
+                    inline=False,
+                )
+                proof.add_field(
+                    name="⚠️ Note",
+                    value="Content was NOT processed by Claude — add a real `ANTHROPIC_API_KEY` to `.env`",
+                    inline=False,
+                )
+            proof.set_footer(text=f"provider={provider_label}")
+            embeds.append(proof)
+
+        await send_to_channel(bot, CHANNEL_CONTENT_QUEUE, embeds)
+
     except Exception as exc:
         logger.error("[job:facebook_generate] Notification error: %s", exc)

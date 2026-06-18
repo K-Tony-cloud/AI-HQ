@@ -123,6 +123,9 @@ _TYPE_HINTS: dict[str, str] = {
 }
 
 
+_MODEL = "claude-haiku-4-5-20251001"
+
+
 def _ai_humanize(text: str, post_type: str) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
@@ -131,13 +134,14 @@ def _ai_humanize(text: str, post_type: str) -> str:
     content = f"{hint}\n\n---\n{text}" if hint else text
 
     msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=_MODEL,
         max_tokens=600,
         system=_SYSTEM,
         messages=[{"role": "user", "content": content}],
     )
     result = msg.content[0].text.strip()
     if len(result) < 20:
+        logger.warning("[humanize] AI returned too-short result, using rule-based")
         return _rule_based(text)
     return result
 
@@ -154,11 +158,19 @@ def humanize_caption(text: str, post_type: str = "comment_bait") -> str:
     if not text or not text.strip():
         return text
 
+    from .ai_status import _is_real_key
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key:
-        try:
-            return _ai_humanize(text, post_type)
-        except Exception as exc:
-            logger.warning("[humanize] AI failed (%s) — using rule-based fallback", exc)
 
-    return _rule_based(text)
+    if _is_real_key(api_key):
+        logger.info("[humanize] BEFORE (%s): %s", post_type, text[:120].replace("\n", "↵"))
+        try:
+            result = _ai_humanize(text, post_type)
+            logger.info("[humanize] AFTER  (claude/%s): %s", _MODEL, result[:120].replace("\n", "↵"))
+            logger.info("[humanize] provider=claude model=%s", _MODEL)
+            return result
+        except Exception as exc:
+            logger.warning("[humanize] Claude failed (%s) — using rule-based fallback", exc)
+
+    result = _rule_based(text)
+    logger.info("[humanize] provider=rule-based (no valid API key)")
+    return result

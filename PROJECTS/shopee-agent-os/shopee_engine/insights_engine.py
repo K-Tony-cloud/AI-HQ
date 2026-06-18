@@ -609,6 +609,7 @@ def fb_generate_daily_schedule(for_date: datetime | None = None) -> dict:
         "success":   True,
         "date":      date_str,
         "scheduled": scheduled,
+        "posts":     posts,
         "total":     len(scheduled),
         "override":  data.get("override_active", False),
     }
