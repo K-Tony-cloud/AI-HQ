@@ -12,6 +12,7 @@ from discord.ext import commands
 from discord_bot.embeds.base import error_embed
 from discord_bot.embeds.insights_embeds import (
     build_content_recommendation_embed,
+    build_facebook_queue_embeds,
     build_last30_embed,
     build_page_insights_embed,
     build_posts_embed,
@@ -165,4 +166,24 @@ class InsightsCog(commands.Cog, name="Insights"):
             logger.info("[InsightsCog] /facebook-scheduled by %s", interaction.user)
         except Exception as exc:
             logger.error("[InsightsCog] /facebook-scheduled error: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ── /facebook-queue ───────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="facebook-queue",
+        description="Inspect queued posts — caption, hook, CTA, quality score, humanized",
+    )
+    async def cmd_facebook_queue(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.insights_engine import fb_get_scheduled_posts
+
+            posts  = await asyncio.to_thread(fb_get_scheduled_posts)
+            embeds = build_facebook_queue_embeds(posts)
+            # Discord allows max 10 embeds per message — send summary + up to 9 post embeds
+            await interaction.followup.send(embeds=embeds[:10])
+            logger.info("[InsightsCog] /facebook-queue by %s — %d posts", interaction.user, len(posts))
+        except Exception as exc:
+            logger.error("[InsightsCog] /facebook-queue error: %s", exc)
             await interaction.followup.send(embed=error_embed(str(exc)))

@@ -206,6 +206,141 @@ def build_content_recommendation_embed(data: dict) -> discord.Embed:
 # Scheduled posts list
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _detect_hook_and_cta(caption: str) -> tuple[str, str]:
+    """Scan caption for known hook and CTA patterns. Returns (hook_text, cta_text)."""
+    try:
+        from shopee_engine.thai_intelligence.pattern_library import _HOOK_BANKS, _CTA_BANKS
+        hook_found = ""
+        cta_found  = ""
+        for bank in _HOOK_BANKS.values():
+            for p in bank:
+                if p.text.strip() in caption:
+                    hook_found = p.text.strip()
+                    break
+            if hook_found:
+                break
+        for bank in _CTA_BANKS.values():
+            for p in bank:
+                if p.text.strip() in caption:
+                    cta_found = p.text.strip()
+                    break
+            if cta_found:
+                break
+        return hook_found, cta_found
+    except Exception:
+        return "", ""
+
+
+def _detect_humanized(caption: str) -> bool:
+    """Heuristic: humanized if caption contains spoken particles or hook signals."""
+    signals = ["อะ", "นะ", "วะ", "เว้ย", "มั้ย", "รึเปล่า", "555",
+               "แค่กูรึเปล่า", "บ้านกูก็", "กูคนเดียว", "💀", "😂", "😅", "🥹"]
+    return sum(1 for s in signals if s in caption) >= 2
+
+
+def build_facebook_queue_embeds(posts: list[dict]) -> list[discord.Embed]:
+    """
+    One summary embed + one detail embed per post.
+    Each detail embed shows: caption, hook, CTA, quality score, humanized.
+    """
+    try:
+        from shopee_engine.humanize_engine import score_caption
+    except Exception:
+        score_caption = None  # type: ignore
+
+    if not posts:
+        return [make_embed(
+            "📋 Facebook Queue",
+            color_key="info",
+            description="No pending posts in queue.",
+        )]
+
+    TYPE_EMOJI = {
+        "comment_bait":     "💬",
+        "weird_product":    "😳",
+        "nostalgia":        "🥹",
+        "visual_curiosity": "👀",
+        "trending":         "🔥",
+        "affiliate":        "🛒",
+    }
+
+    # ── Summary embed ──────────────────────────────────────────────────────────
+    summary = make_embed(
+        f"📋 Facebook Queue — {len(posts)} pending",
+        color_key="queue",
+    )
+    for p in posts:
+        emoji = TYPE_EMOJI.get(p.get("post_type", ""), "📄")
+        pub   = (p.get("publish_at") or "")[:16]
+        note  = p.get("note", "")
+        auto  = "🤖" if "auto:" in note else "✍️"
+        summary.add_field(
+            name=f"{auto} `#{p['id']}` {emoji} {pub}",
+            value=f"`{p.get('post_type','?')}`",
+            inline=True,
+        )
+    summary.set_footer(text=f"{FOOTER_TEXT} • See detail embeds below ↓")
+    embeds = [summary]
+
+    # ── Per-post detail embeds ────────────────────────────────────────────────
+    for p in posts:
+        caption   = p.get("message", "")
+        ptype     = p.get("post_type", "comment_bait")
+        pub       = (p.get("publish_at") or "")[:16]
+        emoji     = TYPE_EMOJI.get(ptype, "📄")
+        note      = p.get("note", "")
+        auto_tag  = "🤖 auto" if "auto:" in note else "✍️ manual"
+
+        hook_text, cta_text = _detect_hook_and_cta(caption)
+        humanized           = _detect_humanized(caption)
+
+        q_summary = ""
+        q_score   = 0
+        q_passed  = False
+        if score_caption:
+            try:
+                q = score_caption(caption, ptype)
+                q_score   = int(q.get("score", 0))
+                q_passed  = q.get("passed", False)
+                badges    = " ".join(q.get("badges", []))
+                issues    = [i["message"] for i in q.get("issues", []) if i["severity"] == "error"]
+                q_summary = f"{badges} {'⚠️ ' + issues[0] if issues else '✅ clean'}"
+            except Exception:
+                q_summary = "?"
+
+        color = 0x00C853 if q_passed else 0xFF9800
+        e = discord.Embed(
+            title=f"#{p['id']} · {emoji} {ptype} · {pub}",
+            color=color,
+        )
+        e.add_field(name="📄 Caption", value=f"```\n{_trunc(caption, 400)}\n```", inline=False)
+        e.add_field(
+            name="🪝 Hook",
+            value=f"`{hook_text}`" if hook_text else "`(none detected)`",
+            inline=True,
+        )
+        e.add_field(
+            name="📣 CTA",
+            value=f"`{cta_text}`" if cta_text else "`(template CTA)`",
+            inline=True,
+        )
+        e.add_field(
+            name="🗣 Humanized",
+            value="`✅ Yes`" if humanized else "`❌ No`",
+            inline=True,
+        )
+        e.add_field(
+            name=f"⭐ Quality  {q_score}/100",
+            value=q_summary or "—",
+            inline=True,
+        )
+        e.add_field(name="🏷 Note", value=f"`{note or '—'}`", inline=True)
+        e.set_footer(text=f"{auto_tag} · {FOOTER_TEXT}")
+        embeds.append(e)
+
+    return embeds
+
+
 def build_scheduled_posts_embed(posts: list[dict]) -> discord.Embed:
     if not posts:
         return make_embed(
