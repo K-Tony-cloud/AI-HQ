@@ -56,3 +56,8 @@ CHANNEL_BOT_STATUS:    int | None = _ch("CHANNEL_BOT_STATUS")
 PAGE_SIZE = 10  # Products per embed page
 
 SCHEDULER_TIMEZONE: str = os.getenv("SCHEDULER_TIMEZONE", "Asia/Bangkok")
+
+# ── FACEBOOK ──────────────────────────────────────────────────────────────────
+FACEBOOK_PAGE_ID:           str = os.getenv("FACEBOOK_PAGE_ID", "")
+FACEBOOK_PAGE_ACCESS_TOKEN: str = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "")
+FACEBOOK_PAGE_NAME:         str = os.getenv("FACEBOOK_PAGE_NAME", "อะไรของมัน")
