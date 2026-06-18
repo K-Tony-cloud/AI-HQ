@@ -89,10 +89,11 @@ def build_today_content_embeds(data: dict) -> list[discord.Embed]:
         slot_type = post.get("type", "manual")
         icon      = _TYPE_ICONS.get(slot_type, "📝")
         label     = _TYPE_LABELS.get(slot_type, slot_type.title())
-        ai_badge  = " ✨AI" if post.get("ai_enhanced") else ""
+        ai_badge  = " ✨" if post.get("ai_enhanced") else ""
+        hu_badge  = " 🗣" if post.get("humanized") else ""
 
         e = make_embed(
-            f"{icon} Post {post['slot']} — {post['time']} · {label}{ai_badge}",
+            f"{icon} Post {post['slot']} — {post['time']} · {label}{ai_badge}{hu_badge}",
             color_key=post_colors[i % len(post_colors)],
         )
 

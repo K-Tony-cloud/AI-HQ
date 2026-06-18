@@ -17,6 +17,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .trend_engine import get_today_trends, _try_ai_trend_enrichment
+from .humanize_engine import humanize_caption
 
 TZ = ZoneInfo("Asia/Bangkok")
 
@@ -305,13 +306,12 @@ _DAILY_SCHEDULES: dict[int, list[dict]] = {
 # Caption builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _pick_caption(post_type: str, trends: dict, slot_idx: int) -> dict:
+def _pick_caption(post_type: str, trends: dict, slot_idx: int, now: datetime | None = None) -> dict:
     """Pick and return a caption for the given type, considering trends."""
-    seed = int(datetime.now(tz=TZ).strftime("%Y%m%d")) + slot_idx
+    now  = now or datetime.now(tz=TZ)
+    seed = int(now.strftime("%Y%m%d")) + slot_idx
     rng  = random.Random(seed)
 
-    # If World Cup is active (June 11 – July 19, 2026), use WC captions for some slots
-    now = datetime.now(tz=TZ)
     is_worldcup = (
         (now.year == 2026 and now.month == 6 and now.day >= 11) or
         (now.year == 2026 and now.month == 7 and now.day <= 19)
@@ -371,13 +371,13 @@ def _enrich_with_ai(post: dict, trends: dict) -> dict:
 # Main public API
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_today_content() -> dict:
+def generate_today_content(for_date: datetime | None = None) -> dict:
     """
-    Generate complete editorial plan for today.
+    Generate complete editorial plan for a given date (defaults to today).
     Returns 3-4 ready-to-publish posts with captions, image recs, and reasoning.
     """
-    now    = datetime.now(tz=TZ)
-    trends = get_today_trends()
+    now    = for_date or datetime.now(tz=TZ)
+    trends = get_today_trends(for_date=now)
     trends = _try_ai_trend_enrichment(trends)
 
     weekday   = now.weekday()
@@ -407,20 +407,26 @@ def generate_today_content() -> dict:
             }
             slot_type = event_map.get(slot_type, "comment_bait")
 
-        entry = _pick_caption(slot_type, trends, idx)
+        entry = _pick_caption(slot_type, trends, idx, now=now)
 
-        # Try AI enhancement
+        # Step 1: inject trend/season context
         entry = _enrich_with_ai(entry, trends)
 
+        # Step 2: humanize — make it sound like Thai people, not AI
+        raw_caption = entry.get("caption", "")
+        human_caption = humanize_caption(raw_caption, post_type=entry.get("type", slot_type))
+        entry = {**entry, "caption": human_caption}
+
         posts.append({
-            "slot":       idx + 1,
-            "time":       slot["time"],
-            "type":       entry.get("type", slot_type),
-            "caption":    entry.get("caption", ""),
-            "image_rec":  entry.get("image_rec", ""),
-            "cta":        entry.get("cta", ""),
-            "reasoning":  slot["reason"],
+            "slot":        idx + 1,
+            "time":        slot["time"],
+            "type":        entry.get("type", slot_type),
+            "caption":     entry.get("caption", ""),
+            "image_rec":   entry.get("image_rec", ""),
+            "cta":         entry.get("cta", ""),
+            "reasoning":   slot["reason"],
             "ai_enhanced": entry.get("ai_enhanced", False),
+            "humanized":   human_caption != raw_caption,
         })
 
     return {
