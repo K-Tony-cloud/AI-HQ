@@ -57,6 +57,17 @@ class ShopeeBot(commands.Bot):
         print(f"[bot] ✅ Logged in as {self.user}  |  {len(self.guilds)} guild(s)")
         from shopee_engine.ai_status import log_ai_status
         log_ai_status()
+        try:
+            import asyncio
+            from shopee_engine.thai_intelligence.learning_loop import init_schema, seed_patterns
+            await asyncio.to_thread(init_schema)
+            seeded = await asyncio.to_thread(seed_patterns)
+            if seeded > 0:
+                print(f"[AI] Thai Intelligence: seeded {seeded} patterns into learning loop")
+            else:
+                print(f"[AI] Thai Intelligence: learning loop ready")
+        except Exception as exc:
+            print(f"[AI] Thai Intelligence: init skipped ({exc})")
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,

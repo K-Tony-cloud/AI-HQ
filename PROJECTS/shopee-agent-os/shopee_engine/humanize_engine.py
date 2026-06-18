@@ -1,5 +1,5 @@
 """
-Humanize Engine — rule-based Thai Facebook caption transformer.
+Humanize Engine — Thai Facebook caption transformer.
 
 Pipeline (4 passes):
   1. Strip AI openers
@@ -7,10 +7,13 @@ Pipeline (4 passes):
   3. Type-aware CTA replacement
   4. Relatable hook injection
 
+Backed by Thai Content Intelligence Engine:
+  - Pattern Library: weighted CTAs and hooks
+  - Learning Loop: applies learned weight overrides from DuckDB
+  - Voice Definition: quality scoring
+
 Voice: คนไทยเมาท์กัน / คอมเมนต์ใต้โพสต์ไวรัล
 Target: "เออว่ะ" / "จริง" / "บ้านกูก็เป็น" / "กูคนหนึ่ง"
-
-No API needed. Seeded random for per-date variety.
 """
 
 from __future__ import annotations
@@ -25,254 +28,126 @@ _MODEL = "claude-haiku-4-5-20251001"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 1 — AI opener patterns to strip from the first block
-# (longest-first so "คำถามที่อยากรู้มานาน 🤔\n\n" is matched before shorter variants)
+# Intelligence imports (lazy — graceful fallback if package missing)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_AI_OPENERS: list[str] = [
-    "คำถามที่อยากรู้มานาน 🤔\n\n",
-    "คำถามที่อยากรู้มานาน\n\n",
-    "คำถามที่น่าสนใจ:\n\n",
-    "คำถาม:\n\n",
-    "คำถาม: ",
-    "น่าสนใจมากที่",
-    "น่าสนใจมาก: ",
-    "ที่น่าสนใจคือ ",
-    "ปฏิเสธไม่ได้ว่า ",
-    "เชื่อหรือไม่ว่า ",
-    "เชื่อหรือไม่ ",
-    "ในยุคปัจจุบัน ",
-    "ในยุคที่ ",
-    "ในสังคมไทย ",
-    "คุณเคยสังเกตไหมว่า ",
-    "คุณเคย ",
-    "ในปัจจุบัน ",
-]
+def _get_intelligence():
+    """Return (pattern_library, learning_loop) or (None, None) on import error."""
+    try:
+        from .thai_intelligence import pattern_library, learning_loop
+        return pattern_library, learning_loop
+    except Exception as exc:
+        logger.warning("[humanize] thai_intelligence unavailable: %s", exc)
+        return None, None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 2 — Substitution table (ordered longest-first)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SUBS: list[tuple[str, str]] = [
-    # AI CTA patterns → casual
-    ("Comment บอกได้เลยว่าคุณเป็นทีมไหน 👇",    "เธออยู่ทีมไหนวะ 👇"),
-    ("Comment บอกได้เลยว่าคุณ",                   "บอกมาเลยว่าเธอ"),
-    ("Comment บอกได้เลย — ไม่มีคำตอบถูกหรือผิด 👇", "บอกมาเลยนะ 👇"),
-    ("Comment บอกได้เลย ไม่ตัดสิน 👇",           "บอกมาเลย ไม่ตัดสินนะ 👇"),
-    ("Comment บอกได้เลย 👇",                      "บอกมาเลย 👇"),
-    ("Comment บอกได้เลย",                         "บอกมาเลยนะ"),
-    ("Comment A หรือ B 👇",                        "A หรือ B วะ 👇"),
-    ("Comment 👇 แล้วอธิบายด้วยว่าทำไม",          "แล้วเธอล่ะ 👇 บอกด้วยว่าทำไม"),
-    ("Comment ชื่อขนมที่คิดถึงที่สุด 👇",         "ขนมที่คิดถึงที่สุดคืออะไร 🥹👇"),
-    ("Comment คำตอบของคุณ 👇",                    "เดาซิ 👇"),
-    ("Comment บอกว่าสนใจ",                        "สนใจบอกมาเลย"),
-    ("Comment: ซื้อ / ไม่ซื้อ",                   "ซื้อหรือไม่ซื้อ 👇"),
-    ("แสดงความคิดเห็น 👇",                        "บอกมาเลย 👇"),
-    # AI philosophical phrases
-    ("บางทีสิ่งที่ดูแปลก อาจเป็นของที่ดีที่สุดก็ได้",   "คนที่ซื้อรู้อะไรที่กูไม่รู้แน่ๆ 💀"),
-    ("ไม่มีคำตอบถูกหรือผิด — แค่อยากรู้ว่าคุณคิดยังไง", "แค่อยากรู้ว่าใครเป็นแบบเดียวกันบ้าง 😂"),
-    ("ไม่มีคำตอบถูกหรือผิด",                            "ไม่มีถูกผิดนะ"),
-    # Formal connectors
-    ("อย่างไรก็ตาม",   "แต่"),
-    ("เพราะฉะนั้น",    "เลย"),
-    ("ดังนั้น",        "งั้น"),
-    ("ทั้งนี้",        ""),
-    ("ซึ่ง",           "ที่"),
-    ("ดังกล่าว",       "นี้"),
-    # Formal Thai → Spoken Thai
-    ("หรือไม่",        "รึเปล่า"),
-    ("อย่างไร",        "ยังไง"),
-    ("ของคุณคือ",      "ของเธอคือ"),
-    ("คุณคิดว่า",      "คิดว่า"),
-    ("ที่คุณ",         "ที่เธอ"),
-    ("คุณตื่นกี่โมง?", "เธอตื่นกี่โมงวะ 👇"),
-    ("คุณเลือกอะไร?",  "เธอเลือกทีมไหนวะ 👇"),
-    ("คุณจะซื้อไหม? 🤔", "ซื้อหรือไม่ซื้อ 👇"),
-    ("คุณจะซื้อไหม?",  "ซื้อหรือไม่ซื้อ 👇"),
-    # Question softening
-    ("บ้างไหม?",       "บ้างมั้ย 👇"),
-    ("บ้างไหม",        "บ้างมั้ย"),
-    ("กันบ้าง?",       "กันบ้าง 👇"),
-    ("ไหม?",           "มั้ย 👇"),
-    ("ใช่ไหม?",        "จริงมั้ย 😂"),
-]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Pass 3 — Type-aware CTA banks
-# Keys: post_type + "_poll" for A/B posts, post_type + "_general" otherwise
-# ─────────────────────────────────────────────────────────────────────────────
-
-_CTAS: dict[str, list[str]] = {
-    "comment_bait_poll": [
-        "A หรือ B วะ 👇",
-        "เธออยู่ทีมไหน 👇",
-        "ทีมไหนก็บอกมาเลย 👇",
-        "A หรือ B? บอกด้วย 👇",
-    ],
-    "comment_bait_general": [
-        "บ้านใครเป็นบ้าง 😂",
-        "ใครเหมือนกันบ้างวะ 👇",
-        "แค่กูรึเปล่า 😅",
-        "มีใครเหมือนกันบ้าง 👇",
-        "กูคนเดียวรึเปล่าที่เป็นแบบนี้ 😂",
-    ],
-    "weird_product": [
-        "ซื้อหรือไม่ซื้อ 👇",
-        "คิดว่ายังไงกัน 😂",
-        "ใครซื้ออยู่บ้าง 👇",
-        "โลกนี้ไปไกลมากจริงๆ 💀",
-    ],
-    "nostalgia": [
-        "ยังจำได้บ้างไหม 🥹",
-        "ใครยังมีอยู่บ้าง 🥹",
-        "คิดถึงมั้ย 🥹",
-        "เด็กสมัยนี้ไม่เข้าใจหรอก 😅",
-    ],
-    "visual_curiosity": [
-        "เธอเห็นอะไรก่อนวะ 👇",
-        "ใช้เวลานานแค่ไหน 👇",
-        "เดาซิ 👇",
-    ],
-    "trending": [
-        "คิดว่ายังไงกัน 👇",
-        "เธอเห็นด้วยมั้ย 👇",
-        "ตามทันกันหรือยัง 👇",
-    ],
-    "affiliate": [
-        "สนใจบอกมาเลย 👇",
-        "คุ้มไหม ลองดูได้เลย",
-        "ใครซื้อแล้วรีวิวด้วยนะ 👇",
-    ],
-}
-
-# Detect if post has A/B poll format
-_POLL_SIGNALS = ["A:", "B:", "A :", "B :", "ทีม A", "ทีม B", "A หรือ B", "B หรือ A"]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Pass 4 — Relatable hook injection
-# Injected between the content body and the closing CTA
-# ─────────────────────────────────────────────────────────────────────────────
-
-_HOOKS: dict[str, list[str]] = {
-    "comment_bait": [
-        "แค่กูรึเปล่าที่รู้สึกแบบนี้ 😅",
-        "กูคนเดียวรึเปล่า 😂",
-        "บ้านกูก็เป็นแบบนี้เลย",
-        "555 จริงมากๆ",
-        "โอ๊ย โดนใจจุงๆ เลย 😭",
-        "ทำไมมันตรงใจมากขนาดนี้ 😅",
-    ],
-    "weird_product": [
-        "กูยังงงอยู่ว่ามีคนซื้อทำไม 💀",
-        "โลกนี้ไปไกลมากจริงๆ",
-        "คนที่ซื้อเก่งมากเลยนะ กูคิดไม่ถึง",
-        "555 อัจฉริยะหรือบ้า กูก็ไม่รู้",
-    ],
-    "nostalgia": [
-        "คิดถึงจุงๆ เลย 🥹",
-        "โห นึกถึงแล้วใจหาย",
-        "สมัยนั้นมันดีกว่านี้จริงๆ",
-        "เวลามันผ่านเร็วมากนะ 😢",
-    ],
-    "visual_curiosity": [
-        "กูนั่งดูนานมาก 😂",
-        "สายตากูมันไม่ดีหรือเปล่านะ",
-    ],
-    "trending": [
-        "กระแสนี้มาแรงมากจริงๆ",
-        "ทุกคนพูดถึงกันหมดเลย",
-    ],
-    "affiliate": [
-        "กูก็เพิ่งรู้ว่ามีของแบบนี้",
-        "ราคานี้คุ้มมากถ้าใช้บ่อย",
-    ],
-}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Pipeline passes
+# Pass 1 — strip AI openers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _pass1_strip_opener(text: str) -> str:
-    """Remove known AI opener patterns from the start of the text."""
-    for opener in _AI_OPENERS:
+    lib, _ = _get_intelligence()
+    openers = lib.AI_OPENERS if lib else _FALLBACK_OPENERS
+    for opener in openers:
         if text.startswith(opener):
-            text = text[len(opener):]
-            break
+            return text[len(opener):]
     return text
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 2 — formal → casual substitutions
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _pass2_substitutions(text: str) -> str:
-    """Apply formal→casual substitution table."""
-    for old, new in _SUBS:
+    lib, _ = _get_intelligence()
+    subs = lib.SUBS if lib else _FALLBACK_SUBS
+    for old, new in subs:
         text = text.replace(old, new)
     while "\n\n\n" in text:
         text = text.replace("\n\n\n", "\n\n")
     return text
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 3 — type-aware CTA replacement
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _is_poll(text: str) -> bool:
-    return any(sig in text for sig in _POLL_SIGNALS)
+    lib, _ = _get_intelligence()
+    signals = lib.POLL_SIGNALS if lib else _FALLBACK_POLL_SIGNALS
+    return any(sig in text for sig in signals)
 
 
 def _pass3_cta(text: str, post_type: str, rng: random.Random) -> str:
-    """
-    Replace the last non-empty line if it looks like a generic CTA,
-    using a type-appropriate casual alternative.
-    """
     lines = text.rstrip().split("\n")
     if not lines:
         return text
 
     last = lines[-1].strip()
 
-    # Already a good short CTA — leave it alone
+    # Already a good short casual CTA — leave it alone
     if len(last) <= 15 and ("👇" in last or "?" in last or "มั้ย" in last or "วะ" in last):
         return text
 
-    # Detect generic AI CTA patterns
-    _bad_endings = [
-        "บอกความคิดเห็น 👇",
-        "แสดงความคิดเห็น 👇",
-        "อยากรู้จักของชิ้นนี้ไหม? 👇",
-        "อยากรู้ว่าใช้ทำอะไร? Comment ถามมาเลย 👇",
-        "Share ให้คนที่โตมายุคเดียวกันเห็น",
-    ]
-    is_bad = any(last.endswith(b.rstrip()) or last == b.strip() for b in _bad_endings)
+    # Check if ending looks like a bad generic CTA
+    lib, _ = _get_intelligence()
+    bad_endings = lib.BAD_CTA_ENDINGS if lib else _FALLBACK_BAD_ENDINGS
+    is_bad = any(last.endswith(b.rstrip()) or last == b.strip() for b in bad_endings)
 
     if not is_bad:
         return text
 
-    # Pick CTA by type
-    key = f"{post_type}_poll" if _is_poll(text) else f"{post_type}_general"
-    bank = _CTAS.get(key) or _CTAS.get(post_type) or _CTAS["comment_bait_general"]
-    lines[-1] = rng.choice(bank)
+    # Get learned weight overrides
+    weight_overrides: dict[str, float] | None = None
+    if lib:
+        try:
+            from .thai_intelligence import learning_loop
+            weight_overrides = learning_loop.get_weight_overrides(post_type)
+        except Exception:
+            pass
+
+    is_poll = _is_poll(text)
+    if lib:
+        new_cta = lib.get_cta(post_type, is_poll, rng, weight_overrides)
+    else:
+        key = f"{post_type}_poll" if is_poll else f"{post_type}_general"
+        bank = _FALLBACK_CTAS.get(key) or _FALLBACK_CTAS.get(post_type) or _FALLBACK_CTAS["comment_bait_general"]
+        new_cta = rng.choice(bank)
+
+    lines[-1] = new_cta
     return "\n".join(lines)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 4 — relatable hook injection
+# ─────────────────────────────────────────────────────────────────────────────
+
 def _pass4_hook(text: str, post_type: str, rng: random.Random) -> str:
-    """
-    Inject a relatable hook before the last line (CTA) if the post
-    doesn't already have one and is longer than 3 lines.
-    """
-    # Don't inject if one already exists
-    _HOOK_SIGNALS = ["แค่กูรึเปล่า", "บ้านกูก็", "กูคนเดียว", "กูยังงง", "คิดถึงจุง", "โห นึก", "กูไม่รู้", "ซื้อรู้อะไร"]
-    if any(sig in text for sig in _HOOK_SIGNALS):
+    lib, _ = _get_intelligence()
+    hook_signals = lib.HOOK_SIGNALS if lib else _FALLBACK_HOOK_SIGNALS
+
+    if any(sig in text for sig in hook_signals):
         return text
 
     lines = [l for l in text.split("\n") if l.strip()]
     if len(lines) < 4:
         return text
 
-    bank = _HOOKS.get(post_type, _HOOKS["comment_bait"])
-    hook = rng.choice(bank)
+    weight_overrides: dict[str, float] | None = None
+    if lib:
+        try:
+            from .thai_intelligence import learning_loop
+            weight_overrides = learning_loop.get_weight_overrides(post_type)
+        except Exception:
+            pass
 
-    # Insert hook as a new paragraph before the last line
+    if lib:
+        hook = lib.get_hook(post_type, rng, weight_overrides)
+    else:
+        bank = _FALLBACK_HOOKS.get(post_type, _FALLBACK_HOOKS["comment_bait"])
+        hook = rng.choice(bank)
+
     all_lines = text.split("\n")
-    # Find the index of the last non-empty line
     last_idx = len(all_lines) - 1
     while last_idx > 0 and not all_lines[last_idx].strip():
         last_idx -= 1
@@ -283,7 +158,7 @@ def _pass4_hook(text: str, post_type: str, rng: random.Random) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Public API
+# Public rule-based entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _rule_based(text: str, post_type: str = "comment_bait", seed: int = 0) -> str:
@@ -298,7 +173,9 @@ def _rule_based(text: str, post_type: str = "comment_bait", seed: int = 0) -> st
     return text.strip()
 
 
-# ── AI path (used when ANTHROPIC_API_KEY is a real key) ──────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Claude AI path (only when real ANTHROPIC_API_KEY present)
+# ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM = """\
 คุณเป็น editor ของเพจ Facebook "อะไรของมัน" เพจไทยที่พูดเรื่องชีวิตประจำวัน
@@ -351,9 +228,14 @@ def _ai_humanize(text: str, post_type: str) -> str:
     return result
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Public API
+# ─────────────────────────────────────────────────────────────────────────────
+
 def humanize_caption(text: str, post_type: str = "comment_bait") -> str:
     """
     Apply humanize layer. Claude Haiku if real ANTHROPIC_API_KEY, else 4-pass rule-based.
+    Automatically applies learned pattern weights from the intelligence loop.
     """
     if not text or not text.strip():
         return text
@@ -375,3 +257,100 @@ def humanize_caption(text: str, post_type: str = "comment_bait") -> str:
     result = _rule_based(text, post_type, seed)
     logger.debug("[humanize] provider=rule-based post_type=%s", post_type)
     return result
+
+
+def score_caption(text: str, post_type: str = "comment_bait") -> dict:
+    """
+    Score a caption against page voice standards.
+    Returns quality result dict with score, passed, issues, badges.
+    """
+    try:
+        from .thai_intelligence.voice_definition import check_content_quality
+        result = check_content_quality(text, post_type)
+        return {
+            "score": result.score,
+            "passed": result.passed,
+            "issues": [{"code": i.code, "severity": i.severity, "message": i.message}
+                       for i in result.issues],
+            "badges": result.badges,
+            "summary": result.summary(),
+        }
+    except Exception as exc:
+        logger.debug("[humanize] score_caption failed: %s", exc)
+        return {"score": 0, "passed": False, "issues": [], "badges": [], "summary": str(exc)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fallback data (used if thai_intelligence package fails to import)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FALLBACK_OPENERS: list[str] = [
+    "คำถามที่อยากรู้มานาน 🤔\n\n",
+    "คำถามที่อยากรู้มานาน\n\n",
+    "คำถามที่น่าสนใจ:\n\n",
+    "คำถาม:\n\n",
+    "คำถาม: ",
+    "น่าสนใจมากที่",
+    "น่าสนใจมาก: ",
+    "ที่น่าสนใจคือ ",
+    "ปฏิเสธไม่ได้ว่า ",
+    "เชื่อหรือไม่ว่า ",
+    "เชื่อหรือไม่ ",
+    "ในยุคปัจจุบัน ",
+    "ในยุคที่ ",
+    "ในสังคมไทย ",
+    "คุณเคยสังเกตไหมว่า ",
+    "คุณเคย ",
+    "ในปัจจุบัน ",
+]
+
+_FALLBACK_SUBS: list[tuple[str, str]] = [
+    ("Comment บอกได้เลยว่าคุณเป็นทีมไหน 👇", "เธออยู่ทีมไหนวะ 👇"),
+    ("Comment บอกได้เลย 👇",                  "บอกมาเลย 👇"),
+    ("Comment A หรือ B 👇",                    "A หรือ B วะ 👇"),
+    ("แสดงความคิดเห็น 👇",                    "บอกมาเลย 👇"),
+    ("บางทีสิ่งที่ดูแปลก อาจเป็นของที่ดีที่สุดก็ได้", "คนที่ซื้อรู้อะไรที่กูไม่รู้แน่ๆ 💀"),
+    ("ไม่มีคำตอบถูกหรือผิด — แค่อยากรู้ว่าคุณคิดยังไง", "แค่อยากรู้ว่าใครเป็นแบบเดียวกันบ้าง 😂"),
+    ("อย่างไรก็ตาม", "แต่"),
+    ("เพราะฉะนั้น", "เลย"),
+    ("ดังนั้น", "งั้น"),
+    ("หรือไม่", "รึเปล่า"),
+    ("อย่างไร", "ยังไง"),
+    ("คุณจะซื้อไหม? 🤔", "ซื้อหรือไม่ซื้อ 👇"),
+    ("คุณจะซื้อไหม?", "ซื้อหรือไม่ซื้อ 👇"),
+    ("ไหม?", "มั้ย 👇"),
+    ("ใช่ไหม?", "จริงมั้ย 😂"),
+]
+
+_FALLBACK_POLL_SIGNALS: list[str] = ["A:", "B:", "A :", "B :", "ทีม A", "ทีม B", "A หรือ B"]
+
+_FALLBACK_HOOK_SIGNALS: list[str] = [
+    "แค่กูรึเปล่า", "บ้านกูก็", "กูคนเดียว", "กูยังงง",
+    "คิดถึงจุง", "โห นึก", "กูไม่รู้", "ซื้อรู้อะไร",
+]
+
+_FALLBACK_BAD_ENDINGS: list[str] = [
+    "บอกความคิดเห็น 👇",
+    "แสดงความคิดเห็น 👇",
+    "Share ให้คนที่โตมายุคเดียวกันเห็น",
+    "กดแชร์ให้เพื่อนด้วย",
+]
+
+_FALLBACK_CTAS: dict[str, list[str]] = {
+    "comment_bait_poll":    ["A หรือ B วะ 👇", "เธออยู่ทีมไหน 👇"],
+    "comment_bait_general": ["บ้านใครเป็นบ้าง 😂", "แค่กูรึเปล่า 😅", "ใครเหมือนกันบ้างวะ 👇"],
+    "weird_product":        ["ซื้อหรือไม่ซื้อ 👇", "โลกนี้ไปไกลมากจริงๆ 💀"],
+    "nostalgia":            ["ยังจำได้บ้างไหม 🥹", "คิดถึงมั้ย 🥹"],
+    "visual_curiosity":     ["เธอเห็นอะไรก่อนวะ 👇", "เดาซิ 👇"],
+    "trending":             ["คิดว่ายังไงกัน 👇"],
+    "affiliate":            ["สนใจบอกมาเลย 👇"],
+}
+
+_FALLBACK_HOOKS: dict[str, list[str]] = {
+    "comment_bait":     ["แค่กูรึเปล่าที่รู้สึกแบบนี้ 😅", "บ้านกูก็เป็นแบบนี้เลย", "กูคนเดียวรึเปล่า 😂"],
+    "weird_product":    ["กูยังงงอยู่ว่ามีคนซื้อทำไม 💀", "โลกนี้ไปไกลมากจริงๆ"],
+    "nostalgia":        ["คิดถึงจุงๆ เลย 🥹", "เวลามันผ่านเร็วมากนะ 😢"],
+    "visual_curiosity": ["กูนั่งดูนานมาก 😂"],
+    "trending":         ["กระแสนี้มาแรงมากจริงๆ"],
+    "affiliate":        ["กูก็เพิ่งรู้ว่ามีของแบบนี้"],
+}
