@@ -16,7 +16,10 @@ from discord_bot.embeds.scheduler_embeds import (
 
 logger = logging.getLogger(__name__)
 
-_VALID_JOBS = ["morning_brief", "trend_watch", "evening_summary", "auto_queue", "weekly_report"]
+_VALID_JOBS = [
+    "morning_brief", "trend_watch", "evening_summary", "auto_queue", "weekly_report",
+    "facebook_generate", "facebook_publish_morning", "facebook_publish_afternoon", "facebook_publish_evening",
+]
 
 
 class SchedulerCog(commands.Cog, name="Scheduler"):
@@ -104,18 +107,17 @@ class SchedulerCog(commands.Cog, name="Scheduler"):
         name="run-job",
         description="Manually trigger a scheduled job right now",
     )
-    @app_commands.describe(
-        job_id=(
-            "Job to run: morning_brief | trend_watch | "
-            "evening_summary | auto_queue | weekly_report"
-        )
-    )
+    @app_commands.describe(job_id="Scheduled job to run immediately")
     @app_commands.choices(job_id=[
-        app_commands.Choice(name="Morning Brief (08:00)",       value="morning_brief"),
-        app_commands.Choice(name="Trend Watch (12:00)",         value="trend_watch"),
-        app_commands.Choice(name="Evening Summary (18:00)",     value="evening_summary"),
-        app_commands.Choice(name="Auto Queue Generator (06:30)", value="auto_queue"),
-        app_commands.Choice(name="Weekly Report (Sunday)",      value="weekly_report"),
+        app_commands.Choice(name="Morning Brief (08:00)",            value="morning_brief"),
+        app_commands.Choice(name="Trend Watch (12:00)",              value="trend_watch"),
+        app_commands.Choice(name="Evening Summary (18:00)",          value="evening_summary"),
+        app_commands.Choice(name="Auto Queue Generator (06:30)",     value="auto_queue"),
+        app_commands.Choice(name="Weekly Report (Sunday)",           value="weekly_report"),
+        app_commands.Choice(name="FB Content Generator (06:00)",     value="facebook_generate"),
+        app_commands.Choice(name="FB Publisher — Morning (08:00)",   value="facebook_publish_morning"),
+        app_commands.Choice(name="FB Publisher — Afternoon (13:00)", value="facebook_publish_afternoon"),
+        app_commands.Choice(name="FB Publisher — Evening (20:00)",   value="facebook_publish_evening"),
     ])
     async def cmd_run_job(
         self,

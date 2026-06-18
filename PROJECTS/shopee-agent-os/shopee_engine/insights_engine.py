@@ -560,6 +560,122 @@ def fb_schedule_post(
         con.close()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Daily auto-schedule helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fb_generate_daily_schedule(for_date: datetime | None = None) -> dict:
+    """Generate today's editorial content and save 3 posts to scheduled_posts (08:00/13:00/20:00)."""
+    from .editorial_engine import generate_today_content
+
+    now      = for_date or datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+
+    con = _connect_rw()
+    try:
+        _init_scheduled(con)
+        existing = con.execute(
+            f"SELECT COUNT(*) FROM {SCHEDULED_TABLE} WHERE DATE(publish_at) = ? AND note LIKE 'auto:%'",
+            [date_str],
+        ).fetchone()[0]
+        if existing >= 3:
+            return {"skipped": True, "reason": f"Already have {existing} auto posts for {date_str}", "date": date_str}
+    finally:
+        con.close()
+
+    data  = generate_today_content(for_date=now)
+    posts = data.get("posts", [])
+    if not posts:
+        return {"error": "No posts generated", "success": False}
+
+    _AUTO_SLOTS = ["08:00", "13:00", "20:00"]
+    scheduled   = []
+
+    for i, slot_time in enumerate(_AUTO_SLOTS):
+        if i >= len(posts):
+            break
+        post       = posts[i]
+        publish_at = f"{date_str} {slot_time}:00"
+        result     = fb_schedule_post(
+            message    = post.get("caption", ""),
+            publish_at = publish_at,
+            post_type  = post.get("type", "auto"),
+            note       = f"auto:{date_str}",
+        )
+        if result.get("success"):
+            scheduled.append({"id": result["id"], "publish_at": publish_at, "post_type": post.get("type", "auto")})
+
+    return {
+        "success":   True,
+        "date":      date_str,
+        "scheduled": scheduled,
+        "total":     len(scheduled),
+        "override":  data.get("override_active", False),
+    }
+
+
+def fb_publish_due_posts() -> dict:
+    """Publish all pending scheduled posts where publish_at <= now (today only)."""
+    from .facebook_engine import fb_post_message
+
+    if not config.db_path.exists():
+        return {"published": [], "errors": [], "total": 0}
+
+    now       = datetime.now()
+    now_str   = now.strftime("%Y-%m-%d %H:%M:%S")
+    today_str = now.strftime("%Y-%m-%d")
+
+    con = _connect_rw()
+    try:
+        _init_scheduled(con)
+        rows = con.execute(f"""
+            SELECT id, message, image_url, link, post_type
+            FROM {SCHEDULED_TABLE}
+            WHERE status = 'pending'
+              AND publish_at <= ?
+              AND DATE(publish_at) = ?
+            ORDER BY publish_at ASC
+        """, [now_str, today_str]).fetchall()
+
+        published: list[dict] = []
+        errors:    list[dict] = []
+
+        for row in rows:
+            db_id, message, image_url, link, post_type = row
+            if not message or not message.strip():
+                continue
+            try:
+                if image_url and image_url.strip():
+                    result = fb_post_with_image(message, image_url)
+                else:
+                    result = fb_post_message(message, link=link or "")
+
+                if result.get("success"):
+                    fb_post_id = result.get("post_id", "")
+                    con.execute(
+                        f"UPDATE {SCHEDULED_TABLE} SET status='posted', post_id=? WHERE id=?",
+                        [fb_post_id, db_id],
+                    )
+                    published.append({
+                        "db_id":     db_id,
+                        "post_id":   fb_post_id,
+                        "post_type": post_type,
+                        "message":   message[:80],
+                    })
+                else:
+                    con.execute(
+                        f"UPDATE {SCHEDULED_TABLE} SET status='failed' WHERE id=?",
+                        [db_id],
+                    )
+                    errors.append({"db_id": db_id, "error": result.get("error", "unknown")})
+            except Exception as exc:
+                errors.append({"db_id": db_id, "error": str(exc)})
+
+        return {"published": published, "errors": errors, "total": len(published)}
+    finally:
+        con.close()
+
+
 def fb_get_scheduled_posts(limit: int = 10) -> list[dict]:
     if not config.db_path.exists():
         return []

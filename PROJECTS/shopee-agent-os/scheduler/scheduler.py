@@ -38,6 +38,26 @@ JOB_REGISTRY: dict[str, dict] = {
         "description": "Sunday 20:00 — Export MD/HTML/CSV and post to Discord",
         "cron":        {"day_of_week": "sun", "hour": 20, "minute": 0},
     },
+    "facebook_generate": {
+        "label":       "Facebook Daily Content Generator",
+        "description": "06:00 — Generate today's 3 Facebook posts and queue them for auto-publish",
+        "cron":        {"hour": 6, "minute": 0},
+    },
+    "facebook_publish_morning": {
+        "label":       "Facebook Publisher — Morning",
+        "description": "08:00 — Publish morning post to อะไรของมัน Facebook page",
+        "cron":        {"hour": 8, "minute": 0},
+    },
+    "facebook_publish_afternoon": {
+        "label":       "Facebook Publisher — Afternoon",
+        "description": "13:00 — Publish afternoon post to อะไรของมัน Facebook page",
+        "cron":        {"hour": 13, "minute": 0},
+    },
+    "facebook_publish_evening": {
+        "label":       "Facebook Publisher — Evening",
+        "description": "20:00 — Publish evening post to อะไรของมัน Facebook page",
+        "cron":        {"hour": 20, "minute": 0},
+    },
 }
 
 
@@ -50,18 +70,24 @@ class ShopeeScheduler:
         self._register_jobs()
 
     def _register_jobs(self) -> None:
-        from scheduler.jobs.morning_brief  import run_morning_brief
-        from scheduler.jobs.trend_watch    import run_trend_watch
-        from scheduler.jobs.evening_summary import run_evening_summary
-        from scheduler.jobs.auto_queue     import run_auto_queue
-        from scheduler.jobs.weekly_report  import run_weekly_report
+        from scheduler.jobs.morning_brief    import run_morning_brief
+        from scheduler.jobs.trend_watch      import run_trend_watch
+        from scheduler.jobs.evening_summary  import run_evening_summary
+        from scheduler.jobs.auto_queue       import run_auto_queue
+        from scheduler.jobs.weekly_report    import run_weekly_report
+        from scheduler.jobs.facebook_generate  import run_facebook_generate
+        from scheduler.jobs.facebook_publisher import run_facebook_publisher
 
         _funcs = {
-            "morning_brief":   run_morning_brief,
-            "trend_watch":     run_trend_watch,
-            "evening_summary": run_evening_summary,
-            "auto_queue":      run_auto_queue,
-            "weekly_report":   run_weekly_report,
+            "morning_brief":              run_morning_brief,
+            "trend_watch":                run_trend_watch,
+            "evening_summary":            run_evening_summary,
+            "auto_queue":                 run_auto_queue,
+            "weekly_report":              run_weekly_report,
+            "facebook_generate":          run_facebook_generate,
+            "facebook_publish_morning":   run_facebook_publisher,
+            "facebook_publish_afternoon": run_facebook_publisher,
+            "facebook_publish_evening":   run_facebook_publisher,
         }
 
         for job_id, meta in JOB_REGISTRY.items():
