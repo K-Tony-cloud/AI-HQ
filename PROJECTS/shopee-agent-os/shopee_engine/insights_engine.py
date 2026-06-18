@@ -575,11 +575,14 @@ def fb_generate_daily_schedule(for_date: datetime | None = None) -> dict:
     try:
         _init_scheduled(con)
         existing = con.execute(
-            f"SELECT COUNT(*) FROM {SCHEDULED_TABLE} WHERE DATE(publish_at) = ? AND note LIKE 'auto:%'",
+            f"""SELECT COUNT(*) FROM {SCHEDULED_TABLE}
+                WHERE DATE(publish_at) = ?
+                  AND note LIKE 'auto:%'
+                  AND status NOT IN ('failed', 'deleted', 'cancelled')""",
             [date_str],
         ).fetchone()[0]
         if existing >= 3:
-            return {"skipped": True, "reason": f"Already have {existing} auto posts for {date_str}", "date": date_str}
+            return {"skipped": True, "reason": f"Already have {existing} active auto posts for {date_str}", "date": date_str}
     finally:
         con.close()
 
