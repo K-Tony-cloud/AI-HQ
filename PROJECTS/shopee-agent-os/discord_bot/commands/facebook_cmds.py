@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from discord_bot.embeds.base import error_embed
 from discord_bot.embeds.facebook_embeds import (
+    build_fb_debug_embed,
     build_fb_draft_saved_embed,
     build_fb_drafts_list_embed,
     build_fb_page_info_embed,
@@ -121,3 +122,22 @@ class FacebookCog(commands.Cog, name="Facebook"):
         except Exception as exc:
             logger.error("[FacebookCog] /facebook-draft error: %s", exc)
             await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ── /facebook-debug ───────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="facebook-debug",
+        description="Full Facebook token/page diagnostic — shows raw API responses and exact errors",
+    )
+    async def cmd_facebook_debug(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            from shopee_engine.facebook_engine import fb_debug
+
+            data  = await asyncio.to_thread(fb_debug)
+            embed = build_fb_debug_embed(data)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            logger.info("[FacebookCog] /facebook-debug by %s", interaction.user)
+        except Exception as exc:
+            logger.error("[FacebookCog] /facebook-debug error: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)

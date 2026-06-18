@@ -104,3 +104,96 @@ def build_fb_drafts_list_embed(drafts: list[dict]) -> discord.Embed:
         )
     e.add_field(name="Drafts", value="\n".join(lines)[:1024], inline=False)
     return e
+
+
+def build_fb_debug_embed(data: dict) -> discord.Embed:
+    """Embed for /facebook-debug — full token/page diagnostic."""
+    diagnosis = data.get("diagnosis", [])
+    has_error = any(line.startswith("❌") for line in diagnosis)
+    color = "error" if has_error else "success"
+    e = make_embed("🔍 Facebook Debug Report", color_key=color)
+
+    # Credentials
+    e.add_field(
+        name="Credentials",
+        value=(
+            f"Page ID: `{data.get('page_id') or '—'}`\n"
+            f"Token: `{data.get('token_preview') or '—'}`\n"
+            f"Token set: {'✅' if data.get('token_set') else '❌'} | "
+            f"Page ID set: {'✅' if data.get('page_id_set') else '❌'}"
+        ),
+        inline=False,
+    )
+
+    # Token kind
+    kind_map = {
+        "page_token":        "✅ Page Token",
+        "user_token":        "⚠️ User Token (wrong type)",
+        "invalid_or_expired": "❌ Invalid / Expired",
+    }
+    kind_label = kind_map.get(data.get("token_kind", ""), data.get("token_kind", "unknown"))
+    e.add_field(name="Token Kind", value=kind_label, inline=True)
+
+    # /me result
+    me = data.get("me")
+    me_err = data.get("me_raw_error")
+    if me:
+        e.add_field(name="/me", value=f"`id={me.get('id')}` {me.get('name','')}", inline=True)
+    elif me_err:
+        e.add_field(name="/me error", value=_trunc(me_err, 200), inline=False)
+
+    # Permissions
+    perms = data.get("permissions", [])
+    perms_err = data.get("permissions_raw_error")
+    if perms:
+        e.add_field(name="Permissions", value=", ".join(f"`{p}`" for p in perms), inline=False)
+    elif perms_err:
+        e.add_field(name="Permissions error", value=_trunc(perms_err, 200), inline=False)
+    else:
+        e.add_field(name="Permissions", value="*(none returned)*", inline=False)
+
+    # /me/accounts
+    accounts = data.get("accounts", [])
+    accts_err = data.get("accounts_raw_error")
+    if accounts:
+        lines = [
+            f"`{a.get('id')}` **{a.get('name','')}** — {a.get('category','')}"
+            for a in accounts[:5]
+        ]
+        e.add_field(name="/me/accounts", value="\n".join(lines), inline=False)
+    elif accts_err:
+        e.add_field(name="/me/accounts error", value=_trunc(accts_err, 200), inline=False)
+    else:
+        e.add_field(name="/me/accounts", value="*(empty)*", inline=False)
+
+    # /{page_id}
+    page = data.get("page")
+    page_err = data.get("page_raw_error")
+    if page:
+        e.add_field(
+            name=f"/{data.get('page_id')}",
+            value=f"`{page.get('id')}` **{page.get('name','')}** — {page.get('category','')}",
+            inline=False,
+        )
+    elif page_err:
+        e.add_field(name=f"/{data.get('page_id')} error", value=_trunc(page_err, 200), inline=False)
+
+    # Post test — raw body
+    post = data.get("post_test", {})
+    if post:
+        if post.get("success"):
+            e.add_field(name="POST test", value=f"✅ Published! `{post.get('raw_body','')}`", inline=False)
+        else:
+            raw = post.get("raw_body", post.get("error", "no response"))
+            e.add_field(
+                name=f"POST test HTTP {post.get('http_status', '?')}",
+                value=f"```json\n{_trunc(raw, 600)}\n```",
+                inline=False,
+            )
+
+    # Diagnosis
+    if diagnosis:
+        e.add_field(name="Diagnosis", value="\n".join(diagnosis)[:1024], inline=False)
+
+    e.set_footer(text=f"{FOOTER_TEXT} • Facebook Graph API v19.0 — debug")
+    return e

@@ -225,3 +225,146 @@ def fb_get_drafts(limit: int = 10, status: str = "") -> list[dict]:
         ]
     finally:
         con.close()
+
+
+def fb_debug() -> dict:
+    """Full token/page diagnostic — returns raw API responses for every call."""
+    result: dict = {
+        "page_id":       _page_id(),
+        "token_preview": _mask_token(_token()),
+        "token_set":     bool(_token()),
+        "page_id_set":   bool(_page_id()),
+    }
+
+    if not _token():
+        result["diagnosis"] = ["❌ FACEBOOK_PAGE_ACCESS_TOKEN is not set in .env"]
+        return result
+    if not _page_id():
+        result["diagnosis"] = ["❌ FACEBOOK_PAGE_ID is not set in .env"]
+        return result
+
+    # ── 1. GET /me ────────────────────────────────────────────────────────────
+    try:
+        me = _fb_get("me", fields="id,name")
+        result["me"] = me
+        # If /me returns the same id as FACEBOOK_PAGE_ID → page token
+        if me.get("id") == str(_page_id()):
+            result["token_kind"] = "page_token"
+        else:
+            result["token_kind"] = "user_token"
+    except Exception as exc:
+        result["me_raw_error"] = str(exc)
+        result["token_kind"] = "invalid_or_expired"
+
+    # ── 2. GET /me/permissions ────────────────────────────────────────────────
+    try:
+        pdata = _fb_get("me/permissions")
+        granted = [
+            p["permission"]
+            for p in pdata.get("data", [])
+            if p.get("status") == "granted"
+        ]
+        result["permissions"] = granted
+    except Exception as exc:
+        result["permissions_raw_error"] = str(exc)
+        result["permissions"] = []
+
+    # ── 3. GET /me/accounts ───────────────────────────────────────────────────
+    try:
+        accts = _fb_get("me/accounts", fields="id,name,category,tasks")
+        result["accounts"] = accts.get("data", [])
+    except Exception as exc:
+        result["accounts_raw_error"] = str(exc)
+        result["accounts"] = []
+
+    # ── 4. GET /{page_id} ─────────────────────────────────────────────────────
+    try:
+        page = _fb_get(_page_id(), fields="id,name,fan_count,category")
+        result["page"] = page
+    except Exception as exc:
+        result["page_raw_error"] = str(exc)
+
+    # ── 5. POST /{page_id}/feed — capture raw HTTP body ───────────────────────
+    try:
+        payload = {
+            "message":      "[DEBUG PROBE — ignore]",
+            "access_token": _token(),
+        }
+        encoded = urllib.parse.urlencode(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{FB_BASE}/{_page_id()}/feed",
+            data=encoded,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read().decode("utf-8", errors="replace")
+            result["post_test"] = {"success": True, "raw_body": body}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        result["post_test"] = {
+            "success":     False,
+            "http_status": exc.code,
+            "raw_body":    raw,
+        }
+        try:
+            result["post_test"]["parsed"] = json.loads(raw)
+        except Exception:
+            pass
+    except Exception as exc:
+        result["post_test"] = {"success": False, "error": str(exc)}
+
+    # ── Diagnosis ─────────────────────────────────────────────────────────────
+    diagnosis: list[str] = []
+    kind = result.get("token_kind", "unknown")
+
+    if kind == "invalid_or_expired":
+        diagnosis.append("❌ Token is INVALID or EXPIRED — /me call failed")
+    elif kind == "user_token":
+        diagnosis.append(
+            "⚠️ Token is a USER TOKEN — you need a PAGE ACCESS TOKEN.\n"
+            "   Get one from Graph API Explorer → switch dropdown to 'Page Token'."
+        )
+    elif kind == "page_token":
+        diagnosis.append("✅ Token is a PAGE TOKEN")
+
+    required = {"pages_manage_posts", "pages_read_engagement"}
+    granted_set = set(result.get("permissions", []))
+    missing = required - granted_set
+    if missing and kind != "page_token":
+        diagnosis.append(f"❌ Missing permissions: {', '.join(sorted(missing))}")
+    elif not result.get("permissions") and kind == "page_token":
+        diagnosis.append(
+            "ℹ️ /me/permissions returns nothing for page tokens — that is normal.\n"
+            "   Permissions are embedded in the token itself."
+        )
+
+    accts = result.get("accounts", [])
+    page_ids_in_accounts = [str(a.get("id")) for a in accts]
+    if accts and str(_page_id()) not in page_ids_in_accounts:
+        diagnosis.append(
+            f"❌ Page ID {_page_id()} not found in /me/accounts — "
+            "token may belong to a different user or wrong page."
+        )
+    elif accts and str(_page_id()) in page_ids_in_accounts:
+        matched = next(a for a in accts if str(a.get("id")) == str(_page_id()))
+        tasks = matched.get("tasks", [])
+        diagnosis.append(f"✅ Page found in /me/accounts — tasks: {tasks or 'none listed'}")
+
+    post = result.get("post_test", {})
+    if post.get("success"):
+        diagnosis.append("✅ TEST POST SUCCEEDED (was actually published — delete it!)")
+    else:
+        parsed = post.get("parsed", {})
+        fb_err = parsed.get("error", {})
+        if fb_err:
+            diagnosis.append(
+                f"📋 Post error {post.get('http_status')}: "
+                f"[{fb_err.get('type','?')} #{fb_err.get('code','?')}/{fb_err.get('error_subcode','?')}] "
+                f"{fb_err.get('message','')}"
+            )
+        elif post.get("error"):
+            diagnosis.append(f"❌ Post network error: {post['error']}")
+
+    result["diagnosis"] = diagnosis
+    return result
