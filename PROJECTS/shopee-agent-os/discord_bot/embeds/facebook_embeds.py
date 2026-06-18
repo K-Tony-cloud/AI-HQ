@@ -106,6 +106,34 @@ def build_fb_drafts_list_embed(drafts: list[dict]) -> discord.Embed:
     return e
 
 
+def build_fb_schedule_embed(result: dict, message: str, publish_at: str) -> discord.Embed:
+    """Embed for /facebook-schedule — confirms post queued."""
+    if not result.get("success"):
+        e = make_embed("❌ Schedule Failed", color_key="error")
+        e.add_field(name="Error", value=result.get("error", "Unknown error"), inline=False)
+        return e
+
+    e = make_embed(
+        f"📅 Post #{result.get('id')} Scheduled",
+        color_key="queue",
+        description="Post saved to queue. Will not publish until manually approved.",
+    )
+    e.add_field(name="Publish At",      value=f"🕐 **{publish_at}**",           inline=True)
+    e.add_field(name="Status",          value="⏳ Pending approval",             inline=True)
+    e.add_field(
+        name="Message Preview",
+        value=f"```{_trunc(message, 300)}```",
+        inline=False,
+    )
+    e.add_field(
+        name="Next Step",
+        value="Use `/facebook-scheduled` to review · `/facebook-post` to publish when ready.",
+        inline=False,
+    )
+    e.set_footer(text=f"{FOOTER_TEXT} • Manual approval mode")
+    return e
+
+
 def build_fb_debug_embed(data: dict) -> discord.Embed:
     """Embed for /facebook-debug — full token/page diagnostic."""
     diagnosis = data.get("diagnosis", [])

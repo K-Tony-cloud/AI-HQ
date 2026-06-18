@@ -25,6 +25,7 @@ class ShopeeBot(commands.Bot):
         from .commands.revenue_cmds   import RevenueCog
         from .commands.system_cmds    import SystemCog
         from .commands.facebook_cmds  import FacebookCog
+        from .commands.insights_cmds  import InsightsCog
 
         await self.add_cog(DiscoveryCog(self))
         await self.add_cog(PerformanceCog(self))
@@ -37,6 +38,7 @@ class ShopeeBot(commands.Bot):
         await self.add_cog(RevenueCog(self))
         await self.add_cog(SystemCog(self))
         await self.add_cog(FacebookCog(self))
+        await self.add_cog(InsightsCog(self))
 
         if DISCORD_GUILD_ID:
             guild = discord.Object(id=int(DISCORD_GUILD_ID))

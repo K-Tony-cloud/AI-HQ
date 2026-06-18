@@ -16,6 +16,7 @@ from discord_bot.embeds.facebook_embeds import (
     build_fb_drafts_list_embed,
     build_fb_page_info_embed,
     build_fb_post_result_embed,
+    build_fb_schedule_embed,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,3 +142,111 @@ class FacebookCog(commands.Cog, name="Facebook"):
         except Exception as exc:
             logger.error("[FacebookCog] /facebook-debug error: %s", exc)
             await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)
+
+    # ── /facebook-post ────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="facebook-post",
+        description="Publish a post to อะไรของมัน Facebook page immediately",
+    )
+    @app_commands.describe(
+        message="Post content",
+        link="Optional URL to attach",
+    )
+    async def cmd_facebook_post(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        link: str = "",
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.facebook_engine import fb_post_message
+
+            result = await asyncio.to_thread(fb_post_message, message, link)
+            embed  = build_fb_post_result_embed(result, message)
+            await interaction.followup.send(embed=embed)
+            logger.info(
+                "[FacebookCog] /facebook-post by %s — success=%s post_id=%s",
+                interaction.user, result.get("success"), result.get("post_id"),
+            )
+        except Exception as exc:
+            logger.error("[FacebookCog] /facebook-post error: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ── /facebook-post-image ──────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="facebook-post-image",
+        description="Publish a photo post with caption to อะไรของมัน page",
+    )
+    @app_commands.describe(
+        message="Caption for the image",
+        image_url="Public URL of the image (must be accessible by Facebook)",
+    )
+    async def cmd_facebook_post_image(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        image_url: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.insights_engine import fb_post_with_image
+
+            result = await asyncio.to_thread(fb_post_with_image, message, image_url)
+            embed  = build_fb_post_result_embed(result, message)
+            await interaction.followup.send(embed=embed)
+            logger.info(
+                "[FacebookCog] /facebook-post-image by %s — success=%s post_id=%s",
+                interaction.user, result.get("success"), result.get("post_id"),
+            )
+        except Exception as exc:
+            logger.error("[FacebookCog] /facebook-post-image error: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ── /facebook-schedule ────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="facebook-schedule",
+        description="Queue a Facebook post for future publishing (manual approval required)",
+    )
+    @app_commands.describe(
+        message="Post content",
+        publish_at="Publish date and time (YYYY-MM-DD HH:MM, Bangkok time)",
+        post_type="Content type tag",
+        note="Optional note for yourself",
+    )
+    @app_commands.choices(post_type=[
+        app_commands.Choice(name="Comment Bait",     value="comment_bait"),
+        app_commands.Choice(name="Weird Product",    value="weird_product"),
+        app_commands.Choice(name="Nostalgia",        value="nostalgia"),
+        app_commands.Choice(name="Visual Curiosity", value="visual_curiosity"),
+        app_commands.Choice(name="Trending",         value="trending"),
+        app_commands.Choice(name="Affiliate",        value="affiliate"),
+        app_commands.Choice(name="Manual",           value="manual"),
+    ])
+    async def cmd_facebook_schedule(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        publish_at: str,
+        post_type: str = "manual",
+        note: str = "",
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.insights_engine import fb_schedule_post
+
+            result = await asyncio.to_thread(
+                fb_schedule_post, message, publish_at, post_type, "", "", note
+            )
+            embed  = build_fb_schedule_embed(result, message, publish_at)
+            await interaction.followup.send(embed=embed)
+            logger.info(
+                "[FacebookCog] /facebook-schedule by %s — id=%s publish_at=%s",
+                interaction.user, result.get("id"), publish_at,
+            )
+        except Exception as exc:
+            logger.error("[FacebookCog] /facebook-schedule error: %s", exc)
+            await interaction.followup.send(embed=error_embed(str(exc)))
