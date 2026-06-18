@@ -150,35 +150,47 @@ def fb_get_page_insights() -> dict[str, Any]:
     ok, err = _creds_ok()
     if not ok:
         return {"error": err}
+
+    result: dict[str, Any] = {"page_id": _page_id()}
+
+    # Basic page stats (always available)
     try:
-        since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        until = datetime.now().strftime("%Y-%m-%d")
-        metrics = (
-            "page_impressions,"
-            "page_impressions_unique,"
-            "page_engaged_users,"
-            "page_fan_adds,"
-            "page_views_total"
-        )
-        data = _fb_get(
-            f"{_page_id()}/insights",
-            metric=metrics,
-            period="day",
-            since=since,
-            until=until,
-        )
-        result: dict[str, Any] = {"page_id": _page_id(), "since": since, "until": until}
-        for item in data.get("data", []):
-            name   = item["name"]
-            values = item.get("values", [])
-            total  = sum(
-                v.get("value", 0) if isinstance(v.get("value"), (int, float)) else 0
-                for v in values
-            )
-            result[name] = int(total)
-        return result
+        page = _fb_get(_page_id(), fields="id,name,fan_count,followers_count,category")
+        result["fan_count"]       = page.get("fan_count", 0)
+        result["followers_count"] = page.get("followers_count", 0)
+        result["page_name"]       = page.get("name", "")
     except Exception as exc:
-        return {"error": str(exc)}
+        result["page_error"] = str(exc)
+
+    # Insights metrics valid in Graph API v19.0 for standard pages
+    since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    until = datetime.now().strftime("%Y-%m-%d")
+    result["since"] = since
+    result["until"] = until
+
+    _valid_metrics = [
+        "page_views_total",
+        "page_post_engagements",
+        "page_total_actions",
+    ]
+    for metric in _valid_metrics:
+        try:
+            data = _fb_get(
+                f"{_page_id()}/insights/{metric}",
+                period="day",
+                since=since,
+                until=until,
+            )
+            total = sum(
+                v.get("value", 0) if isinstance(v.get("value"), (int, float)) else 0
+                for item in data.get("data", [])
+                for v in item.get("values", [])
+            )
+            result[metric] = int(total)
+        except Exception:
+            result[metric] = 0
+
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,26 +198,29 @@ def fb_get_page_insights() -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fb_get_posts(limit: int = 10) -> list[dict]:
+    """Fetch posts with metrics. Falls back to local DB if API lacks pages_read_engagement."""
     ok, err = _creds_ok()
     if not ok:
         return [{"error": err}]
+
+    api_posts: list[dict] = []
+    api_error: str = ""
+
     try:
         raw = _fb_get(
             f"{_page_id()}/posts",
             fields="id,message,story,created_time,permalink_url",
             limit=limit,
         )
-        result = []
         for p in raw.get("data", []):
             post_id  = p.get("id", "")
             msg_text = (p.get("message") or p.get("story") or "")[:120]
             m        = _get_post_metrics(post_id)
             er = round(
-                (m["reactions"] + m["comments"] + m["shares"]) / max(m["reach"], 1) * 100,
-                4,
+                (m["reactions"] + m["comments"] + m["shares"]) / max(m["reach"], 1) * 100, 4,
             )
             sc = _compute_score(m["reach"], m["reactions"], m["comments"], m["shares"], m["clicks"])
-            result.append({
+            api_posts.append({
                 "post_id":         post_id,
                 "message":         msg_text,
                 "created_at":      p.get("created_time", ""),
@@ -218,10 +233,73 @@ def fb_get_posts(limit: int = 10) -> list[dict]:
                 "clicks":          m["clicks"],
                 "engagement_rate": er,
                 "score":           sc,
+                "source":          "api",
             })
-        return result
     except Exception as exc:
-        return [{"error": str(exc)}]
+        api_error = str(exc)
+
+    if api_posts:
+        return api_posts
+
+    # Fallback: posts from local performance DB + drafts marked as posted
+    db_posts = _get_local_posts(limit)
+    if db_posts:
+        return db_posts
+
+    if api_error:
+        return [{"error": api_error, "hint": "Token may be missing pages_read_engagement scope"}]
+    return []
+
+
+def _get_local_posts(limit: int = 10) -> list[dict]:
+    """Return posts stored locally (performance DB + posted drafts)."""
+    if not config.db_path.exists():
+        return []
+    result: list[dict] = []
+    try:
+        con    = _connect_ro()
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+
+        if PERFORMANCE_TABLE in tables:
+            rows = con.execute(f"""
+                SELECT post_id, created_at, message, reach, impressions, reactions,
+                       comments, shares, clicks, engagement_rate, score
+                FROM {PERFORMANCE_TABLE}
+                ORDER BY created_at DESC LIMIT {limit}
+            """).fetchall()
+            for r in rows:
+                result.append({
+                    "post_id": r[0], "created_at": r[1], "message": r[2],
+                    "reach": r[3], "impressions": r[4], "reactions": r[5],
+                    "comments": r[6], "shares": r[7], "clicks": r[8],
+                    "engagement_rate": r[9], "score": r[10],
+                    "url": "", "source": "local_db",
+                })
+
+        # Also pull from facebook_drafts (posted items)
+        from .facebook_engine import DRAFTS_TABLE, STATUS_POSTED
+        if DRAFTS_TABLE in tables and len(result) < limit:
+            needed = limit - len(result)
+            existing_ids = {r["post_id"] for r in result}
+            rows = con.execute(f"""
+                SELECT post_id, created_at, message, posted_at
+                FROM {DRAFTS_TABLE}
+                WHERE status = '{STATUS_POSTED}' AND post_id != ''
+                ORDER BY posted_at DESC LIMIT {needed}
+            """).fetchall()
+            for r in rows:
+                if r[0] not in existing_ids:
+                    result.append({
+                        "post_id": r[0], "created_at": r[1], "message": r[2][:120],
+                        "reach": 0, "impressions": 0, "reactions": 0,
+                        "comments": 0, "shares": 0, "clicks": 0,
+                        "engagement_rate": 0.0, "score": 0.0,
+                        "url": "", "source": "drafts_db",
+                    })
+        con.close()
+    except Exception:
+        pass
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

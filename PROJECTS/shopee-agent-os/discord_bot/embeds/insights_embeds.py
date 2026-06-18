@@ -26,22 +26,21 @@ def build_page_insights_embed(data: dict) -> discord.Embed:
         e.add_field(name="Error", value=data["error"], inline=False)
         return e
 
+    since = data.get("since", "?")
+    until = data.get("until", "?")
     e = make_embed(
         "📊 Page Insights — Last 30 Days",
         color_key="content",
-        description=f"Page ID: `{data.get('page_id','—')}` · {data.get('since','?')} → {data.get('until','?')}",
+        description=f"**{data.get('page_name','อะไรของมัน')}** · {since} → {until}",
     )
-    e.add_field(name="👁 Impressions",    value=_fmt(data.get("page_impressions", 0)),        inline=True)
-    e.add_field(name="📡 Reach",          value=_fmt(data.get("page_impressions_unique", 0)), inline=True)
-    e.add_field(name="💬 Engaged Users",  value=_fmt(data.get("page_engaged_users", 0)),      inline=True)
-    e.add_field(name="❤️ New Likes",      value=_fmt(data.get("page_fan_adds", 0)),           inline=True)
-    e.add_field(name="🔍 Page Views",     value=_fmt(data.get("page_views_total", 0)),        inline=True)
+    e.add_field(name="👥 Followers",      value=_fmt(data.get("followers_count", 0)),          inline=True)
+    e.add_field(name="❤️ Page Likes",    value=_fmt(data.get("fan_count", 0)),                inline=True)
+    e.add_field(name="🔍 Page Views",    value=_fmt(data.get("page_views_total", 0)),          inline=True)
+    e.add_field(name="💬 Post Engagements", value=_fmt(data.get("page_post_engagements", 0)), inline=True)
+    e.add_field(name="🖱 Total Actions",  value=_fmt(data.get("page_total_actions", 0)),       inline=True)
 
-    total = data.get("page_impressions_unique", 0)
-    eng   = data.get("page_engaged_users", 0)
-    if total > 0:
-        er = round(eng / total * 100, 2)
-        e.add_field(name="📈 Eng. Rate", value=f"{er}%", inline=True)
+    if data.get("page_error"):
+        e.add_field(name="⚠️ Note", value=data["page_error"][:200], inline=False)
 
     e.set_footer(text=f"{FOOTER_TEXT} • Facebook Graph API")
     return e
@@ -139,12 +138,12 @@ def build_last30_embed(data: dict) -> discord.Embed:
     if has_error:
         e.add_field(name="Insights Error", value=pi["error"], inline=False)
     else:
-        e.add_field(name="👁 Total Impressions", value=_fmt(pi.get("page_impressions", 0)),        inline=True)
-        e.add_field(name="📡 Unique Reach",       value=_fmt(pi.get("page_impressions_unique", 0)), inline=True)
-        e.add_field(name="💬 Engaged Users",      value=_fmt(pi.get("page_engaged_users", 0)),      inline=True)
-        e.add_field(name="❤️ New Likes",          value=_fmt(pi.get("page_fan_adds", 0)),           inline=True)
-        e.add_field(name="🔍 Page Views",         value=_fmt(pi.get("page_views_total", 0)),        inline=True)
-        e.add_field(name="📝 Posts Published",    value=str(count),                                 inline=True)
+        e.add_field(name="👥 Followers",       value=_fmt(pi.get("followers_count", 0)),          inline=True)
+        e.add_field(name="❤️ Page Likes",     value=_fmt(pi.get("fan_count", 0)),                inline=True)
+        e.add_field(name="🔍 Page Views",     value=_fmt(pi.get("page_views_total", 0)),          inline=True)
+        e.add_field(name="💬 Engagements",    value=_fmt(pi.get("page_post_engagements", 0)),     inline=True)
+        e.add_field(name="🖱 Total Actions",  value=_fmt(pi.get("page_total_actions", 0)),        inline=True)
+        e.add_field(name="📝 Posts Tracked",  value=str(count),                                  inline=True)
 
     if top:
         msg   = _trunc(top.get("message", "*(no text)*"), 80)
