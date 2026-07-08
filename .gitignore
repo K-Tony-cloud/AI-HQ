@@ -8,12 +8,19 @@ PROJECTS/SheetAppScriptRW01/
 credentials/
 *.json
 !operation-timeline/**/*.json
+!PROJECTS/seo-website/package.json
+!PROJECTS/seo-website/package-lock.json
+!PROJECTS/seo-website/tsconfig.json
+!PROJECTS/seo-website/.vscode/*.json
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 venv/
+
+# Test caches
+.pytest_cache/
 
 # macOS
 .DS_Store

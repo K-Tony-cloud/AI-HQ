@@ -32,3 +32,16 @@ desktop.ini
 
 # Logs
 *.log
+
+# Test / lint caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ephemeral SEO exports (generated at runtime, never commit)
+exports/
+
+# Secrets
+.env
+.env.*
+!.env.example
