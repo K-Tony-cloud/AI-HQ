@@ -1,0 +1,73 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+export async function getStaticPaths() {
+  const CATEGORIES = [
+    { slug: 'home-living',    label: 'บ้านและครัว',        match: 'Home & Living' },
+    { slug: 'mobile-gadgets', label: 'มือถือ & แกดเจ็ต',  match: 'Mobile & Gadgets' },
+    { slug: 'beauty',         label: 'ความงาม',            match: 'Beauty' },
+    { slug: 'health',         label: 'สุขภาพ',             match: 'Health' },
+    { slug: 'mom-baby',       label: 'แม่และเด็ก',         match: 'Mom & Baby' },
+    { slug: 'sports',         label: 'กีฬา',               match: 'Sports & Outdoors' },
+    { slug: 'food',           label: 'อาหาร & เครื่องดื่ม', match: 'Food & Beverages' },
+  ];
+
+  const allArticles = await getCollection('articles', ({ data }) => data.article_status === 'published');
+
+  return CATEGORIES.map(cat => ({
+    params: { cat: cat.slug },
+    props: {
+      label: cat.label,
+      articles: allArticles.filter(a =>
+        a.data.category?.includes(cat.match) || a.data.category === cat.match
+      ).sort((a, b) => new Date(b.data.updated_at).getTime() - new Date(a.data.updated_at).getTime()),
+    },
+  }));
+}
+
+const { cat }     = Astro.params;
+const { label, articles } = Astro.props;
+---
+
+<BaseLayout
+  title={`${label} — คำแนะนำสินค้า`}
+  description={`รวมคำแนะนำและรีวิวสินค้าหมวด ${label} จากข้อมูลยอดขายจริงบน Shopee`}
+  breadcrumbs={[{ name: label, url: Astro.url.href }]}
+>
+  <div class="container" style="padding-top:1.5rem;">
+    <nav class="breadcrumb">
+      <a href="/">หน้าแรก</a>
+      <span>{label}</span>
+    </nav>
+
+    <h1>{label}</h1>
+    <p style="color:var(--color-muted);">
+      บทความคำแนะนำสินค้าหมวด {label} จากข้อมูลยอดขายจริง
+    </p>
+
+    {articles.length > 0 ? (
+      <ul class="article-list">
+        {articles.map(article => (
+          <li>
+            <a href={`/${article.id}`} style="font-size:1.05rem;font-weight:600;">
+              {article.data.title}
+            </a>
+            <div class="article-meta">
+              {new Date(article.data.updated_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}
+            </div>
+            {article.data.description && (
+              <p style="margin:0.3rem 0 0;color:var(--color-muted);font-size:0.95rem;">
+                {article.data.description.slice(0, 120)}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <div style="padding:3rem;text-align:center;background:var(--color-bg-alt);border-radius:var(--radius);">
+        <p style="color:var(--color-muted);">กำลังเตรียมบทความหมวดนี้</p>
+      </div>
+    )}
+  </div>
+</BaseLayout>

@@ -1,0 +1,1327 @@
+"""SEO Affiliate Website Engine — article generation and management.
+
+Generates Thai SEO buying-guide articles from the existing Shopee product
+database.  Data rules:
+  - All product specs, prices, images, and affiliate links come from the DB.
+  - AI (Claude/OpenAI) is used ONLY for: intro paragraph, buying guide prose,
+    transition text, and summary.
+  - AI must NEVER invent specs, prices, scores, or product info.
+  - Template fallback is used when no API key is available.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import textwrap
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import duckdb
+import pandas as pd
+
+from shopee_engine.config import config
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SEO_ARTICLES_TABLE         = "seo_articles"
+SEO_ARTICLE_PRODUCTS_TABLE = "seo_article_products"
+
+ARTICLE_STATUSES = ("draft", "reviewed", "published", "archived")
+
+# Allowed status transitions — all others are forbidden
+_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "draft":     frozenset({"reviewed"}),
+    "reviewed":  frozenset({"draft", "published"}),
+    "published": frozenset({"reviewed", "archived"}),
+    "archived":  frozenset(),
+}
+
+
+def validate_status_transition(from_status: str, to_status: str) -> dict:
+    """Check whether a status transition is permitted.
+
+    Returns {valid: bool, error: str | None}.
+    """
+    if from_status not in _ALLOWED_TRANSITIONS:
+        return {"valid": False, "error": f"Unknown status: '{from_status}'"}
+    if to_status not in ARTICLE_STATUSES:
+        return {"valid": False, "error": f"Unknown target status: '{to_status}'"}
+    if to_status not in _ALLOWED_TRANSITIONS[from_status]:
+        allowed_str = ", ".join(sorted(_ALLOWED_TRANSITIONS[from_status])) or "ไม่มี"
+        return {
+            "valid": False,
+            "error": f"ไม่สามารถเปลี่ยนจาก '{from_status}' → '{to_status}' (อนุญาต: {allowed_str})",
+        }
+    return {"valid": True, "error": None}
+
+SITE_CATEGORIES = [
+    "Home & Living",
+    "Mobile & Gadgets",
+    "Beauty",
+    "Health",
+    "Mom & Baby",
+    "Sports & Outdoors",
+    "Food & Beverages",
+]
+
+# Keyword templates for building article opportunity ideas
+_SEARCH_INTENT_TEMPLATES = [
+    "{category} ราคาไม่เกิน {price}",
+    "{category} ตัวไหนดี",
+    "{category} คุ้มค่าที่สุด",
+    "{category} แนะนำ",
+    "ซื้อ {category} อะไรดี",
+    "{category} สำหรับผู้เริ่มต้น",
+    "{category} ยอดนิยม",
+]
+
+_PRICE_BUCKETS = [500, 1000, 1500, 2000, 3000, 5000]
+
+
+# ---------------------------------------------------------------------------
+# Price formatting — ALL price display must go through this function
+# ---------------------------------------------------------------------------
+
+def format_price(value: int | float | None) -> str:
+    """Format a DB price value (already in THB) for display."""
+    if value is None:
+        return "ไม่ระบุราคา"
+    try:
+        v = int(value)
+        return f"฿{v:,}"
+    except (TypeError, ValueError):
+        return "ไม่ระบุราคา"
+
+
+# ---------------------------------------------------------------------------
+# DB connection
+# ---------------------------------------------------------------------------
+
+def _connect(read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    return duckdb.connect(str(config.db_path), read_only=read_only)
+
+
+# ---------------------------------------------------------------------------
+# Migration — idempotent, safe to run multiple times
+# ---------------------------------------------------------------------------
+
+def run_migration() -> dict[str, str]:
+    """Create SEO tables if they do not exist. Returns {table: status}."""
+    results: dict[str, str] = {}
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        for table in (SEO_ARTICLES_TABLE, SEO_ARTICLE_PRODUCTS_TABLE):
+            count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            results[table] = f"ok ({count} rows)"
+        con.close()
+    except Exception as exc:
+        con.close()
+        raise RuntimeError(f"Migration failed: {exc}") from exc
+    return results
+
+
+def _init_seo_tables(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {SEO_ARTICLES_TABLE} (
+            id                  INTEGER PRIMARY KEY,
+            article_id          VARCHAR UNIQUE NOT NULL,
+            keyword             VARCHAR NOT NULL,
+            category            VARCHAR DEFAULT '',
+            title               VARCHAR DEFAULT '',
+            meta_description    VARCHAR DEFAULT '',
+            content_md          TEXT DEFAULT '',
+            status              VARCHAR DEFAULT 'draft',
+            created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_product_sync   TIMESTAMP,
+            affiliate_disclosure BOOLEAN DEFAULT true,
+            published_path      VARCHAR DEFAULT '',
+            git_commit_hash     VARCHAR DEFAULT ''
+        )
+    """)
+    # Idempotent column additions for future schema evolution
+    for col_def in [
+        ("article_id",          "VARCHAR"),
+        ("affiliate_disclosure","BOOLEAN DEFAULT true"),
+        ("published_path",      "VARCHAR DEFAULT ''"),
+        ("git_commit_hash",     "VARCHAR DEFAULT ''"),
+        ("last_product_sync",   "TIMESTAMP"),
+        ("reviewed_at",         "TIMESTAMP"),
+        ("review_note",         "VARCHAR DEFAULT ''"),
+        ("published_at",        "TIMESTAMP"),
+    ]:
+        try:
+            con.execute(
+                f"ALTER TABLE {SEO_ARTICLES_TABLE} "
+                f"ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}"
+            )
+        except Exception:
+            pass
+
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {SEO_ARTICLE_PRODUCTS_TABLE} (
+            id                  INTEGER PRIMARY KEY,
+            article_id          VARCHAR NOT NULL,
+            itemid              BIGINT,
+            shopid              BIGINT,
+            product_title       VARCHAR DEFAULT '',
+            sale_price          BIGINT DEFAULT 0,
+            image_link          VARCHAR DEFAULT '',
+            affiliate_link      VARCHAR DEFAULT '',
+            affiliate_link_type VARCHAR DEFAULT 'none',
+            opportunity_score   DOUBLE DEFAULT 0,
+            rank_in_article     INTEGER DEFAULT 0,
+            product_status      VARCHAR DEFAULT 'active',
+            synced_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    for col_def in [
+        ("affiliate_link_type", "VARCHAR DEFAULT 'none'"),
+        ("product_status",      "VARCHAR DEFAULT 'active'"),
+        ("synced_at",           "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    ]:
+        try:
+            con.execute(
+                f"ALTER TABLE {SEO_ARTICLE_PRODUCTS_TABLE} "
+                f"ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}"
+            )
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Slug generation
+# ---------------------------------------------------------------------------
+
+def generate_slug(keyword: str) -> str:
+    """Generate a URL-safe slug from a Thai/English keyword."""
+    slug = keyword.strip().lower()
+    slug = re.sub(r"[^฀-๿a-z0-9\s-]", "", slug)
+    slug = re.sub(r"\s+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    if not slug:
+        slug = hashlib.md5(keyword.encode()).hexdigest()[:8]
+    return slug
+
+
+def _unique_article_id(keyword: str, con: duckdb.DuckDBPyConnection) -> str:
+    """Return a unique article_id (slug), appending a suffix if needed."""
+    base = generate_slug(keyword)
+    candidate = base
+    suffix = 2
+    while True:
+        exists = con.execute(
+            f"SELECT COUNT(*) FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+            [candidate],
+        ).fetchone()[0]
+        if not exists:
+            return candidate
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+
+
+def check_duplicate_draft(keyword: str) -> dict | None:
+    """Return existing article dict if any article already exists for this keyword, else None.
+
+    Checks both slug match (article_id) and exact keyword match (case-insensitive).
+    """
+    slug = generate_slug(keyword)
+    con = _connect(read_only=True)
+    try:
+        row = con.execute(
+            f"SELECT article_id, title, keyword, status, updated_at "
+            f"FROM {SEO_ARTICLES_TABLE} "
+            f"WHERE article_id = ? OR LOWER(keyword) = LOWER(?)",
+            [slug, keyword],
+        ).fetchdf()
+        con.close()
+        if row.empty:
+            return None
+        return row.iloc[0].to_dict()
+    except Exception:
+        con.close()
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Keyword / article opportunity ideas
+# ---------------------------------------------------------------------------
+
+def find_keyword_opportunities(
+    category: str | None = None,
+    top: int = 10,
+    min_sales: int = 50,
+) -> list[dict]:
+    """Return ranked article opportunity ideas from product database.
+
+    Uses opportunity_score calculated from actual product data.
+    Does NOT claim to represent Google search volume.
+    Label in UI: "article opportunity score".
+    """
+    con = _connect(read_only=True)
+    try:
+        cat_filter = ""
+        params: list[Any] = []
+        if category:
+            cat_filter = "AND (global_category1 ILIKE ? OR global_category2 ILIKE ? OR global_category3 ILIKE ?)"
+            params = [f"%{category}%", f"%{category}%", f"%{category}%"]
+
+        rows = con.execute(f"""
+            SELECT
+                title,
+                itemid,
+                shopid,
+                sale_price,
+                item_sold,
+                "like" AS likes,
+                shop_rating,
+                item_rating,
+                discount_percentage,
+                global_category1 AS cat1,
+                global_category2 AS cat2,
+                global_category3 AS cat3,
+                image_link,
+                product_link,
+                "product_short link" AS datafeed_link,
+                (
+                    COALESCE(item_sold, 0) * 0.40
+                    + COALESCE("like", 0) * 0.15
+                    + COALESCE(discount_percentage, 0) * 0.15
+                    + COALESCE(shop_rating, 0) * 100 * 0.15
+                    + COALESCE(item_rating, 0) * 100 * 0.15
+                ) AS opportunity_score
+            FROM products
+            WHERE item_sold >= ?
+            {cat_filter}
+            ORDER BY opportunity_score DESC
+            LIMIT ?
+        """, [min_sales] + params + [top * 5]).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if rows.empty:
+        return []
+
+    # Group into keyword ideas by category + price bucket
+    ideas: list[dict] = []
+    seen_cats: set[str] = set()
+
+    for _, row in rows.iterrows():
+        cat = str(row.get("cat3") or row.get("cat2") or row.get("cat1") or "")
+        price = int(row.get("sale_price") or 0)
+
+        # Build keyword ideas from category + price
+        for bucket in _PRICE_BUCKETS:
+            if price <= bucket:
+                kw = f"{cat} ไม่เกิน {bucket:,} บาท"
+                key = f"{cat}_{bucket}"
+                if key not in seen_cats:
+                    ideas.append({
+                        "keyword":            kw,
+                        "category":           cat,
+                        "price_bucket":       bucket,
+                        "top_product_title":  str(row["title"])[:60],
+                        "top_product_price":  format_price(row.get("sale_price")),
+                        "opportunity_score":  round(float(row.get("opportunity_score") or 0), 1),
+                        "estimated_products": 0,
+                    })
+                    seen_cats.add(key)
+                break
+
+        if len(ideas) >= top:
+            break
+
+    # For each idea, count how many products match
+    con2 = _connect(read_only=True)
+    try:
+        for idea in ideas:
+            cat = idea["category"]
+            bucket = idea["price_bucket"]
+            n = con2.execute("""
+                SELECT COUNT(*) FROM products
+                WHERE (global_category3 = ? OR global_category2 = ? OR global_category1 = ?)
+                AND sale_price <= ?
+                AND item_sold >= ?
+            """, [cat, cat, cat, bucket, min_sales]).fetchone()[0]
+            idea["estimated_products"] = int(n)
+    finally:
+        con2.close()
+
+    return sorted(ideas, key=lambda x: x["opportunity_score"], reverse=True)[:top]
+
+
+def suggest_daily_plan(top: int = 5) -> list[dict]:
+    """Suggest articles to create today, combining trends + coverage gaps."""
+    from shopee_engine.trend_engine import get_today_trends
+    trends = get_today_trends()
+
+    seasonal = trends.get("seasonal_theme", "")
+    override = trends.get("override", "")
+
+    ideas = find_keyword_opportunities(top=top * 3)
+
+    boost_keywords: list[str] = []
+    for item in [override, seasonal]:
+        if item:
+            boost_keywords.append(str(item).lower())
+
+    def _score(idea: dict) -> float:
+        base = idea["opportunity_score"]
+        for bk in boost_keywords:
+            if bk and bk in idea["keyword"].lower():
+                base *= 1.5
+        return base
+
+    ideas.sort(key=_score, reverse=True)
+
+    plan = []
+    for idea in ideas[:top]:
+        article_title = f"{idea['estimated_products']} {idea['category']} ไม่เกิน {idea['price_bucket']:,} บาท ที่ดีที่สุด"
+        plan.append({
+            **idea,
+            "suggested_title": article_title,
+            "seasonal_relevance": bool(boost_keywords),
+        })
+
+    return plan
+
+
+# ---------------------------------------------------------------------------
+# Affiliate link resolution
+# ---------------------------------------------------------------------------
+
+def _get_affiliate_lookup() -> dict[str, dict]:
+    """Return {product_link: {affiliate_link, link_type}} from affiliate_products."""
+    try:
+        from shopee_engine.affiliate_products_engine import get_all_affiliate_products
+        raw = get_all_affiliate_products()  # {product_link: affiliate_short_url}
+        return {k: {"affiliate_link": v, "link_type": "confirmed"} for k, v in raw.items()}
+    except Exception:
+        return {}
+
+
+def _resolve_affiliate_link(
+    product_link: str,
+    datafeed_short_link: str | None,
+    lookup: dict[str, dict],
+) -> tuple[str, str]:
+    """Resolve the best affiliate link for a product.
+
+    Returns (link, link_type) where link_type is:
+        'confirmed' — real s.shopee.co.th link from affiliate_products table
+        'datafeed'  — shope.ee redirect from products datafeed
+        'none'      — no link available
+    """
+    if product_link in lookup:
+        entry = lookup[product_link]
+        return entry["affiliate_link"], "confirmed"
+    if datafeed_short_link and datafeed_short_link.strip():
+        return datafeed_short_link.strip(), "datafeed"
+    return "", "none"
+
+
+# ---------------------------------------------------------------------------
+# Product selection for an article
+# ---------------------------------------------------------------------------
+
+def fetch_products_for_keyword(
+    keyword: str,
+    category: str | None = None,
+    price_max: int | None = None,
+    top: int = 7,
+    min_sales: int = 20,
+) -> list[dict]:
+    """Fetch top products from DB for a given keyword.
+
+    All returned data is from the database — no AI inference.
+    """
+    con = _connect(read_only=True)
+    try:
+        parts: list[str] = []
+        params: list[Any] = []
+
+        kw_terms = [t.strip() for t in keyword.replace(",", " ").split() if t.strip()]
+        for term in kw_terms:
+            parts.append("(title ILIKE ? OR description ILIKE ?)")
+            params.extend([f"%{term}%", f"%{term}%"])
+
+        if category:
+            parts.append("(global_category1 ILIKE ? OR global_category2 ILIKE ? OR global_category3 ILIKE ?)")
+            params.extend([f"%{category}%", f"%{category}%", f"%{category}%"])
+
+        if price_max:
+            parts.append("sale_price <= ?")
+            params.append(price_max)
+
+        where = f"WHERE item_sold >= ? AND {' AND '.join(parts)}" if parts else "WHERE item_sold >= ?"
+        params_final = [min_sales] + params
+
+        rows = con.execute(f"""
+            SELECT
+                title,
+                itemid,
+                shopid,
+                sale_price,
+                price AS original_price,
+                item_sold,
+                "like" AS likes,
+                shop_rating,
+                item_rating,
+                discount_percentage,
+                global_category1 AS cat1,
+                global_category2 AS cat2,
+                global_category3 AS cat3,
+                global_brand AS brand,
+                image_link,
+                product_link,
+                "product_short link" AS datafeed_link,
+                description,
+                (
+                    COALESCE(item_sold, 0) * 0.40
+                    + COALESCE("like", 0) * 0.15
+                    + COALESCE(discount_percentage, 0) * 0.15
+                    + COALESCE(shop_rating, 0) * 100 * 0.15
+                    + COALESCE(item_rating, 0) * 100 * 0.15
+                ) AS opportunity_score
+            FROM products
+            {where}
+            ORDER BY opportunity_score DESC
+            LIMIT ?
+        """, params_final + [top]).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if rows.empty:
+        return []
+
+    aff_lookup = _get_affiliate_lookup()
+    results = []
+    for _, row in rows.iterrows():
+        aff_link, link_type = _resolve_affiliate_link(
+            str(row.get("product_link") or ""),
+            str(row.get("datafeed_link") or ""),
+            aff_lookup,
+        )
+        results.append({
+            "title":             str(row.get("title") or ""),
+            "itemid":            int(row.get("itemid") or 0),
+            "shopid":            int(row.get("shopid") or 0),
+            "sale_price":        int(row.get("sale_price") or 0),
+            "sale_price_fmt":    format_price(row.get("sale_price")),
+            "original_price":    int(row.get("original_price") or 0),
+            "original_price_fmt": format_price(row.get("original_price")),
+            "item_sold":         int(row.get("item_sold") or 0),
+            "shop_rating":       float(row.get("shop_rating") or 0),
+            "item_rating":       float(row.get("item_rating") or 0),
+            "discount_pct":      int(row.get("discount_percentage") or 0),
+            "category":          str(row.get("cat3") or row.get("cat2") or row.get("cat1") or ""),
+            "brand":             str(row.get("brand") or ""),
+            "image_link":        str(row.get("image_link") or ""),
+            "product_link":      str(row.get("product_link") or ""),
+            "affiliate_link":    aff_link,
+            "affiliate_link_type": link_type,
+            "opportunity_score": round(float(row.get("opportunity_score") or 0), 1),
+            "description_raw":   str(row.get("description") or "")[:500],
+        })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Article generation
+# ---------------------------------------------------------------------------
+
+def _ai_intro(keyword: str, products: list[dict]) -> str:
+    """Generate intro paragraph using AI (or template fallback)."""
+    try:
+        from shopee_engine.content_engine import call_ai, detect_provider
+        provider = detect_provider()
+        if provider == "template":
+            raise ValueError("no api key")
+
+        top_product = products[0]["title"] if products else keyword
+        product_list = "\n".join(
+            f"- {p['title']} ({p['sale_price_fmt']})" for p in products[:5]
+        )
+        prompt = textwrap.dedent(f"""
+            เขียนย่อหน้าเปิดบทความ SEO ภาษาไทยสำหรับหัวข้อ: "{keyword}"
+
+            สินค้าที่รีวิวในบทความนี้:
+            {product_list}
+
+            กฎสำคัญ:
+            - ใช้ภาษาไทยธรรมชาติ ไม่เป็นทางการมากเกินไป
+            - ห้ามระบุราคา สเปก หรือข้อมูลสินค้าที่ไม่ได้รับมา
+            - ความยาว 2-3 ประโยค
+            - เน้น pain point ของผู้อ่าน
+            - ห้ามขึ้นต้นด้วย "คุณเคย" หรือ "น่าสนใจ"
+        """).strip()
+
+        return call_ai(
+            system="คุณเป็นนักเขียน SEO ภาษาไทยที่เขียนเนื้อหาช่วยคนตัดสินใจซื้อสินค้า",
+            user_prompt=prompt,
+            max_tokens=300,
+        )
+    except Exception:
+        count = len(products)
+        return (
+            f"หากกำลังมองหา {keyword} อยู่ บทความนี้รวบรวม {count} ตัวเลือก "
+            f"ที่คัดสรรจากข้อมูลยอดขายและความนิยมจริงบน Shopee "
+            f"เพื่อช่วยให้ตัดสินใจได้ง่ายขึ้น"
+        )
+
+
+def _ai_buying_guide(keyword: str, products: list[dict]) -> str:
+    """Generate buying guide section using AI (or template fallback)."""
+    try:
+        from shopee_engine.content_engine import call_ai, detect_provider
+        provider = detect_provider()
+        if provider == "template":
+            raise ValueError("no api key")
+
+        prompt = textwrap.dedent(f"""
+            เขียนคำแนะนำการเลือกซื้อ "{keyword}" สำหรับผู้บริโภคชาวไทย
+
+            กฎสำคัญ:
+            - ห้ามระบุหรืออ้างอิงสเปกหรือราคาของสินค้าในรายการที่ให้มา
+            - เขียนเป็นหลักการทั่วไปเท่านั้น เช่น ควรดูอะไรก่อนซื้อ
+            - ความยาว 3-4 ประโยค
+            - ภาษาไทยเป็นธรรมชาติ
+        """).strip()
+
+        return call_ai(
+            system="คุณเป็นนักเขียน SEO ภาษาไทย",
+            user_prompt=prompt,
+            max_tokens=400,
+        )
+    except Exception:
+        return (
+            f"ก่อนตัดสินใจซื้อ {keyword} ควรพิจารณาจากคะแนนรีวิวผู้ซื้อจริง "
+            f"ยอดขายสะสม และเปรียบเทียบราคากับสินค้าในระดับเดียวกัน "
+            f"เลือกร้านที่มีคะแนนร้านสูงและมีนโยบายคืนสินค้าที่ชัดเจน"
+        )
+
+
+def _ai_summary(keyword: str, products: list[dict]) -> str:
+    """Generate summary using AI (or template fallback)."""
+    try:
+        from shopee_engine.content_engine import call_ai, detect_provider
+        provider = detect_provider()
+        if provider == "template":
+            raise ValueError("no api key")
+
+        top3 = products[:3]
+        names = ", ".join(p["title"][:30] for p in top3)
+        prompt = f'เขียนบทสรุปสั้น 2 ประโยคสำหรับบทความ "{keyword}" โดยกล่าวถึงสินค้าที่น่าสนใจ แต่ห้ามระบุราคาหรือสเปกเอง ให้กล่าวถึงชื่อสินค้าได้: {names}'
+
+        return call_ai(
+            system="คุณเป็นนักเขียน SEO ภาษาไทย",
+            user_prompt=prompt,
+            max_tokens=200,
+        )
+    except Exception:
+        return (
+            f"ทั้งหมดนี้คือตัวเลือกที่ดีสำหรับ {keyword} ที่คัดมาจากข้อมูลจริงบน Shopee "
+            f"คลิกที่ปุ่มดูสินค้าเพื่อตรวจสอบราคาล่าสุดและรายละเอียดก่อนตัดสินใจ"
+        )
+
+
+def _build_comparison_table(products: list[dict]) -> str:
+    """Build a markdown comparison table from real product data only."""
+    if not products:
+        return ""
+
+    lines = [
+        "| # | สินค้า | ราคา | ยอดขาย | คะแนน | ส่วนลด |",
+        "|---|-------|------|--------|-------|--------|",
+    ]
+    for i, p in enumerate(products, 1):
+        name = p["title"][:40].replace("|", "｜")
+        price = p["sale_price_fmt"]
+        sold = f'{p["item_sold"]:,}'
+        rating = f'{p["item_rating"]:.1f}⭐' if p["item_rating"] else f'{p["shop_rating"]:.1f}⭐'
+        disc = f'{p["discount_pct"]}%' if p["discount_pct"] else "-"
+        lines.append(f"| {i} | {name} | {price} | {sold} | {rating} | {disc} |")
+
+    return "\n".join(lines)
+
+
+def _build_product_blocks(products: list[dict]) -> str:
+    """Build per-product detail blocks with data from DB only."""
+    blocks = []
+    for i, p in enumerate(products, 1):
+        name = p["title"]
+        price = p["sale_price_fmt"]
+        orig = p["original_price_fmt"] if p["original_price"] > p["sale_price"] else ""
+        disc = f" (ลด {p['discount_pct']}%)" if p["discount_pct"] else ""
+        rating = p["item_rating"] if p["item_rating"] else p["shop_rating"]
+        sold = f'{p["item_sold"]:,}'
+        aff = p["affiliate_link"]
+        img = p["image_link"]
+
+        block = f"### {i}. {name}\n\n"
+        if img:
+            block += f"![{name}]({img})\n\n"
+        block += f"**ราคา:** {price}"
+        if orig:
+            block += f" ~~{orig}~~"
+        block += f"{disc}\n\n"
+        block += f"**คะแนน:** {rating:.1f} ⭐ | **ยอดขาย:** {sold} ชิ้น\n\n"
+        if aff:
+            block += f"[ดูสินค้าบน Shopee]({aff}){{.affiliate-btn}}\n\n"
+        else:
+            block += f"[ดูสินค้าบน Shopee]({p['product_link']}){{.affiliate-btn}}\n\n"
+        blocks.append(block)
+
+    return "\n---\n\n".join(blocks)
+
+
+def _build_faq(keyword: str, products: list[dict]) -> str:
+    """Build an FAQ section — only factual questions, no invented answers."""
+    price_min = min((p["sale_price"] for p in products if p["sale_price"]), default=0)
+    price_max = max((p["sale_price"] for p in products if p["sale_price"]), default=0)
+    count = len(products)
+
+    lines = [
+        "## คำถามที่พบบ่อย (FAQ)\n",
+        f"**{keyword} ราคาเริ่มต้นเท่าไหร่?**\n\n"
+        f"จากข้อมูลในบทความนี้ ราคาเริ่มต้นอยู่ที่ {format_price(price_min)} และสูงสุดที่ {format_price(price_max)}\n",
+        f"**มีตัวเลือกกี่รุ่นในบทความนี้?**\n\nบทความนี้รวบรวม {count} รุ่นที่คัดสรรจากยอดขายและคะแนนรีวิวบน Shopee\n",
+        f"**ซื้อ {keyword} ที่ไหนดี?**\n\nสามารถซื้อได้ผ่านลิงก์ Shopee ในบทความนี้ได้เลย มีระบบคุ้มครองผู้ซื้อของ Shopee\n",
+    ]
+    return "\n".join(lines)
+
+
+def generate_article_draft(
+    keyword: str,
+    category: str | None = None,
+    price_max: int | None = None,
+    top_products: int = 5,
+) -> dict:
+    """Generate a full SEO article draft and save to seo_articles table.
+
+    Returns:
+        {
+          "success": bool,
+          "article_id": str,
+          "title": str,
+          "products_count": int,
+          "has_confirmed_affiliate": bool,
+          "products_without_link": int,
+          "ai_used": bool,
+          "error": str | None,
+        }
+    """
+    products = fetch_products_for_keyword(
+        keyword=keyword,
+        category=category,
+        price_max=price_max,
+        top=top_products,
+    )
+
+    if not products:
+        return {
+            "success": False,
+            "error": f"ไม่พบสินค้าที่ตรงกับ '{keyword}' ในฐานข้อมูล",
+        }
+
+    count = len(products)
+    title = f"{count} {keyword} ที่ดีที่สุด (อัปเดต {datetime.now().year})"
+    meta_desc = (
+        f"รวม {count} {keyword} คัดสรรจากข้อมูลยอดขายจริงบน Shopee "
+        f"พร้อมตารางเปรียบเทียบราคาและรีวิว"
+    )
+
+    # Build content sections — data from DB only except AI text sections
+    intro          = _ai_intro(keyword, products)
+    buying_guide   = _ai_buying_guide(keyword, products)
+    summary        = _ai_summary(keyword, products)
+    comp_table     = _build_comparison_table(products)
+    product_blocks = _build_product_blocks(products)
+    faq            = _build_faq(keyword, products)
+
+    from shopee_engine.ai_status import get_ai_status
+    ai_used = get_ai_status()["active"]
+
+    # Frontmatter
+    now_str = datetime.now(timezone.utc).isoformat()
+    cat = category or products[0].get("category", "")
+    product_ids = [p["itemid"] for p in products]
+
+    frontmatter = textwrap.dedent(f"""\
+        ---
+        article_id: "{{ARTICLE_ID}}"
+        keyword: "{keyword}"
+        category: "{cat}"
+        title: "{title}"
+        description: "{meta_desc}"
+        product_ids: {product_ids}
+        created_at: "{now_str}"
+        updated_at: "{now_str}"
+        last_product_sync: "{now_str}"
+        article_status: "draft"
+        affiliate_disclosure: true
+        ---
+    """)
+
+    body = f"""\
+## บทนำ
+
+{intro}
+
+## ตารางเปรียบเทียบ
+
+{comp_table}
+
+## แนะนำสินค้า
+
+{product_blocks}
+
+## คำแนะนำการเลือกซื้อ
+
+{buying_guide}
+
+{faq}
+
+## บทสรุป
+
+{summary}
+
+---
+
+*บทความนี้มีลิงก์ Affiliate — เมื่อซื้อสินค้าผ่านลิงก์ในบทความ ผู้เขียนอาจได้รับค่าคอมมิชชัน โดยไม่มีผลต่อราคาสินค้าสำหรับผู้ซื้อ*
+"""
+
+    content_md = frontmatter + "\n" + body
+
+    # Save to DB — atomic transaction; rollback on any INSERT failure
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        article_id = _unique_article_id(keyword, con)
+
+        # Replace placeholder in frontmatter
+        content_md = content_md.replace("{ARTICLE_ID}", article_id)
+
+        con.begin()
+        try:
+            next_id = (con.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {SEO_ARTICLES_TABLE}").fetchone()[0])
+            con.execute(f"""
+                INSERT INTO {SEO_ARTICLES_TABLE}
+                    (id, article_id, keyword, category, title, meta_description,
+                     content_md, status, created_at, updated_at, last_product_sync, affiliate_disclosure)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true)
+            """, [next_id, article_id, keyword, cat, title, meta_desc, content_md])
+
+            # Save product relationships
+            for rank, p in enumerate(products, 1):
+                prod_id = con.execute(
+                    f"SELECT COALESCE(MAX(id), 0) + 1 FROM {SEO_ARTICLE_PRODUCTS_TABLE}"
+                ).fetchone()[0]
+                con.execute(f"""
+                    INSERT INTO {SEO_ARTICLE_PRODUCTS_TABLE}
+                        (id, article_id, itemid, shopid, product_title, sale_price,
+                         image_link, affiliate_link, affiliate_link_type,
+                         opportunity_score, rank_in_article, product_status, synced_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+                """, [
+                    prod_id, article_id,
+                    p["itemid"], p["shopid"], p["title"], p["sale_price"],
+                    p["image_link"], p["affiliate_link"], p["affiliate_link_type"],
+                    p["opportunity_score"], rank,
+                ])
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
+
+        con.close()
+    except Exception as exc:
+        con.close()
+        raise RuntimeError(f"Failed to save article draft: {exc}") from exc
+
+    confirmed = sum(1 for p in products if p["affiliate_link_type"] == "confirmed")
+    no_link   = sum(1 for p in products if p["affiliate_link_type"] == "none")
+
+    return {
+        "success":                 True,
+        "article_id":              article_id,
+        "title":                   title,
+        "keyword":                 keyword,
+        "category":                cat,
+        "products_count":          count,
+        "has_confirmed_affiliate": confirmed > 0,
+        "confirmed_links":         confirmed,
+        "datafeed_links":          count - confirmed - no_link,
+        "products_without_link":   no_link,
+        "ai_used":                 ai_used,
+        "content_preview":         body[:400],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Article management
+# ---------------------------------------------------------------------------
+
+def get_article(article_id: str) -> dict | None:
+    con = _connect(read_only=True)
+    try:
+        row = con.execute(
+            f"SELECT * FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+        con.close()
+        if row.empty:
+            return None
+        return row.iloc[0].to_dict()
+    except Exception:
+        con.close()
+        raise
+
+
+def get_article_product_count(article_id: str) -> int:
+    """Return number of products linked to an article."""
+    con = _connect(read_only=True)
+    try:
+        n = con.execute(
+            f"SELECT COUNT(*) FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?",
+            [article_id],
+        ).fetchone()[0]
+        con.close()
+        return int(n)
+    except Exception:
+        con.close()
+        raise
+
+
+def list_articles(status: str | None = None, limit: int = 20) -> list[dict]:
+    con = _connect(read_only=True)
+    try:
+        if status:
+            df = con.execute(
+                f"SELECT id, article_id, keyword, category, title, status, created_at, updated_at "
+                f"FROM {SEO_ARTICLES_TABLE} WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
+                [status, limit],
+            ).fetchdf()
+        else:
+            df = con.execute(
+                f"SELECT id, article_id, keyword, category, title, status, created_at, updated_at "
+                f"FROM {SEO_ARTICLES_TABLE} ORDER BY updated_at DESC LIMIT ?",
+                [limit],
+            ).fetchdf()
+        con.close()
+        return df.to_dict("records")
+    except Exception:
+        con.close()
+        raise
+
+
+def get_article_stats() -> dict:
+    con = _connect(read_only=True)
+    try:
+        df = con.execute(
+            f"SELECT status, COUNT(*) AS cnt FROM {SEO_ARTICLES_TABLE} GROUP BY status"
+        ).fetchdf()
+        product_count = con.execute(
+            f"SELECT COUNT(*) FROM {SEO_ARTICLE_PRODUCTS_TABLE}"
+        ).fetchone()[0]
+        confirmed = con.execute(
+            f"SELECT COUNT(*) FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE affiliate_link_type = 'confirmed'"
+        ).fetchone()[0]
+        con.close()
+        stats = {row["status"]: int(row["cnt"]) for _, row in df.iterrows()}
+        return {
+            "draft":              stats.get("draft", 0),
+            "reviewed":           stats.get("reviewed", 0),
+            "published":          stats.get("published", 0),
+            "archived":           stats.get("archived", 0),
+            "total_products":     int(product_count),
+            "confirmed_links":    int(confirmed),
+        }
+    except Exception:
+        con.close()
+        raise
+
+
+def update_article_status(article_id: str, new_status: str) -> bool:
+    if new_status not in ARTICLE_STATUSES:
+        raise ValueError(f"Invalid status: {new_status}. Must be one of {ARTICLE_STATUSES}")
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        # DuckDB rowcount is unreliable after UPDATE — check existence first
+        exists = con.execute(
+            f"SELECT COUNT(*) FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+            [article_id],
+        ).fetchone()[0]
+        if not exists:
+            con.close()
+            return False
+        con.execute(
+            f"UPDATE {SEO_ARTICLES_TABLE} SET status = ?, updated_at = CURRENT_TIMESTAMP "
+            f"WHERE article_id = ?",
+            [new_status, article_id],
+        )
+        con.close()
+        return True
+    except Exception:
+        con.close()
+        raise
+
+
+def update_published_info(article_id: str, published_path: str, git_hash: str) -> None:
+    con = _connect(read_only=False)
+    try:
+        con.execute(f"""
+            UPDATE {SEO_ARTICLES_TABLE}
+            SET status = 'published',
+                published_path = ?,
+                git_commit_hash = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE article_id = ?
+        """, [published_path, git_hash, article_id])
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Article validation (pre-publish checks)
+# ---------------------------------------------------------------------------
+
+def validate_article_for_publish(article_id: str) -> dict:
+    """Run all pre-publish validations. Returns {valid: bool, errors: list, warnings: list}."""
+    errors: list[str]   = []
+    warnings: list[str] = []
+
+    con = _connect(read_only=True)
+    try:
+        article = con.execute(
+            f"SELECT * FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+
+        if article.empty:
+            return {"valid": False, "errors": [f"Article '{article_id}' not found"], "warnings": []}
+
+        row = article.iloc[0]
+        status = str(row.get("status") or "")
+        title  = str(row.get("title") or "")
+        meta   = str(row.get("meta_description") or "")
+        content = str(row.get("content_md") or "")
+
+        if status != "reviewed":
+            errors.append(f"Status must be 'reviewed' before publishing (current: '{status}')")
+        if not title:
+            errors.append("Article title is empty")
+        if not meta:
+            warnings.append("Meta description is empty — SEO impact")
+        if len(content) < 500:
+            errors.append("Article content is too short (< 500 chars)")
+
+        products = con.execute(
+            f"SELECT * FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+
+        if products.empty:
+            errors.append("No products linked to this article")
+        else:
+            no_link = products[products["affiliate_link"].isna() | (products["affiliate_link"] == "")]
+            if not no_link.empty:
+                warnings.append(
+                    f"{len(no_link)} product(s) have no affiliate link: "
+                    + ", ".join(str(r) for r in no_link["product_title"].head(3))
+                )
+            no_confirmed = products[products["affiliate_link_type"] != "confirmed"]
+            if not no_confirmed.empty:
+                warnings.append(
+                    f"{len(no_confirmed)} product(s) use datafeed links (commission not guaranteed)"
+                )
+
+        con.close()
+    except Exception as exc:
+        con.close()
+        return {"valid": False, "errors": [str(exc)], "warnings": []}
+
+    return {
+        "valid":    len(errors) == 0,
+        "errors":   errors,
+        "warnings": warnings,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Pre-review validation (lighter than pre-publish — doesn't gate on "reviewed" status)
+# ---------------------------------------------------------------------------
+
+def validate_article_for_review(article_id: str) -> dict:
+    """Run checks required before approving an article to 'reviewed' status."""
+    errors: list[str]   = []
+    warnings: list[str] = []
+
+    con = _connect(read_only=True)
+    try:
+        article = con.execute(
+            f"SELECT * FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+
+        if article.empty:
+            return {"valid": False, "errors": [f"Article '{article_id}' not found"], "warnings": []}
+
+        row      = article.iloc[0]
+        title    = str(row.get("title") or "")
+        meta     = str(row.get("meta_description") or "")
+        content  = str(row.get("content_md") or "")
+        keyword  = str(row.get("keyword") or "")
+        category = str(row.get("category") or "")
+
+        if not title:
+            errors.append("Title ยังว่างอยู่")
+        if not keyword:
+            errors.append("Keyword ยังว่างอยู่")
+        if not category:
+            warnings.append("Category ไม่ได้ระบุ — กระทบ URL routing")
+        if not meta:
+            warnings.append("Meta description ยังว่างอยู่ — กระทบ SEO")
+        if len(content) < 500:
+            errors.append(f"Content สั้นเกินไป ({len(content)} ตัวอักษร ต้องการอย่างน้อย 500)")
+
+        products = con.execute(
+            f"SELECT * FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+
+        if products.empty:
+            errors.append("ไม่มีสินค้าในบทความ")
+        else:
+            no_link = products[
+                products["affiliate_link"].isna() | (products["affiliate_link"] == "")
+            ]
+            if not no_link.empty:
+                warnings.append(f"{len(no_link)} สินค้าไม่มี affiliate link")
+            no_confirmed = products[products["affiliate_link_type"] != "confirmed"]
+            if not no_confirmed.empty:
+                warnings.append(
+                    f"{len(no_confirmed)} สินค้าใช้ datafeed link (คอมมิชชันไม่รับประกัน)"
+                )
+
+        con.close()
+    except Exception as exc:
+        con.close()
+        return {"valid": False, "errors": [str(exc)], "warnings": []}
+
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# Article review workflow
+# ---------------------------------------------------------------------------
+
+def review_article(article_id: str, action: str, note: str = "") -> dict:
+    """Change article status during editorial review.
+
+    action='approve':         draft → reviewed  (runs pre-review validation)
+    action='return_to_draft': reviewed → draft   (no validation required)
+
+    Returns {success, action, article_id, from_status, to_status, warnings?, error?}
+    """
+    if action not in ("approve", "return_to_draft"):
+        return {"success": False, "error": f"Invalid action: '{action}'"}
+
+    # Load current status
+    con_r = _connect(read_only=True)
+    try:
+        row = con_r.execute(
+            f"SELECT status FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchone()
+        con_r.close()
+    except Exception as exc:
+        con_r.close()
+        return {"success": False, "error": str(exc)}
+
+    if not row:
+        return {"success": False, "error": f"Article '{article_id}' not found"}
+
+    current_status = row[0]
+
+    # Enforce strict source-status requirements for each action
+    if action == "approve":
+        if current_status != "draft":
+            return {
+                "success": False,
+                "error": f"approve ใช้ได้เฉพาะ draft → reviewed (status ปัจจุบัน: '{current_status}')",
+            }
+        to_status = "reviewed"
+    else:  # return_to_draft
+        if current_status != "reviewed":
+            return {
+                "success": False,
+                "error": f"return_to_draft ใช้ได้เฉพาะ reviewed → draft (status ปัจจุบัน: '{current_status}')",
+            }
+        to_status = "draft"
+
+    validation_warnings: list[str] = []
+    if action == "approve":
+        val = validate_article_for_review(article_id)
+        if not val["valid"]:
+            return {
+                "success":  False,
+                "blocked":  True,
+                "errors":   val["errors"],
+                "warnings": val["warnings"],
+                "error":    "Validation errors: " + "; ".join(val["errors"]),
+            }
+        validation_warnings = val.get("warnings", [])
+
+    con_w = _connect(read_only=False)
+    try:
+        _init_seo_tables(con_w)
+        if action == "approve":
+            con_w.execute(f"""
+                UPDATE {SEO_ARTICLES_TABLE}
+                SET status = 'reviewed',
+                    reviewed_at = CURRENT_TIMESTAMP,
+                    review_note = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE article_id = ?
+            """, [note or "", article_id])
+        else:
+            con_w.execute(f"""
+                UPDATE {SEO_ARTICLES_TABLE}
+                SET status = 'draft',
+                    review_note = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE article_id = ?
+            """, [note or "", article_id])
+        con_w.close()
+    except Exception as exc:
+        con_w.close()
+        return {"success": False, "error": str(exc)}
+
+    return {
+        "success":     True,
+        "action":      "approved" if action == "approve" else "returned_to_draft",
+        "article_id":  article_id,
+        "from_status": current_status,
+        "to_status":   to_status,
+        "warnings":    validation_warnings,
+        "note":        note,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Product refresh
+# ---------------------------------------------------------------------------
+
+def refresh_article_products(article_id: str) -> dict:
+    """Re-sync product prices, images, and affiliate links from current DB.
+
+    Rules:
+    - Updates: sale_price, image_link, affiliate_link, affiliate_link_type
+    - If product not found in products table: mark product_status='not_found'
+    - If out of stock: mark product_status='out_of_stock'
+    - NEVER auto-replace products or publish automatically
+    """
+    con = _connect(read_only=True)
+    try:
+        article_products = con.execute(
+            f"SELECT * FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if article_products.empty:
+        return {"success": False, "error": "No products found for this article"}
+
+    aff_lookup = _get_affiliate_lookup()
+    updated = 0
+    not_found = 0
+    out_of_stock = 0
+
+    con2 = _connect(read_only=False)
+    try:
+        for _, prod_row in article_products.iterrows():
+            itemid = int(prod_row.get("itemid") or 0)
+            shopid = int(prod_row.get("shopid") or 0)
+
+            result = con2.execute("""
+                SELECT title, sale_price, image_link, product_link,
+                       "product_short link" AS datafeed_link, stock
+                FROM products
+                WHERE itemid = ? AND shopid = ?
+                LIMIT 1
+            """, [itemid, shopid]).fetchdf()
+
+            if result.empty:
+                con2.execute(f"""
+                    UPDATE {SEO_ARTICLE_PRODUCTS_TABLE}
+                    SET product_status = 'not_found', synced_at = CURRENT_TIMESTAMP
+                    WHERE article_id = ? AND itemid = ? AND shopid = ?
+                """, [article_id, itemid, shopid])
+                not_found += 1
+                continue
+
+            p = result.iloc[0]
+            stock_val = p.get("stock")
+            stock = int(stock_val) if stock_val is not None else 1
+            new_status = "out_of_stock" if stock == 0 else "active"
+            if stock == 0:
+                out_of_stock += 1
+
+            aff_link, link_type = _resolve_affiliate_link(
+                str(p.get("product_link") or ""),
+                str(p.get("datafeed_link") or ""),
+                aff_lookup,
+            )
+
+            con2.execute(f"""
+                UPDATE {SEO_ARTICLE_PRODUCTS_TABLE}
+                SET sale_price = ?,
+                    image_link = ?,
+                    affiliate_link = ?,
+                    affiliate_link_type = ?,
+                    product_status = ?,
+                    synced_at = CURRENT_TIMESTAMP
+                WHERE article_id = ? AND itemid = ? AND shopid = ?
+            """, [
+                int(p.get("sale_price") or 0),
+                str(p.get("image_link") or ""),
+                aff_link, link_type, new_status,
+                article_id, itemid, shopid,
+            ])
+            updated += 1
+
+        # Update last_product_sync on the article
+        con2.execute(f"""
+            UPDATE {SEO_ARTICLES_TABLE}
+            SET last_product_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE article_id = ?
+        """, [article_id])
+        con2.close()
+    except Exception:
+        con2.close()
+        raise
+
+    needs_review = not_found > 0 or out_of_stock > 0
+    return {
+        "success":       True,
+        "updated":       updated,
+        "not_found":     not_found,
+        "out_of_stock":  out_of_stock,
+        "needs_review":  needs_review,
+        "message":       (
+            f"Refreshed {updated} products. "
+            + (f"{not_found} not found. " if not_found else "")
+            + (f"{out_of_stock} out of stock. " if out_of_stock else "")
+            + ("Manual review required." if needs_review else "All products active.")
+        ),
+    }

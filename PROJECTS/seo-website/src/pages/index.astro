@@ -1,0 +1,77 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const allArticles = await getCollection('articles', ({ data }) => data.article_status === 'published');
+const latest = allArticles
+  .sort((a, b) => new Date(b.data.updated_at).getTime() - new Date(a.data.updated_at).getTime())
+  .slice(0, 6);
+
+const CATEGORIES = [
+  { name: 'บ้านและครัว',       slug: 'home-living',    emoji: '🏠' },
+  { name: 'มือถือ & แกดเจ็ต',  slug: 'mobile-gadgets', emoji: '📱' },
+  { name: 'ความงาม',           slug: 'beauty',         emoji: '💄' },
+  { name: 'สุขภาพ',            slug: 'health',         emoji: '💊' },
+  { name: 'แม่และเด็ก',        slug: 'mom-baby',       emoji: '👶' },
+  { name: 'กีฬา',              slug: 'sports',         emoji: '⚽' },
+  { name: 'อาหาร & เครื่องดื่ม', slug: 'food',         emoji: '🍜' },
+];
+---
+
+<BaseLayout
+  title="ซื้อไหนดี — ศูนย์รวมคำแนะนำสินค้าจากข้อมูลจริง"
+  description="เปรียบเทียบสินค้าและอ่านรีวิวจากข้อมูลยอดขายจริงบน Shopee ช่วยคุณตัดสินใจได้ง่ายขึ้น"
+>
+  <div style="background:linear-gradient(135deg,#fff7ed,#fff);border-bottom:1px solid var(--color-border);padding:3rem 0;">
+    <div class="container" style="text-align:center;">
+      <h1 style="font-size:2.2rem;margin:0 0 0.75rem;">ซื้อไหนดี?</h1>
+      <p style="color:var(--color-muted);font-size:1.1rem;margin:0 0 1.5rem;">
+        คำแนะนำสินค้าจากข้อมูลยอดขายจริง ช่วยคุณเลือกสินค้าได้ถูกต้อง
+      </p>
+    </div>
+  </div>
+
+  <div class="container" style="padding-top:2rem;">
+    <section>
+      <h2>หมวดหมู่สินค้า</h2>
+      <div class="category-grid">
+        {CATEGORIES.map(cat => (
+          <a href={`/category/${cat.slug}`} class="category-card">
+            <span class="emoji">{cat.emoji}</span>
+            {cat.name}
+          </a>
+        ))}
+      </div>
+    </section>
+
+    {latest.length > 0 && (
+      <section style="margin-top:2rem;">
+        <h2>บทความล่าสุด</h2>
+        <ul class="article-list">
+          {latest.map(article => (
+            <li>
+              <a href={`/${article.id}`} style="font-size:1.05rem;font-weight:600;">
+                {article.data.title}
+              </a>
+              <div class="article-meta">
+                {article.data.category && <span>{article.data.category} · </span>}
+                {new Date(article.data.updated_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}
+              </div>
+              {article.data.description && (
+                <p style="margin:0.3rem 0 0;color:var(--color-muted);font-size:0.95rem;">
+                  {article.data.description.slice(0, 120)}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    {latest.length === 0 && (
+      <div style="margin-top:2rem;padding:3rem;text-align:center;background:var(--color-bg-alt);border-radius:var(--radius);">
+        <p style="color:var(--color-muted);">กำลังเตรียมบทความ เร็ว ๆ นี้</p>
+      </div>
+    )}
+  </div>
+</BaseLayout>

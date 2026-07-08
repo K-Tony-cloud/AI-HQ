@@ -1,0 +1,134 @@
+---
+export interface Props {
+  title: string;
+  description?: string;
+  canonicalUrl?: string;
+  ogImage?: string;
+  articleSchema?: object;
+  breadcrumbs?: Array<{ name: string; url: string }>;
+}
+
+const {
+  title,
+  description = 'รวมรีวิวสินค้าและคำแนะนำการซื้อจากข้อมูลยอดขายจริงบน Shopee',
+  canonicalUrl = Astro.url.href,
+  ogImage,
+  articleSchema,
+  breadcrumbs,
+} = Astro.props;
+
+const siteUrl   = import.meta.env.SITE || Astro.site?.toString() || 'http://localhost:4321';
+const siteName  = 'ซื้อไหนดี — ศูนย์รวมคำแนะนำสินค้า';
+const fullTitle = `${title} | ${siteName}`;
+
+const breadcrumbSchema = breadcrumbs && breadcrumbs.length > 0 ? {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'หน้าแรก', item: siteUrl },
+    ...breadcrumbs.map((b, i) => ({
+      '@type': 'ListItem',
+      position: i + 2,
+      name: b.name,
+      item: b.url,
+    })),
+  ],
+} : null;
+---
+
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="generator" content={Astro.generator} />
+
+  <!-- SEO -->
+  <title>{fullTitle}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonicalUrl} />
+  <meta name="robots" content="index, follow" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:title"       content={fullTitle} />
+  <meta property="og:description" content={description} />
+  <meta property="og:url"         content={canonicalUrl} />
+  <meta property="og:site_name"   content={siteName} />
+  {ogImage && <meta property="og:image" content={ogImage} />}
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content={fullTitle} />
+  <meta name="twitter:description" content={description} />
+  {ogImage && <meta name="twitter:image" content={ogImage} />}
+
+  <!-- Structured Data -->
+  {articleSchema && (
+    <script type="application/ld+json" set:html={JSON.stringify(articleSchema)} />
+  )}
+  {breadcrumbSchema && (
+    <script type="application/ld+json" set:html={JSON.stringify(breadcrumbSchema)} />
+  )}
+
+  <!-- Google Search Console verification (add GOOGLE_SITE_VERIFICATION env) -->
+  {import.meta.env.GOOGLE_SITE_VERIFICATION && (
+    <meta name="google-site-verification" content={import.meta.env.GOOGLE_SITE_VERIFICATION} />
+  )}
+
+  <!-- Cloudflare Web Analytics (add CF_ANALYTICS_TOKEN env) -->
+  {import.meta.env.CF_ANALYTICS_TOKEN && (
+    <script
+      defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon={`{"token": "${import.meta.env.CF_ANALYTICS_TOKEN}"}`}
+    />
+  )}
+
+  <link rel="stylesheet" href="/styles/global.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container" style="display:flex;align-items:center;justify-content:space-between;padding-top:0.75rem;padding-bottom:0.75rem;">
+      <a href="/" class="site-logo" style="font-size:1.3rem;font-weight:700;color:var(--color-primary);text-decoration:none;">
+        ซื้อไหนดี
+      </a>
+      <nav style="display:flex;gap:1.5rem;font-size:0.95rem;">
+        <a href="/">หน้าแรก</a>
+        <a href="/category/home-living">บ้านและครัว</a>
+        <a href="/category/mobile-gadgets">มือถือ&แกดเจ็ต</a>
+        <a href="/about">เกี่ยวกับเรา</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <slot />
+  </main>
+
+  <footer style="background:var(--color-bg-alt);border-top:1px solid var(--color-border);margin-top:3rem;padding:2rem 0;font-size:0.85rem;color:var(--color-muted);">
+    <div class="container" style="display:flex;flex-wrap:wrap;gap:1rem;justify-content:space-between;align-items:center;">
+      <div>
+        <strong>ซื้อไหนดี</strong> — คำแนะนำสินค้าจากข้อมูลจริง
+      </div>
+      <nav style="display:flex;gap:1rem;">
+        <a href="/about" style="color:var(--color-muted);">เกี่ยวกับเรา</a>
+        <a href="/contact" style="color:var(--color-muted);">ติดต่อ</a>
+        <a href="/privacy-policy" style="color:var(--color-muted);">นโยบายความเป็นส่วนตัว</a>
+        <a href="/affiliate-disclosure" style="color:var(--color-muted);">Affiliate Disclosure</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>
+
+<style>
+  .site-header {
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 100;
+  }
+</style>

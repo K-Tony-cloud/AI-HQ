@@ -141,12 +141,12 @@ _THAI_SLANG = [
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_today_trends() -> dict:
+def get_today_trends(for_date: datetime | None = None) -> dict:
     """
-    Return trend data for today.
+    Return trend data for a given date (defaults to today).
     Checks calendar override, seasonal context, weekly mood, and viral topic bank.
     """
-    now     = datetime.now(tz=TZ)
+    now     = for_date or datetime.now(tz=TZ)
     month   = now.month
     day     = now.day
     weekday = now.weekday()

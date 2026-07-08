@@ -1,0 +1,43 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+const updated = '2026-07-08';
+---
+
+<BaseLayout
+  title="Affiliate Disclosure"
+  description="ข้อมูลการเปิดเผย Affiliate ของเว็บไซต์ ซื้อไหนดี"
+  breadcrumbs={[{ name: 'Affiliate Disclosure', url: Astro.url.href }]}
+>
+  <div class="container" style="max-width:740px;padding-top:2rem;">
+    <nav class="breadcrumb"><a href="/">หน้าแรก</a><span>Affiliate Disclosure</span></nav>
+    <h1>Affiliate Disclosure</h1>
+    <p style="color:var(--color-muted);font-size:0.9rem;">อัปเดตล่าสุด: {updated}</p>
+
+    <div class="disclosure-banner" style="margin-top:1.5rem;">
+      เว็บไซต์นี้เข้าร่วมโปรแกรม Shopee Affiliate และอาจได้รับค่าคอมมิชชันจากการซื้อสินค้าผ่านลิงก์ในบทความ
+    </div>
+
+    <h2>เราคือใคร</h2>
+    <p>
+      ซื้อไหนดี คือเว็บไซต์ที่ให้คำแนะนำสินค้าโดยใช้ข้อมูลจริงจาก Shopee
+      เราเข้าร่วมโปรแกรม Shopee Affiliate ซึ่งทำให้เราได้รับค่าคอมมิชชันเล็กน้อยเมื่อผู้อ่านซื้อสินค้าผ่านลิงก์ที่เราแนะนำ
+    </p>
+
+    <h2>ผลกระทบต่อผู้อ่าน</h2>
+    <ul>
+      <li>ราคาสินค้าสำหรับคุณไม่เปลี่ยนแปลงไม่ว่าจะซื้อผ่านลิงก์ของเราหรือไม่</li>
+      <li>เราคัดสรรสินค้าจากข้อมูลยอดขายและคะแนนรีวิวจริง ไม่ใช่จากค่าตอบแทน</li>
+      <li>บทความทุกชิ้นมีป้ายแจ้งเตือน Affiliate อยู่ด้านบน</li>
+    </ul>
+
+    <h2>ความโปร่งใส</h2>
+    <p>
+      เราให้คำแนะนำตามข้อมูลจริงเท่านั้น ไม่มีผู้ผลิตหรือแบรนด์ใดจ่ายเงินให้เราเพื่อแนะนำสินค้า
+      รายได้จาก Affiliate ช่วยให้เราดูแลเว็บไซต์นี้ต่อไปได้
+    </p>
+
+    <p style="margin-top:2rem;">
+      หากมีคำถาม ติดต่อได้ที่ <a href="/contact">หน้าติดต่อ</a>
+    </p>
+  </div>
+</BaseLayout>

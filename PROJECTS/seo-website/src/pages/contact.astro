@@ -1,0 +1,21 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="ติดต่อเรา"
+  description="ติดต่อทีมงาน ซื้อไหนดี"
+  breadcrumbs={[{ name: 'ติดต่อ', url: Astro.url.href }]}
+>
+  <div class="container" style="max-width:740px;padding-top:2rem;">
+    <nav class="breadcrumb"><a href="/">หน้าแรก</a><span>ติดต่อ</span></nav>
+    <h1>ติดต่อเรา</h1>
+    <p>หากมีคำถาม ข้อเสนอแนะ หรือต้องการรายงานข้อมูลที่ไม่ถูกต้อง สามารถติดต่อได้ที่</p>
+    <ul>
+      <li>อีเมล: <a href="mailto:khomsan87@gmail.com">khomsan87@gmail.com</a></li>
+    </ul>
+    <p style="color:var(--color-muted);font-size:0.9rem;margin-top:2rem;">
+      เราพยายามตอบกลับภายใน 3-5 วันทำการ
+    </p>
+  </div>
+</BaseLayout>
