@@ -57,6 +57,10 @@ PAGE_SIZE = 10  # Products per embed page
 
 SCHEDULER_TIMEZONE: str = os.getenv("SCHEDULER_TIMEZONE", "Asia/Bangkok")
 
+# ── SEO WEBSITE ──────────────────────────────────────────────────────────────
+CHANNEL_SEO_ARTICLES: int | None = _ch("CHANNEL_SEO_ARTICLES")
+CHANNEL_SEO_LOG:      int | None = _ch("CHANNEL_SEO_LOG")
+
 # ── FACEBOOK ──────────────────────────────────────────────────────────────────
 FACEBOOK_PAGE_ID:           str = os.getenv("FACEBOOK_PAGE_ID", "")
 FACEBOOK_PAGE_ACCESS_TOKEN: str = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "")
