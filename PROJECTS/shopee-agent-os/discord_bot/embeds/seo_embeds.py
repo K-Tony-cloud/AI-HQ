@@ -29,13 +29,15 @@ def build_ideas_embed(
     )
 
     for i, idea in enumerate(ideas, 1):
-        kw          = idea["keyword"]
-        score       = idea["opportunity_score"]
-        est         = idea["estimated_products"]
-        top_title   = idea.get("top_product_title", "")[:40]
-        top_price   = idea.get("top_product_price", "")
+        kw        = idea["keyword"]
+        score     = idea["opportunity_score"]
+        est       = idea["estimated_products"]
+        top_title = idea.get("top_product_title", "")[:40]
+        top_price = idea.get("top_product_price", "")
+        idea_id   = idea.get("idea_id", "")
 
         field_val = (
+            f"**ID:** `{idea_id}` → `/seo-draft idea_id:{idea_id}`\n"
             f"**Article Opportunity Score:** {score:,.1f}\n"
             f"**สินค้าที่ตรงกัน:** {est:,} รายการ\n"
             f"**Top Product:** {top_title} ({top_price})"

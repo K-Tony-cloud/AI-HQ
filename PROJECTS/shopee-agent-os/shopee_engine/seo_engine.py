@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import re
 import textwrap
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,117 @@ import duckdb
 import pandas as pd
 
 from shopee_engine.config import config
+
+# ---------------------------------------------------------------------------
+# In-memory idea cache (volatile — valid for 1 hour within same process)
+# ---------------------------------------------------------------------------
+
+_idea_cache: dict[str, dict] = {}
+_IDEA_TTL = 3600  # seconds
+
+def _evict_ideas() -> None:
+    now = time.time()
+    expired = [k for k, v in _idea_cache.items() if now - v["ts"] > _IDEA_TTL]
+    for k in expired:
+        del _idea_cache[k]
+
+def _make_idea_id(cat: str, bucket: int) -> str:
+    raw = f"{cat}_{bucket}"
+    return "idea-" + hashlib.md5(raw.encode()).hexdigest()[:6]
+
+
+# ---------------------------------------------------------------------------
+# Keyword normalization
+# ---------------------------------------------------------------------------
+
+_PRICE_RE       = re.compile(r"ไม่เกิน\s*([\d,]+)\s*บาท", re.IGNORECASE)
+_CONNECTOR_RE   = re.compile(r"[&,\-/|]+")
+_STOPWORDS_TH   = frozenset([
+    "ไม่เกิน", "บาท", "ที่สุด", "ที่ดีที่สุด", "ราคา", "แนะนำ",
+    "ยอดนิยม", "สำหรับ", "ผู้เริ่มต้น", "ดีที่สุด", "คุ้มค่า",
+])
+_STOPWORDS_EN   = frozenset(["and", "or", "the", "for", "best", "top"])
+
+# Synonym groups: lower-case trigger → list of extra search terms
+_SYNONYM_MAP: dict[str, list[str]] = {
+    "powerbank":          ["power bank", "พาวเวอร์แบงค์", "แบตสำรอง", "แบตเตอรี่สำรอง"],
+    "powerbanks":         ["power bank", "powerbank", "พาวเวอร์แบงค์", "แบตสำรอง", "แบตเตอรี่สำรอง"],
+    "power bank":         ["powerbank", "พาวเวอร์แบงค์", "แบตสำรอง"],
+    "พาวเวอร์แบงค์":     ["powerbank", "power bank", "แบตสำรอง"],
+    "แบตสำรอง":          ["powerbank", "power bank", "พาวเวอร์แบงค์"],
+    "fan":                ["พัดลม"],
+    "mobile fan":         ["พัดลมพกพา", "พัดลม usb", "usb fan"],
+    "usb fan":            ["พัดลมพกพา", "พัดลม usb", "mobile fan"],
+    "usb & mobile fan":   ["พัดลมพกพา", "พัดลม usb", "usb fan", "mobile fan", "พัดลม"],
+    "portable fan":       ["พัดลมพกพา", "พัดลม usb", "usb fan"],
+    "พัดลมพกพา":         ["usb fan", "mobile fan", "พัดลม usb"],
+    "พัดลม usb":          ["usb fan", "mobile fan", "พัดลมพกพา"],
+}
+
+
+def _extract_price_max(keyword: str) -> tuple[str, int | None]:
+    """Strip price constraint from keyword; return (cleaned_kw, price_max|None)."""
+    m = _PRICE_RE.search(keyword)
+    if not m:
+        return keyword, None
+    price_max = int(m.group(1).replace(",", ""))
+    cleaned = _PRICE_RE.sub("", keyword).strip()
+    return cleaned, price_max
+
+
+def _keyword_to_search_terms(keyword: str) -> list[str]:
+    """Normalize a keyword string to a deduplicated list of search terms.
+
+    Steps:
+      1. Replace connectors (&, -, /) with spaces
+      2. Split into tokens
+      3. Drop stopwords
+      4. Expand synonyms
+    """
+    kw_clean = _CONNECTOR_RE.sub(" ", keyword).strip()
+    tokens = [t.strip().lower() for t in kw_clean.split() if t.strip()]
+    tokens = [t for t in tokens if t not in _STOPWORDS_TH and t not in _STOPWORDS_EN]
+
+    # Check full phrase synonyms first (e.g. "usb & mobile fan" as a whole)
+    full_phrase = " ".join(tokens)
+    all_terms = list(tokens)
+    if full_phrase in _SYNONYM_MAP:
+        all_terms.extend(_SYNONYM_MAP[full_phrase])
+    else:
+        for token in tokens:
+            if token in _SYNONYM_MAP:
+                all_terms.extend(_SYNONYM_MAP[token])
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    result = []
+    for t in all_terms:
+        if t not in seen:
+            seen.add(t)
+            result.append(t)
+    return result
+
+
+def normalize_search_terms(keyword: str) -> dict:
+    """Public helper: normalize keyword and return display info.
+
+    Returns:
+        {
+          "cleaned": str,
+          "price_max": int | None,
+          "terms": list[str],
+          "display": str,
+        }
+    """
+    cleaned, price_max = _extract_price_max(keyword)
+    terms = _keyword_to_search_terms(cleaned)
+    return {
+        "cleaned":   cleaned,
+        "price_max": price_max,
+        "terms":     terms,
+        "display":   ", ".join(terms) if terms else cleaned,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -338,19 +450,45 @@ def find_keyword_opportunities(
         if len(ideas) >= top:
             break
 
-    # For each idea, count how many products match
+    # For each idea, count products, fetch top product_ids, and cache
     con2 = _connect(read_only=True)
     try:
         for idea in ideas:
-            cat = idea["category"]
+            cat    = idea["category"]
             bucket = idea["price_bucket"]
-            n = con2.execute("""
-                SELECT COUNT(*) FROM products
+            rows2 = con2.execute("""
+                SELECT itemid,
+                    (
+                        COALESCE(item_sold, 0) * 0.40
+                        + COALESCE("like", 0) * 0.15
+                        + COALESCE(discount_percentage, 0) * 0.15
+                        + COALESCE(shop_rating, 0) * 100 * 0.15
+                        + COALESCE(item_rating, 0) * 100 * 0.15
+                    ) AS opp
+                FROM products
                 WHERE (global_category3 = ? OR global_category2 = ? OR global_category1 = ?)
                 AND sale_price <= ?
                 AND item_sold >= ?
-            """, [cat, cat, cat, bucket, min_sales]).fetchone()[0]
-            idea["estimated_products"] = int(n)
+                ORDER BY opp DESC
+                LIMIT 20
+            """, [cat, cat, cat, bucket, min_sales]).fetchdf()
+
+            product_ids = rows2["itemid"].tolist() if not rows2.empty else []
+            idea["estimated_products"] = len(product_ids)
+            idea["product_ids"]        = product_ids
+            idea["search_category"]    = cat
+            idea["price_max"]          = bucket
+
+            idea_id = _make_idea_id(cat, bucket)
+            idea["idea_id"] = idea_id
+            _evict_ideas()
+            _idea_cache[idea_id] = {
+                "category":    cat,
+                "price_max":   bucket,
+                "product_ids": product_ids,
+                "keyword":     idea["keyword"],
+                "ts":          time.time(),
+            }
     finally:
         con2.close()
 
@@ -447,10 +585,20 @@ def fetch_products_for_keyword(
         parts: list[str] = []
         params: list[Any] = []
 
-        kw_terms = [t.strip() for t in keyword.replace(",", " ").split() if t.strip()]
-        for term in kw_terms:
-            parts.append("(title ILIKE ? OR description ILIKE ?)")
-            params.extend([f"%{term}%", f"%{term}%"])
+        # Extract price from keyword if not supplied explicitly
+        cleaned_kw, kw_price = _extract_price_max(keyword) if keyword else (keyword, None)
+        if price_max is None:
+            price_max = kw_price
+
+        # Normalize keyword to OR-matched search terms (no stopword/connector noise)
+        search_terms = _keyword_to_search_terms(cleaned_kw) if cleaned_kw else []
+        if search_terms:
+            term_conditions = []
+            for term in search_terms:
+                term_conditions.append("(title ILIKE ? OR description ILIKE ?)")
+                params.extend([f"%{term}%", f"%{term}%"])
+            # OR between all terms so any single match is enough
+            parts.append(f"({' OR '.join(term_conditions)})")
 
         if category:
             parts.append("(global_category1 ILIKE ? OR global_category2 ILIKE ? OR global_category3 ILIKE ?)")
@@ -534,6 +682,95 @@ def fetch_products_for_keyword(
         })
 
     return results
+
+
+def fetch_products_by_idea(idea_id: str, top: int = 7) -> list[dict] | None:
+    """Fetch products using a cached idea (from find_keyword_opportunities).
+
+    Returns:
+        list[dict]  — products found
+        None        — idea_id not in cache / expired (caller should ask user to re-run /seo-ideas)
+    """
+    _evict_ideas()
+    cached = _idea_cache.get(idea_id)
+    if cached is None:
+        return None  # expired or unknown
+
+    product_ids = cached.get("product_ids", [])
+    category    = cached.get("category", "")
+    price_max   = cached.get("price_max")
+
+    # Primary: fetch by exact itemids selected during /seo-ideas
+    if product_ids:
+        con = _connect(read_only=True)
+        try:
+            placeholders = ", ".join(["?"] * len(product_ids[:top * 3]))
+            rows = con.execute(f"""
+                SELECT
+                    title, itemid, shopid, sale_price,
+                    price AS original_price,
+                    item_sold, "like" AS likes, shop_rating, item_rating,
+                    discount_percentage,
+                    global_category1 AS cat1, global_category2 AS cat2, global_category3 AS cat3,
+                    global_brand AS brand,
+                    image_link, product_link,
+                    "product_short link" AS datafeed_link, description,
+                    (
+                        COALESCE(item_sold, 0) * 0.40
+                        + COALESCE("like", 0) * 0.15
+                        + COALESCE(discount_percentage, 0) * 0.15
+                        + COALESCE(shop_rating, 0) * 100 * 0.15
+                        + COALESCE(item_rating, 0) * 100 * 0.15
+                    ) AS opportunity_score
+                FROM products
+                WHERE itemid IN ({placeholders})
+                ORDER BY opportunity_score DESC
+                LIMIT ?
+            """, product_ids[:top * 3] + [top]).fetchdf()
+            con.close()
+        except Exception:
+            con.close()
+            raise
+
+        if not rows.empty and len(rows) >= 3:
+            aff_lookup = _get_affiliate_lookup()
+            results = []
+            for _, row in rows.iterrows():
+                aff_link, link_type = _resolve_affiliate_link(
+                    str(row.get("product_link") or ""),
+                    str(row.get("datafeed_link") or ""),
+                    aff_lookup,
+                )
+                results.append({
+                    "title":              str(row.get("title") or ""),
+                    "itemid":             int(row.get("itemid") or 0),
+                    "shopid":             int(row.get("shopid") or 0),
+                    "sale_price":         int(row.get("sale_price") or 0),
+                    "sale_price_fmt":     format_price(row.get("sale_price")),
+                    "original_price":     int(row.get("original_price") or 0),
+                    "original_price_fmt": format_price(row.get("original_price")),
+                    "item_sold":          int(row.get("item_sold") or 0),
+                    "shop_rating":        float(row.get("shop_rating") or 0),
+                    "item_rating":        float(row.get("item_rating") or 0),
+                    "discount_pct":       int(row.get("discount_percentage") or 0),
+                    "category":           str(row.get("cat3") or row.get("cat2") or row.get("cat1") or ""),
+                    "brand":              str(row.get("brand") or ""),
+                    "image_link":         str(row.get("image_link") or ""),
+                    "product_link":       str(row.get("product_link") or ""),
+                    "affiliate_link":     aff_link,
+                    "affiliate_link_type": link_type,
+                    "opportunity_score":  round(float(row.get("opportunity_score") or 0), 1),
+                    "description_raw":    str(row.get("description") or "")[:500],
+                })
+            return results
+
+    # Fallback: use category + price_max query
+    return fetch_products_for_keyword(
+        keyword="",
+        category=category,
+        price_max=price_max,
+        top=top,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -702,10 +939,11 @@ def _build_faq(keyword: str, products: list[dict]) -> str:
 
 
 def generate_article_draft(
-    keyword: str,
+    keyword: str = "",
     category: str | None = None,
     price_max: int | None = None,
     top_products: int = 5,
+    idea_id: str | None = None,
 ) -> dict:
     """Generate a full SEO article draft and save to seo_articles table.
 
@@ -721,17 +959,45 @@ def generate_article_draft(
           "error": str | None,
         }
     """
-    products = fetch_products_for_keyword(
-        keyword=keyword,
-        category=category,
-        price_max=price_max,
-        top=top_products,
-    )
+    if idea_id:
+        # idea_id path: use products selected during /seo-ideas (no keyword text search)
+        products = fetch_products_by_idea(idea_id, top=top_products)
+        if products is None:
+            return {
+                "success": False,
+                "error": (
+                    f"idea_id `{idea_id}` ไม่พบหรือหมดอายุแล้ว\n"
+                    "กรุณารัน `/seo-ideas` ใหม่และใช้ idea_id ที่ได้รับ"
+                ),
+            }
+        # Pull keyword + category from cache if not overridden
+        cached = _idea_cache.get(idea_id, {})
+        if not keyword:
+            keyword = cached.get("keyword", cached.get("category", "สินค้า"))
+        if not category:
+            category = cached.get("category")
+    else:
+        # keyword path: normalize + OR search
+        products = fetch_products_for_keyword(
+            keyword=keyword,
+            category=category,
+            price_max=price_max,
+            top=top_products,
+        )
 
     if not products:
+        # Show effective search terms, not raw SQL
+        info = normalize_search_terms(keyword) if keyword else {}
+        terms_display = info.get("display", keyword)
         return {
             "success": False,
-            "error": f"ไม่พบสินค้าที่ตรงกับ '{keyword}' ในฐานข้อมูล",
+            "error": (
+                f"ไม่พบสินค้าที่ตรงกับ '{keyword}' ในฐานข้อมูล\n"
+                f"Search terms used: {terms_display}"
+                if not idea_id else
+                f"idea_id `{idea_id}`: สินค้าทั้งหมดถูกลบหรือ affiliate link หาย\n"
+                "ลอง `/seo-ideas` ใหม่หรือใช้ `/seo-draft keyword:<คำค้น>`"
+            ),
         }
 
     count = len(products)

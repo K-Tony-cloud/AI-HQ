@@ -16,29 +16,38 @@ def get_keyword_opportunities(
 
 
 def create_article_draft(
-    keyword: str,
+    keyword: str = "",
     category: str | None = None,
     product_count: int = 5,
+    idea_id: str | None = None,
 ) -> dict:
     try:
         from shopee_engine.seo_engine import check_duplicate_draft, generate_article_draft
-        duplicate = check_duplicate_draft(keyword)
-        if duplicate:
-            return {
-                "success":         False,
-                "duplicate":       True,
-                "existing_id":     str(duplicate.get("article_id", "")),
-                "existing_status": str(duplicate.get("status", "")),
-                "existing_updated": str(duplicate.get("updated_at", "")),
-                "error": (
-                    f"บทความสำหรับ '{keyword}' มีอยู่แล้ว "
-                    f"(article_id: {duplicate['article_id']}, status: {duplicate['status']})"
-                ),
-            }
+        # Duplicate check: use cached keyword if idea_id given
+        check_kw = keyword
+        if idea_id and not keyword:
+            from shopee_engine.seo_engine import _idea_cache
+            cached = _idea_cache.get(idea_id, {})
+            check_kw = cached.get("keyword", "")
+        if check_kw:
+            duplicate = check_duplicate_draft(check_kw)
+            if duplicate:
+                return {
+                    "success":          False,
+                    "duplicate":        True,
+                    "existing_id":      str(duplicate.get("article_id", "")),
+                    "existing_status":  str(duplicate.get("status", "")),
+                    "existing_updated": str(duplicate.get("updated_at", "")),
+                    "error": (
+                        f"บทความสำหรับ '{check_kw}' มีอยู่แล้ว "
+                        f"(article_id: {duplicate['article_id']}, status: {duplicate['status']})"
+                    ),
+                }
         result = generate_article_draft(
             keyword=keyword,
             category=category,
             top_products=product_count,
+            idea_id=idea_id,
         )
         return result
     except Exception as e:

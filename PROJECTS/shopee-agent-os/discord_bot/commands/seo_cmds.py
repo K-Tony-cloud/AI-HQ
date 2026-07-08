@@ -85,7 +85,8 @@ class SeoCog(commands.Cog):
         description="Generate a new SEO article draft from Shopee product data",
     )
     @app_commands.describe(
-        keyword="Keyword หลักของบทความ (required)",
+        idea_id="Idea ID จาก /seo-ideas (แนะนำ — ค้นสินค้าตรง)",
+        keyword="Keyword หลักของบทความ (ใช้เมื่อไม่มี idea_id)",
         category="หมวดสินค้าสำหรับกรองข้อมูล (optional)",
         product_count="จำนวนสินค้าในบทความ (3-7, default 5)",
     )
@@ -93,20 +94,32 @@ class SeoCog(commands.Cog):
     async def cmd_seo_draft(
         self,
         interaction: discord.Interaction,
-        keyword: str,
+        idea_id: str | None = None,
+        keyword: str | None = None,
         category: str | None = None,
         product_count: int = 5,
     ) -> None:
         from discord_bot.config import CHANNEL_SEO_ARTICLES
         await interaction.response.defer(thinking=True)
+
+        if not idea_id and not keyword:
+            await interaction.followup.send(
+                embed=error_embed("ต้องระบุ `idea_id` (จาก /seo-ideas) หรือ `keyword` อย่างใดอย่างหนึ่ง")
+            )
+            return
+
         product_count = max(3, min(7, product_count))
         try:
             result = await asyncio.to_thread(
-                seo_service.create_article_draft, keyword, category, product_count
+                seo_service.create_article_draft,
+                keyword or "",
+                category,
+                product_count,
+                idea_id,
             )
             if not result.get("success"):
                 if result.get("duplicate"):
-                    embed = build_draft_duplicate_embed(keyword, {
+                    embed = build_draft_duplicate_embed(keyword or idea_id or "", {
                         "article_id": result["existing_id"],
                         "status":     result["existing_status"],
                         "updated_at": result.get("existing_updated", ""),
