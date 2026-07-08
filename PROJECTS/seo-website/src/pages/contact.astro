@@ -7,15 +7,35 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   description="ติดต่อทีมงาน ซื้อไหนดี"
   breadcrumbs={[{ name: 'ติดต่อ', url: Astro.url.href }]}
 >
-  <div class="container" style="max-width:740px;padding-top:2rem;">
-    <nav class="breadcrumb"><a href="/">หน้าแรก</a><span>ติดต่อ</span></nav>
-    <h1>ติดต่อเรา</h1>
-    <p>หากมีคำถาม ข้อเสนอแนะ หรือต้องการรายงานข้อมูลที่ไม่ถูกต้อง สามารถติดต่อได้ที่</p>
-    <ul>
-      <li>อีเมล: <a href="mailto:khomsan87@gmail.com">khomsan87@gmail.com</a></li>
-    </ul>
-    <p style="color:var(--color-muted);font-size:0.9rem;margin-top:2rem;">
-      เราพยายามตอบกลับภายใน 3-5 วันทำการ
-    </p>
+  <section class="page-header">
+    <div class="container container--narrow">
+      <nav class="breadcrumb">
+        <a href="/">หน้าแรก</a>
+        <span class="breadcrumb__sep">›</span>
+        <span>ติดต่อ</span>
+      </nav>
+      <h1>ติดต่อเรา</h1>
+    </div>
+  </section>
+
+  <div class="container container--narrow">
+    <div class="page-content">
+      <p>หากมีคำถาม ข้อเสนอแนะ หรือต้องการรายงานข้อมูลที่ไม่ถูกต้อง สามารถติดต่อได้ที่</p>
+
+      <h2>อีเมล</h2>
+      <p>
+        <a href="mailto:khomsan87@gmail.com">khomsan87@gmail.com</a>
+      </p>
+
+      <h2>ระยะเวลาตอบกลับ</h2>
+      <p>เราพยายามตอบกลับภายใน 3–5 วันทำการ</p>
+
+      <h2>หัวข้อที่รับติดต่อ</h2>
+      <ul>
+        <li>ข้อมูลสินค้าไม่ถูกต้องหรือล้าสมัย</li>
+        <li>ข้อเสนอแนะด้านเนื้อหา</li>
+        <li>คำถามเกี่ยวกับ Affiliate Disclosure</li>
+      </ul>
+    </div>
   </div>
 </BaseLayout>

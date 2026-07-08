@@ -2,13 +2,13 @@
 import BaseLayout from './BaseLayout.astro';
 
 export interface Props {
-  title:       string;
-  description: string;
-  keyword:     string;
-  category:    string;
-  slug:        string;
-  createdAt:   string;
-  updatedAt:   string;
+  title:         string;
+  description:   string;
+  keyword:       string;
+  category:      string;
+  slug:          string;
+  createdAt:     string;
+  updatedAt:     string;
   hasDisclosure: boolean;
 }
 
@@ -33,10 +33,15 @@ const articleSchema = {
   inLanguage: 'th',
 };
 
+const catSlug = category?.toLowerCase().replace(/\s+/g, '-') ?? '';
 const breadcrumbs = [
-  ...(category ? [{ name: category, url: `${siteUrl}/category/${category.toLowerCase().replace(/\s+/g, '-')}` }] : []),
+  ...(category ? [{ name: category, url: `${siteUrl}/category/${catSlug}` }] : []),
   { name: title.slice(0, 60), url: articleUrl },
 ];
+
+const updatedLabel = new Date(updatedAt).toLocaleDateString('th-TH', {
+  year: 'numeric', month: 'long', day: 'numeric'
+});
 ---
 
 <BaseLayout
@@ -46,30 +51,31 @@ const breadcrumbs = [
   {articleSchema}
   {breadcrumbs}
 >
-  <div class="container" style="max-width:860px;">
-    <!-- Breadcrumb -->
-    <nav class="breadcrumb" style="margin-top:1rem;">
-      <a href="/">หน้าแรก</a>
-      {category && (
-        <span>
-          <a href={`/category/${category.toLowerCase().replace(/\s+/g, '-')}`}>{category}</a>
-        </span>
+  <div class="article-wrap">
+    <div class="article-header">
+      <!-- Breadcrumb -->
+      <nav class="breadcrumb">
+        <a href="/">หน้าแรก</a>
+        {category && (
+          <>
+            <span class="breadcrumb__sep">›</span>
+            <a href={`/category/${catSlug}`}>{category}</a>
+          </>
+        )}
+        <span class="breadcrumb__sep">›</span>
+        <span>{title.slice(0, 50)}</span>
+      </nav>
+
+      <!-- Disclosure banner -->
+      {hasDisclosure && (
+        <div class="disclosure-banner">
+          บทความนี้มีลิงก์ Affiliate — เมื่อซื้อสินค้าผ่านลิงก์ ผู้เขียนอาจได้รับค่าคอมมิชชัน
+          โดยไม่มีผลต่อราคาสินค้าสำหรับผู้ซื้อ <a href="/affiliate-disclosure">อ่านเพิ่มเติม</a>
+        </div>
       )}
-      <span>{title.slice(0, 50)}</span>
-    </nav>
 
-    <!-- Disclosure banner -->
-    {hasDisclosure && (
-      <div class="disclosure-banner">
-        บทความนี้มีลิงก์ Affiliate — เมื่อซื้อสินค้าผ่านลิงก์ ผู้เขียนอาจได้รับค่าคอมมิชชัน
-        โดยไม่มีผลต่อราคาสินค้าสำหรับผู้ซื้อ <a href="/affiliate-disclosure">อ่านเพิ่มเติม</a>
-      </div>
-    )}
-
-    <h1 style="font-size:1.9rem;margin-top:0.5rem;">{title}</h1>
-
-    <div style="font-size:0.85rem;color:var(--color-muted);margin-bottom:1.5rem;">
-      อัปเดตล่าสุด: {new Date(updatedAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+      <h1>{title}</h1>
+      <div class="article-meta">อัปเดตล่าสุด: {updatedLabel}</div>
     </div>
 
     <article class="article-body">
@@ -77,12 +83,10 @@ const breadcrumbs = [
     </article>
 
     <!-- Related links -->
-    <div style="margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid var(--color-border);font-size:0.9rem;">
-      <a href="/">กลับหน้าแรก</a>
+    <div class="article-related">
+      <a href="/">← กลับหน้าแรก</a>
       {category && (
-        <span style="margin-left:1rem;">
-          <a href={`/category/${category.toLowerCase().replace(/\s+/g, '-')}`}>ดูสินค้าหมวด {category}</a>
-        </span>
+        <a href={`/category/${catSlug}`}>ดูสินค้าหมวด {category} →</a>
       )}
     </div>
   </div>

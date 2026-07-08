@@ -8,13 +8,13 @@ const latest = allArticles
   .slice(0, 6);
 
 const CATEGORIES = [
-  { name: 'บ้านและครัว',       slug: 'home-living',    emoji: '🏠' },
-  { name: 'มือถือ & แกดเจ็ต',  slug: 'mobile-gadgets', emoji: '📱' },
-  { name: 'ความงาม',           slug: 'beauty',         emoji: '💄' },
-  { name: 'สุขภาพ',            slug: 'health',         emoji: '💊' },
-  { name: 'แม่และเด็ก',        slug: 'mom-baby',       emoji: '👶' },
-  { name: 'กีฬา',              slug: 'sports',         emoji: '⚽' },
-  { name: 'อาหาร & เครื่องดื่ม', slug: 'food',         emoji: '🍜' },
+  { name: 'บ้านและครัว',         slug: 'home-living',    emoji: '🏠' },
+  { name: 'มือถือ & แกดเจ็ต',    slug: 'mobile-gadgets', emoji: '📱' },
+  { name: 'ความงาม',             slug: 'beauty',         emoji: '💄' },
+  { name: 'สุขภาพ',              slug: 'health',         emoji: '💊' },
+  { name: 'แม่และเด็ก',          slug: 'mom-baby',       emoji: '👶' },
+  { name: 'กีฬา',                slug: 'sports',         emoji: '⚽' },
+  { name: 'อาหาร & เครื่องดื่ม', slug: 'food',           emoji: '🍜' },
 ];
 ---
 
@@ -22,18 +22,40 @@ const CATEGORIES = [
   title="ซื้อไหนดี — ศูนย์รวมคำแนะนำสินค้าจากข้อมูลจริง"
   description="เปรียบเทียบสินค้าและอ่านรีวิวจากข้อมูลยอดขายจริงบน Shopee ช่วยคุณตัดสินใจได้ง่ายขึ้น"
 >
-  <div style="background:linear-gradient(135deg,#fff7ed,#fff);border-bottom:1px solid var(--color-border);padding:3rem 0;">
-    <div class="container" style="text-align:center;">
-      <h1 style="font-size:2.2rem;margin:0 0 0.75rem;">ซื้อไหนดี?</h1>
-      <p style="color:var(--color-muted);font-size:1.1rem;margin:0 0 1.5rem;">
-        คำแนะนำสินค้าจากข้อมูลยอดขายจริง ช่วยคุณเลือกสินค้าได้ถูกต้อง
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>ซื้อไหนดี?</h1>
+      <p class="hero__sub">
+        คำแนะนำสินค้าจากข้อมูลยอดขายและรีวิวจริงบน Shopee<br />
+        ช่วยให้คุณเลือกสินค้าได้ถูกต้องและคุ้มค่า
       </p>
-    </div>
-  </div>
+      <div>
+        <a href="/category/home-living" class="btn btn--primary">ดูสินค้าแนะนำ</a>
+        <a href="/about" class="btn btn--outline">เกี่ยวกับเรา</a>
+      </div>
 
-  <div class="container" style="padding-top:2rem;">
-    <section>
-      <h2>หมวดหมู่สินค้า</h2>
+      <div class="trust-row">
+        <div class="trust-item">
+          <div class="trust-item__icon">📊</div>
+          <div class="trust-item__label">ข้อมูลยอดขายจริง</div>
+        </div>
+        <div class="trust-item">
+          <div class="trust-item__icon">⚖️</div>
+          <div class="trust-item__label">เปรียบเทียบง่าย</div>
+        </div>
+        <div class="trust-item">
+          <div class="trust-item__icon">🔄</div>
+          <div class="trust-item__label">อัปเดตสม่ำเสมอ</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="container">
+    <!-- Categories -->
+    <section class="section">
+      <h2 class="section-title">หมวดหมู่สินค้า</h2>
       <div class="category-grid">
         {CATEGORIES.map(cat => (
           <a href={`/category/${cat.slug}`} class="category-card">
@@ -44,34 +66,41 @@ const CATEGORIES = [
       </div>
     </section>
 
-    {latest.length > 0 && (
-      <section style="margin-top:2rem;">
-        <h2>บทความล่าสุด</h2>
+    <!-- Latest articles -->
+    <section class="section">
+      <h2 class="section-title">บทความล่าสุด</h2>
+
+      {latest.length > 0 ? (
         <ul class="article-list">
           {latest.map(article => (
-            <li>
-              <a href={`/${article.id}`} style="font-size:1.05rem;font-weight:600;">
+            <li class="article-list__item">
+              <a href={`/${article.id}`} class="article-list__title">
                 {article.data.title}
               </a>
-              <div class="article-meta">
+              <div class="article-list__meta">
                 {article.data.category && <span>{article.data.category} · </span>}
                 {new Date(article.data.updated_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}
               </div>
               {article.data.description && (
-                <p style="margin:0.3rem 0 0;color:var(--color-muted);font-size:0.95rem;">
+                <p class="article-list__excerpt">
                   {article.data.description.slice(0, 120)}
                 </p>
               )}
             </li>
           ))}
         </ul>
-      </section>
-    )}
+      ) : (
+        <div class="empty-state">
+          <div class="empty-state__icon">📝</div>
+          <p>กำลังเตรียมบทความคำแนะนำสินค้า — กลับมาใหม่เร็ว ๆ นี้</p>
+        </div>
+      )}
+    </section>
+  </div>
 
-    {latest.length === 0 && (
-      <div style="margin-top:2rem;padding:3rem;text-align:center;background:var(--color-bg-alt);border-radius:var(--radius);">
-        <p style="color:var(--color-muted);">กำลังเตรียมบทความ เร็ว ๆ นี้</p>
-      </div>
-    )}
+  <!-- Affiliate disclosure strip -->
+  <div class="disclosure-strip">
+    เว็บไซต์นี้เข้าร่วมโปรแกรม Shopee Affiliate — ลิงก์บางส่วนในบทความอาจทำให้เราได้รับค่าคอมมิชชัน
+    โดยไม่มีผลต่อราคาสินค้าของคุณ &nbsp;<a href="/affiliate-disclosure">อ่านเพิ่มเติม</a>
   </div>
 </BaseLayout>
