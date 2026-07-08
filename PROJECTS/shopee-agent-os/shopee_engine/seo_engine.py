@@ -1306,10 +1306,18 @@ def validate_article_for_publish(article_id: str) -> dict:
                     f"{len(no_link)} product(s) have no affiliate link: "
                     + ", ".join(str(r) for r in no_link["product_title"].head(3))
                 )
-            no_confirmed = products[products["affiliate_link_type"] != "confirmed"]
-            if not no_confirmed.empty:
+            confirmed_count = int((products["affiliate_link_type"] == "confirmed").sum())
+            datafeed_count  = len(products) - confirmed_count
+            if confirmed_count == 0:
+                errors.append(
+                    f"Zero confirmed affiliate links — all {len(products)} product(s) use "
+                    f"datafeed links (shope.ee/an_redir) which are NOT commission-tracked to "
+                    f"our account. Add real affiliate links from the Shopee Affiliate Portal "
+                    f"before publishing."
+                )
+            elif datafeed_count > 0:
                 warnings.append(
-                    f"{len(no_confirmed)} product(s) use datafeed links (commission not guaranteed)"
+                    f"{datafeed_count} product(s) use datafeed links (commission not guaranteed)"
                 )
 
         con.close()
@@ -1372,10 +1380,18 @@ def validate_article_for_review(article_id: str) -> dict:
             ]
             if not no_link.empty:
                 warnings.append(f"{len(no_link)} สินค้าไม่มี affiliate link")
-            no_confirmed = products[products["affiliate_link_type"] != "confirmed"]
-            if not no_confirmed.empty:
+            confirmed_count = int((products["affiliate_link_type"] == "confirmed").sum())
+            datafeed_count  = len(products) - confirmed_count
+            if confirmed_count == 0:
+                errors.append(
+                    f"ไม่มี confirmed affiliate link แม้แต่รายการเดียว — "
+                    f"ลิงก์ทั้ง {len(products)} รายการเป็น datafeed (shope.ee/an_redir) "
+                    f"ซึ่งไม่ผูกกับบัญชี affiliate ของเรา ต้องเพิ่มลิงก์จริงจาก "
+                    f"Shopee Affiliate Portal ก่อน review"
+                )
+            elif datafeed_count > 0:
                 warnings.append(
-                    f"{len(no_confirmed)} สินค้าใช้ datafeed link (คอมมิชชันไม่รับประกัน)"
+                    f"{datafeed_count} สินค้าใช้ datafeed link (คอมมิชชันไม่รับประกัน)"
                 )
 
         con.close()
