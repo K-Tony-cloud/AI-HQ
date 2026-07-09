@@ -473,69 +473,153 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
             await interaction.followup.send(embed=error_embed("Affiliate Link Confirm", str(exc)))
 
     # ------------------------------------------------------------------
-    # /affiliate-link-add-product  — add one link by searching product keyword
+    # /affiliate-link-add-product  — add one link by itemid or keyword
     # ------------------------------------------------------------------
     @app_commands.command(
         name="affiliate-link-add-product",
-        description="Add one affiliate link by searching for its product by keyword",
+        description="Add affiliate link to a product by itemid (preferred) or keyword (fallback)",
     )
     @app_commands.describe(
-        link="Shopee affiliate short link",
-        product_keyword="Keyword to identify the product",
+        link="Shopee affiliate short link (s.shopee.co.th/...)",
+        itemid="itemid ของสินค้า (แนะนำ — จาก /seo-link-status)",
+        shopid="shopid เพื่อยืนยัน เมื่อ itemid เดียวกันมีหลายร้าน (optional)",
+        product_keyword="Keyword ค้นหาสินค้า (fallback เมื่อไม่มี itemid)",
     )
     async def cmd_affiliate_link_add_product(
         self,
         interaction: discord.Interaction,
         link: str,
-        product_keyword: str,
+        itemid: str | None = None,
+        shopid: str | None = None,
+        product_keyword: str | None = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
         try:
-            import asyncio
+            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
+
+            if not itemid and not product_keyword:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Affiliate Link Add Product",
+                        "ต้องระบุ `itemid` หรือ `product_keyword` อย่างใดอย่างหนึ่ง",
+                    )
+                )
+                return
+
+            # ----------------------------------------------------------
+            # Path A: exact itemid lookup (preferred)
+            # ----------------------------------------------------------
+            if itemid:
+                try:
+                    itemid_int = int(itemid.strip())
+                except ValueError:
+                    await interaction.followup.send(
+                        embed=error_embed("Affiliate Link Add Product", f"itemid ต้องเป็นตัวเลข ได้รับ: `{itemid}`")
+                    )
+                    return
+
+                shopid_int: int | None = None
+                if shopid:
+                    try:
+                        shopid_int = int(shopid.strip())
+                    except ValueError:
+                        await interaction.followup.send(
+                            embed=error_embed("Affiliate Link Add Product", f"shopid ต้องเป็นตัวเลข ได้รับ: `{shopid}`")
+                        )
+                        return
+
+                from shopee_engine.affiliate_products_engine import add_affiliate_product_by_itemid
+                result = await asyncio.to_thread(
+                    add_affiliate_product_by_itemid,
+                    itemid_int,
+                    link,
+                    shopid_int,
+                )
+
+                if not result["success"]:
+                    embed = discord.Embed(
+                        title="❌ ไม่สำเร็จ",
+                        description=result["error"][:500],
+                        color=discord.Color.red(),
+                    )
+                    await interaction.followup.send(embed=embed)
+                    return
+
+                action        = result.get("action", "saved")
+                title         = str(result.get("title", ""))[:80]
+                already_had   = result.get("already_had_link", False)
+                prev_link     = str(result.get("previous_link", ""))
+
+                color   = discord.Color.yellow() if already_had else discord.Color.green()
+                heading = "🔄 อัปเดต affiliate link" if already_had else "✅ บันทึก affiliate link สำเร็จ"
+
+                embed = discord.Embed(title=heading, color=color)
+                embed.add_field(name="สินค้า",      value=title or "—",               inline=False)
+                embed.add_field(name="itemid",       value=f"`{result['itemid']}`",     inline=True)
+                embed.add_field(name="shopid",       value=f"`{result['shopid']}`",     inline=True)
+                embed.add_field(name="Action",       value=action,                      inline=True)
+                embed.add_field(name="Affiliate Link", value=f"`{link[:80]}`",          inline=False)
+                if already_had and prev_link:
+                    embed.add_field(name="Previous Link", value=f"`{prev_link[:80]}`", inline=False)
+                embed.add_field(
+                    name="Next Step",
+                    value="รัน `/seo-refresh <article_id>` เพื่ออัปเดต confirmed count",
+                    inline=False,
+                )
+                await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
+                return
+
+            # ----------------------------------------------------------
+            # Path B: keyword fallback
+            # ----------------------------------------------------------
             from shopee_engine.affiliate_link_engine import (
                 search_products_by_keyword,
                 bulk_add_affiliate_links,
             )
-            from discord_bot.config import CHANNEL_AFFILIATE_LINKS
 
-            candidates = search_products_by_keyword(product_keyword, limit=5)
+            candidates = await asyncio.to_thread(
+                search_products_by_keyword, product_keyword, 5
+            )
 
             if not candidates:
                 embed = discord.Embed(
-                    title="🔍 No Products Found",
-                    description=f"No products matching `{product_keyword[:50]}`.",
+                    title="🔍 ไม่พบสินค้า",
+                    description=(
+                        f"ไม่พบสินค้าที่ตรงกับ `{product_keyword[:50]}`\n\n"
+                        "ลองใช้ `itemid` แทน (ดูได้จาก `/seo-link-status`)"
+                    ),
                     color=discord.Color.orange(),
                 )
                 await interaction.followup.send(embed=embed)
                 return
 
             if len(candidates) == 1:
-                # One strong match — save directly using its product URL as the proxy
                 product = candidates[0]
-                data = await asyncio.to_thread(
-                    bulk_add_affiliate_links, [link],
-                )
-                # Override: if needs_manual_match, force-match to the found product
+                data = await asyncio.to_thread(bulk_add_affiliate_links, [link])
                 if data["needs_manual_match"] > 0 and data["unmatched_links"]:
                     uid = data["unmatched_links"][0].get("unmatched_id")
                     if uid:
                         from shopee_engine.affiliate_link_engine import confirm_affiliate_link
-                        result = await asyncio.to_thread(confirm_affiliate_link, uid, product["itemid"])
-                        if result["success"]:
-                            embed = discord.Embed(title="✅ Saved", color=discord.Color.green())
+                        res = await asyncio.to_thread(confirm_affiliate_link, uid, product["itemid"])
+                        if res["success"]:
+                            embed = discord.Embed(title="✅ Saved (keyword match)", color=discord.Color.green())
                             embed.add_field(name="Product", value=product["title"][:80], inline=False)
-                            embed.add_field(name="Link", value=f"`{link[:80]}`", inline=False)
+                            embed.add_field(name="Link",    value=f"`{link[:80]}`",      inline=False)
+                            embed.add_field(
+                                name="Next Step",
+                                value="รัน `/seo-refresh <article_id>` เพื่ออัปเดต confirmed count",
+                                inline=False,
+                            )
                             await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
                             return
                 embed = _bulk_add_embed(data)
                 await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
             else:
-                # Multiple matches — show choices
                 embed = discord.Embed(
-                    title=f"🔍 {len(candidates)} matches — pick one",
+                    title=f"🔍 พบ {len(candidates)} รายการ — ใช้ itemid แทน",
                     description=(
                         f"Link: `{link[:60]}`\n\n"
-                        "Run `/affiliate-link-add` first, then use `/affiliate-link-confirm`:\n\n"
+                        "พบสินค้าหลายรายการ กรุณาใช้ `itemid` เพื่อระบุให้ตรง:\n\n"
                         + "\n".join(
                             f"`{i}.` itemid=`{c['itemid']}`  {c['title'][:55]}"
                             for i, c in enumerate(candidates, 1)

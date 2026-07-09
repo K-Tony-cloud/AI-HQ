@@ -152,6 +152,89 @@ def add_affiliate_product(
         con.close()
 
 
+def add_affiliate_product_by_itemid(
+    itemid: int,
+    affiliate_short_url: str,
+    shopid: int | None = None,
+    campaign: str = "",
+    platform: str = "",
+) -> dict:
+    """Add or update an affiliate product identified by exact itemid.
+
+    Bypasses title-keyword search. Looks up the product directly from the
+    products table. If shopid is given it is used to disambiguate when the
+    same itemid appears in multiple shops (rare but possible).
+
+    Returns the same shape as add_affiliate_product():
+        {success, action, itemid, shopid, title, identification_url, affiliate_short_url}
+    or {success=False, error}.
+    """
+    if not affiliate_short_url:
+        return {"success": False, "error": "affiliate_short_url is required"}
+    if not config.db_path.exists():
+        return {"success": False, "error": "No database found. Run import-datafeed first."}
+
+    # Always look up by itemid first, then verify shopid separately.
+    # This gives a clear "mismatch" message rather than "not found" when shopid is wrong.
+    con = _connect(read_only=True)
+    try:
+        row = con.execute(
+            'SELECT itemid, shopid, title FROM products WHERE itemid=? LIMIT 1',
+            [itemid],
+        ).fetchone()
+    finally:
+        con.close()
+
+    if not row:
+        return {
+            "success": False,
+            "error": f"ไม่พบสินค้า itemid={itemid} ใน products table",
+        }
+
+    found_itemid, found_shopid, title = row
+
+    if shopid is not None and found_shopid != shopid:
+        return {
+            "success": False,
+            "error": (
+                f"Shopid mismatch: ระบุ shopid={shopid} "
+                f"แต่สินค้า itemid={itemid} อยู่ใน shopid={found_shopid} "
+                f"('{str(title)[:60]}')"
+            ),
+        }
+
+    canonical_url = f"https://shopee.co.th/product/{found_shopid}/{found_itemid}"
+
+    # Check for existing confirmed link (for duplicate warning)
+    existing: tuple | None = None
+    try:
+        con2 = _connect(read_only=True)
+        try:
+            existing = con2.execute(
+                f"SELECT affiliate_short_url FROM {PRODUCTS_TABLE} WHERE itemid=? AND shopid=?",
+                [found_itemid, found_shopid],
+            ).fetchone()
+        finally:
+            con2.close()
+    except Exception:
+        existing = None
+
+    already_confirmed = bool(existing and existing[0])
+
+    result = add_affiliate_product(
+        long_url=canonical_url,
+        short_url=affiliate_short_url,
+        campaign=campaign,
+        platform=platform,
+    )
+
+    if result.get("success"):
+        result["already_had_link"] = already_confirmed
+        result["previous_link"]    = (existing[0] if existing else "") or ""
+
+    return result
+
+
 def update_affiliate_short_url(
     query:         str,
     new_short_url: str,
