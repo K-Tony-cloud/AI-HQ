@@ -1,0 +1,286 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { spayLaterConfig } from '../../config/spaylater';
+
+const { enabled, disclaimer, title: ctaTitle, description: ctaDesc } = spayLaterConfig;
+
+const siteUrl      = import.meta.env.SITE || 'http://localhost:4321';
+const canonicalUrl = `${siteUrl}/guides/spaylater`;
+
+const ctaHero   = '/go/spaylater?utm_source=spaylater-guide&utm_medium=hero&utm_campaign=spaylater';
+const ctaBottom = '/go/spaylater?utm_source=spaylater-guide&utm_medium=bottom-cta&utm_campaign=spaylater';
+
+// FAQ data — used both for rendering and for FAQ schema
+const FAQS = [
+  {
+    q: "SPayLater ต้องมีบัตรเครดิตไหมถึงจะสมัครได้?",
+    a: "ไม่จำเป็นต้องมีบัตรเครดิต การอนุมัติขึ้นอยู่กับเกณฑ์ของ Shopee ซึ่งอาจแตกต่างกันตามบัญชีผู้ใช้ กรุณาตรวจสอบเงื่อนไขในแอปก่อนสมัคร",
+  },
+  {
+    q: "ถ้าชำระไม่ตรงเวลาจะเกิดอะไรขึ้น?",
+    a: "อาจมีค่าปรับหรือผลต่อการใช้บริการ กรุณาตรวจสอบเงื่อนไขการชำระล่าช้าในแอป Shopee ก่อนใช้งาน",
+  },
+  {
+    q: "ใช้ SPayLater ซื้อสินค้าได้ทุกชนิดไหม?",
+    a: "ขึ้นอยู่กับเงื่อนไขของสินค้าและร้านค้านั้น ๆ ตรวจสอบตัวเลือกการชำระในหน้าสั่งซื้อ",
+  },
+  {
+    q: "ยกเลิกหรือปิดใช้งาน SPayLater ได้ไหม?",
+    a: "ตรวจสอบวิธีและเงื่อนไขการปิดใช้งานในการตั้งค่าของแอป Shopee",
+  },
+  {
+    q: "วงเงิน SPayLater เท่าไร?",
+    a: "วงเงินขึ้นอยู่กับการอนุมัติของ Shopee และอาจแตกต่างกันในแต่ละบัญชี ดูวงเงินที่ได้รับอนุมัติในแอปหลังจากสมัครแล้ว",
+  },
+];
+
+const faqSchema = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQS.map(f => ({
+    "@type": "Question",
+    name: f.q,
+    acceptedAnswer: { "@type": "Answer", text: f.a },
+  })),
+};
+
+const breadcrumbs = [
+  { name: "คู่มือ", url: `${siteUrl}/guides/spaylater` },
+  { name: "SPayLater คืออะไร", url: canonicalUrl },
+];
+---
+
+<BaseLayout
+  title="SPayLater คืออะไร? วิธีสมัคร วิธีใช้ และข้อควรรู้"
+  description="ทำความรู้จัก SPayLater วิธีสมัคร วิธีใช้งาน การผ่อนชำระ ดอกเบี้ย รอบบิล และข้อควรรู้ก่อนเปิดใช้งาน"
+  canonicalUrl={canonicalUrl}
+  articleSchema={faqSchema}
+  breadcrumbs={breadcrumbs}
+>
+  <!-- ── Page header ── -->
+  <section class="page-header">
+    <div class="container container--narrow">
+      <nav class="breadcrumb">
+        <a href="/">หน้าแรก</a>
+        <span class="breadcrumb__sep">›</span>
+        <span>คู่มือ</span>
+        <span class="breadcrumb__sep">›</span>
+        <span>SPayLater</span>
+      </nav>
+      <h1>SPayLater คืออะไร? วิธีสมัคร วิธีใช้ และข้อควรรู้ก่อนเปิดใช้งาน</h1>
+    </div>
+  </section>
+
+  <div class="container container--narrow">
+    <div class="page-content guide-content">
+
+      <!-- ── Hero CTA ── -->
+      <div class="guide-cta-block guide-cta-block--top">
+        <p class="guide-cta-block__desc">{ctaDesc}</p>
+        {enabled ? (
+          <a href={ctaHero} class="btn btn--primary btn--lg" rel="nofollow noopener">
+            {ctaTitle}
+          </a>
+        ) : (
+          <p class="guide-cta-block__inactive">ขณะนี้ยังไม่มีลิงก์สมัครที่ยืนยันแล้ว</p>
+        )}
+      </div>
+
+      <!-- ── Mission box ── -->
+      <div class="mission-box">
+        <div class="mission-box__head">
+          <span class="mission-box__badge">Mission</span>
+          <strong>มี Mission SPayLater สำหรับผู้ใช้ที่เข้าเงื่อนไข</strong>
+        </div>
+        <p class="mission-box__desc">
+          สิทธิ์ ภารกิจ และผลตอบแทนอาจแตกต่างกันตามช่วงเวลาและบัญชี
+          กรุณาตรวจสอบรายละเอียดล่าสุดก่อนเข้าร่วม
+        </p>
+        {enabled ? (
+          <a href={ctaHero} class="btn btn--primary" rel="nofollow noopener">
+            {ctaTitle}
+          </a>
+        ) : (
+          <p class="guide-cta-block__inactive">ขณะนี้ยังไม่มี Mission ที่ยืนยันว่าเปิดใช้งาน</p>
+        )}
+      </div>
+
+      <!-- ── 1. SPayLater คืออะไร ── -->
+      <h2>SPayLater คืออะไร</h2>
+      <p>
+        SPayLater คือบริการสินเชื่อ "ซื้อก่อน จ่ายทีหลัง" ของ Shopee
+        ที่ให้คุณสามารถสั่งซื้อสินค้าและชำระเงินในภายหลังตามรอบบิลที่กำหนด
+        โดยไม่ต้องโอนเงินหรือใช้บัตรชำระทันที
+      </p>
+      <p>
+        บริการนี้แบ่งออกเป็น 2 รูปแบบหลัก ได้แก่ การซื้อก่อนจ่ายทีหลังในรอบบิลถัดไป
+        และการผ่อนชำระแบบรายเดือน โดยรายละเอียดและเงื่อนไขแต่ละแบบจะแสดงในแอปก่อนที่คุณจะยืนยัน
+      </p>
+
+      <!-- ── 2. ใช้ทำอะไรได้บ้าง ── -->
+      <h2>ใช้ SPayLater ทำอะไรได้บ้าง</h2>
+      <ul>
+        <li>เลือกเป็นวิธีชำระเงินในหน้าสั่งซื้อบน Shopee แทนการโอนเงินหรือบัตร</li>
+        <li>ชำระยอดรวมทั้งหมดในรอบบิลถัดไป (ขึ้นกับเงื่อนไขที่แสดงในแอป)</li>
+        <li>ผ่อนชำระเป็นรายเดือนตามจำนวนงวดที่เลือกได้ในหน้าชำระเงิน</li>
+      </ul>
+      <p>
+        ทั้งนี้ ตัวเลือกที่ใช้ได้จริงขึ้นอยู่กับสินค้า ร้านค้า และเงื่อนไขบัญชีของคุณ
+        ตรวจสอบในหน้าชำระเงินก่อนยืนยันทุกครั้ง
+      </p>
+
+      <!-- ── 3. ใครสมัครได้ ── -->
+      <h2>ใครสามารถสมัครได้</h2>
+      <ul>
+        <li>ผู้ที่มีบัญชี Shopee และผ่านการตรวจสอบจากระบบของ Shopee</li>
+        <li>ไม่จำเป็นต้องมีบัตรเครดิต</li>
+        <li>เกณฑ์การอนุมัติและวงเงินขึ้นอยู่กับการประเมินของ Shopee และอาจแตกต่างกันในแต่ละบัญชี</li>
+      </ul>
+      <p class="guide-note">
+        ระบบไม่สามารถรับประกันผลการอนุมัติหรือวงเงินได้ กรุณาตรวจสอบสิทธิ์ในแอป Shopee โดยตรง
+      </p>
+
+      <!-- ── 4. วิธีสมัคร ── -->
+      <h2>วิธีสมัครหรือเปิดใช้งาน SPayLater</h2>
+      <ol>
+        <li>เปิดแอป Shopee แล้วไปที่เมนู "บัญชีฉัน"</li>
+        <li>มองหา SPayLater หรือค้นหาในแถบค้นหา</li>
+        <li>กด "สมัครหรือเปิดใช้งาน" และทำตามขั้นตอนที่ปรากฏในแอป</li>
+        <li>รอผลการอนุมัติ (ระยะเวลาและผลขึ้นอยู่กับเกณฑ์ของ Shopee)</li>
+      </ol>
+      <p>หรือสมัครผ่านลิงก์โดยตรงจาก Shopee ได้เลย:</p>
+      {enabled && (
+        <p>
+          <a href={ctaHero} class="btn btn--primary" rel="nofollow noopener">
+            {ctaTitle}
+          </a>
+        </p>
+      )}
+
+      <!-- ── 5. วิธีเลือกชำระ ── -->
+      <h2>วิธีเลือก SPayLater ตอนชำระเงิน</h2>
+      <ol>
+        <li>เพิ่มสินค้าลงตะกร้าและกด "สั่งซื้อ"</li>
+        <li>ในหน้าชำระเงิน ดูที่ส่วน "วิธีชำระเงิน"</li>
+        <li>เลือก "SPayLater" ถ้ามีตัวเลือกนี้</li>
+        <li><strong>ตรวจดูยอดที่ต้องชำระ ดอกเบี้ย และวันครบกำหนดก่อนกด "ยืนยัน"</strong></li>
+      </ol>
+      <p>
+        ถ้าไม่เห็นตัวเลือก SPayLater อาจเป็นเพราะสินค้าหรือร้านค้านั้นไม่รองรับ
+        หรือวงเงินไม่เพียงพอ
+      </p>
+
+      <!-- ── 6. ซื้อก่อนจ่ายทีหลัง vs ผ่อน ── -->
+      <h2>ซื้อก่อนจ่ายทีหลังกับผ่อนชำระต่างกันอย่างไร</h2>
+      <div class="compare-table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>รูปแบบ</th>
+              <th>การชำระเงิน</th>
+              <th>ดอกเบี้ย/ค่าธรรมเนียม</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>ซื้อก่อน จ่ายทีหลัง</strong></td>
+              <td>ชำระยอดรวมทั้งหมดในรอบบิลถัดไป</td>
+              <td>ขึ้นอยู่กับเงื่อนไขที่แสดงในแอป</td>
+            </tr>
+            <tr>
+              <td><strong>ผ่อนชำระ</strong></td>
+              <td>แบ่งจ่ายรายเดือนตามจำนวนงวดที่เลือก</td>
+              <td>มีดอกเบี้ยหรือค่าธรรมเนียมตามที่แสดงก่อนยืนยัน</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── 7. ดอกเบี้ย ค่าธรรมเนียม ── -->
+      <h2>ดอกเบี้ย ค่าธรรมเนียม และยอดที่ต้องชำระ</h2>
+      <p>
+        SPayLater เป็นบริการสินเชื่อที่<strong>อาจมีดอกเบี้ยและ/หรือค่าธรรมเนียม</strong>
+        ขึ้นอยู่กับรูปแบบการชำระและนโยบายของ Shopee ณ ขณะนั้น
+      </p>
+      <p>
+        ยอดที่ต้องชำระ ดอกเบี้ย และค่าธรรมเนียมที่แน่ชัดจะแสดงในแอปก่อนที่คุณจะยืนยันการซื้อ
+        กรุณาอ่านรายละเอียดให้ครบทุกครั้ง
+      </p>
+
+      <!-- Credit warning ── -->
+      <div class="credit-warning" role="note">
+        <span class="credit-warning__icon" aria-hidden="true">⚠️</span>
+        <span>
+          SPayLater เป็นบริการสินเชื่อ ควรตรวจสอบดอกเบี้ย ค่าธรรมเนียม ยอดผ่อน
+          และวันครบกำหนดก่อนยืนยันใช้บริการ และควรใช้เท่าที่จำเป็นโดยคำนึงถึงความสามารถในการชำระคืน
+        </span>
+      </div>
+
+      <!-- ── 8. รอบบิล ── -->
+      <h2>วิธีตรวจรอบบิลและวันครบกำหนด</h2>
+      <ol>
+        <li>เปิดแอป Shopee แล้วไปที่ SPayLater</li>
+        <li>ดูยอดค้างชำระและวันครบกำหนดในหน้าหลักของ SPayLater</li>
+        <li>Shopee มักส่งการแจ้งเตือนก่อนถึงวันครบกำหนด</li>
+      </ol>
+      <p>
+        แนะนำให้ตั้งการแจ้งเตือนส่วนตัวล่วงหน้า 2–3 วัน เพื่อไม่ให้พลาดวันชำระ
+      </p>
+
+      <!-- ── 9. ข้อดี ── -->
+      <h2>ข้อดีของ SPayLater</h2>
+      <ul>
+        <li>ไม่ต้องโอนเงินหรือใช้บัตรชำระในทันที เหมาะสำหรับสินค้าที่จำเป็น</li>
+        <li>ไม่จำเป็นต้องมีบัตรเครดิต</li>
+        <li>เลือกผ่อนชำระรายเดือนได้ตามสะดวก</li>
+        <li>ใช้งานง่ายผ่านแอป Shopee โดยตรง</li>
+      </ul>
+
+      <!-- ── 10. ข้อควรระวัง ── -->
+      <h2>ข้อควรระวังก่อนใช้ SPayLater</h2>
+      <ul>
+        <li>มีดอกเบี้ยและ/หรือค่าธรรมเนียม ขึ้นอยู่กับรูปแบบการชำระ</li>
+        <li>ต้องชำระตามวันครบกำหนด ชำระล่าช้าอาจมีค่าปรับหรือผลต่อการใช้บริการ</li>
+        <li>วงเงินและเงื่อนไขอาจเปลี่ยนแปลงได้ตามนโยบายของ Shopee</li>
+        <li>ควรใช้เท่าที่จำเป็นและวางแผนการชำระไว้ล่วงหน้า</li>
+      </ul>
+
+      <!-- ── 11. FAQ ── -->
+      <h2>คำถามที่พบบ่อย</h2>
+      <dl class="faq-list">
+        {FAQS.map(f => (
+          <div class="faq-item">
+            <dt class="faq-item__q">{f.q}</dt>
+            <dd class="faq-item__a">{f.a}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <!-- ── Disclaimer ── -->
+      <div class="aff-disclaimer" role="note">
+        <span class="aff-disclaimer__icon" aria-hidden="true">ℹ️</span>
+        <span>{disclaimer}</span>
+      </div>
+
+      <!-- ── Bottom CTA ── -->
+      <div class="guide-cta-block guide-cta-block--bottom">
+        <h3>{ctaTitle}</h3>
+        <p class="guide-cta-block__desc">{ctaDesc}</p>
+        {enabled ? (
+          <a href={ctaBottom} class="btn btn--primary btn--lg" rel="nofollow noopener">
+            {ctaTitle}
+          </a>
+        ) : (
+          <p class="guide-cta-block__inactive">ขณะนี้ยังไม่มีลิงก์สมัครที่ยืนยันแล้ว</p>
+        )}
+      </div>
+
+      <!-- Back links -->
+      <div class="article-related">
+        <a href="/">← หน้าแรก</a>
+        <a href="/start-affiliate">เริ่มต้นทำ Shopee Affiliate →</a>
+      </div>
+
+    </div>
+  </div>
+</BaseLayout>
