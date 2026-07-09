@@ -161,7 +161,8 @@ def build_preview_embed(result: dict) -> discord.Embed:
     if not errors and not warnings:
         e.add_field(name="✅ Validation", value="ผ่านการตรวจสอบทั้งหมด", inline=False)
 
-    content_md = str(article.get("content_md", ""))
+    # Use live-regenerated body (same pipeline as republish) — never stale stored content_md
+    content_md = str(result.get("preview_body") or article.get("content_md", ""))
     body_start = content_md.find("## ")
     body_preview = content_md[body_start:body_start + 800] if body_start != -1 else content_md[:800]
 

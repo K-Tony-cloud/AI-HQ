@@ -480,5 +480,34 @@ def delete_article_file(article_id: str) -> bool:
     return False
 
 
+def generate_preview_body(article_id: str) -> dict:
+    """Generate the article body using the same pipeline as export_article, without writing a file.
+
+    Returns {"success": True, "article_id": str, "body": str} or an error dict.
+    Used by /seo-preview so it always reflects live DB data (products, affiliate links, prose).
+    """
+    con = _connect(read_only=True)
+    try:
+        art_df = con.execute(
+            f"SELECT * FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+        if art_df.empty:
+            con.close()
+            return _err(article_id, f"Article '{article_id}' not found")
+        article  = art_df.iloc[0].to_dict()
+        products = _load_enriched_products(article_id, con)
+        con.close()
+    except Exception as exc:
+        con.close()
+        return _err(article_id, str(exc))
+
+    if not products:
+        return _err(article_id, "No active products found for this article")
+
+    prose = _extract_prose(str(article.get("content_md", "")))
+    body  = _build_export_body(article, products, prose)
+    return {"success": True, "article_id": article_id, "body": body}
+
+
 def _err(article_id: str, msg: str) -> dict:
     return {"success": False, "file_path": None, "article_id": article_id, "error": msg}

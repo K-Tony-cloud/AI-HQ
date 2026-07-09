@@ -61,18 +61,22 @@ def preview_article(article_id: str) -> dict:
             get_article_product_count,
             validate_article_for_publish,
         )
+        from shopee_engine.article_exporter import generate_preview_body
+
         article = get_article(article_id)
         if not article:
             return {"success": False, "error": f"Article '{article_id}' not found"}
 
         product_count = get_article_product_count(article_id)
-        validation = validate_article_for_publish(article_id)
+        validation    = validate_article_for_publish(article_id)
+        preview       = generate_preview_body(article_id)
 
         return {
-            "success":       True,
-            "article":       article,
+            "success":      True,
+            "article":      article,
             "product_count": product_count,
-            "validation":    validation,
+            "validation":   validation,
+            "preview_body": preview.get("body", "") if preview.get("success") else "",
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
