@@ -266,6 +266,9 @@ def _init_seo_tables(con: duckdb.DuckDBPyConnection) -> None:
         ("reviewed_at",         "TIMESTAMP"),
         ("review_note",         "VARCHAR DEFAULT ''"),
         ("published_at",        "TIMESTAMP"),
+        ("category_label",      "VARCHAR DEFAULT ''"),
+        ("subcategory",         "VARCHAR DEFAULT ''"),
+        ("subcategory_label",   "VARCHAR DEFAULT ''"),
     ]:
         try:
             con.execute(
@@ -1020,14 +1023,26 @@ def generate_article_draft(
 
     # Frontmatter
     now_str = datetime.now(timezone.utc).isoformat()
-    cat = category or products[0].get("category", "")
+    raw_cat = category or products[0].get("category", "")
     product_ids = [p["itemid"] for p in products]
+
+    from shopee_engine.taxonomy import map_to_canonical, resolve_subcategory
+    _canonical = map_to_canonical(raw_cat)
+    if _canonical:
+        cat_slug, cat_label = _canonical
+    else:
+        cat_slug, cat_label = raw_cat, raw_cat  # unmapped; will be blocked at review
+
+    sub_slug, sub_label = resolve_subcategory(raw_cat)
 
     frontmatter = textwrap.dedent(f"""\
         ---
         article_id: "{{ARTICLE_ID}}"
         keyword: "{keyword}"
-        category: "{cat}"
+        category: "{cat_slug}"
+        category_label: "{cat_label}"
+        subcategory: "{sub_slug}"
+        subcategory_label: "{sub_label}"
         title: "{title}"
         description: "{meta_desc}"
         product_ids: {product_ids}
@@ -1083,10 +1098,12 @@ def generate_article_draft(
             next_id = (con.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {SEO_ARTICLES_TABLE}").fetchone()[0])
             con.execute(f"""
                 INSERT INTO {SEO_ARTICLES_TABLE}
-                    (id, article_id, keyword, category, title, meta_description,
+                    (id, article_id, keyword, category, category_label,
+                     subcategory, subcategory_label,
+                     title, meta_description,
                      content_md, status, created_at, updated_at, last_product_sync, affiliate_disclosure)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true)
-            """, [next_id, article_id, keyword, cat, title, meta_desc, content_md])
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true)
+            """, [next_id, article_id, keyword, cat_slug, cat_label, sub_slug, sub_label, title, meta_desc, content_md])
 
             # Save product relationships
             for rank, p in enumerate(products, 1):
@@ -1123,7 +1140,7 @@ def generate_article_draft(
         "article_id":              article_id,
         "title":                   title,
         "keyword":                 keyword,
-        "category":                cat,
+        "category":                cat_slug,
         "products_count":          count,
         "has_confirmed_affiliate": confirmed > 0,
         "confirmed_links":         confirmed,
@@ -1349,15 +1366,25 @@ def validate_article_for_publish(article_id: str) -> dict:
             return {"valid": False, "errors": [f"Article '{article_id}' not found"], "warnings": []}
 
         row = article.iloc[0]
-        status = str(row.get("status") or "")
-        title  = str(row.get("title") or "")
-        meta   = str(row.get("meta_description") or "")
-        content = str(row.get("content_md") or "")
+        status   = str(row.get("status") or "")
+        title    = str(row.get("title") or "")
+        meta     = str(row.get("meta_description") or "")
+        content  = str(row.get("content_md") or "")
+        category = str(row.get("category") or "")
 
+        from shopee_engine.taxonomy import CANONICAL_CATEGORIES
         if status != "reviewed":
             errors.append(f"Status must be 'reviewed' before publishing (current: '{status}')")
         if not title:
             errors.append("Article title is empty")
+        if not category:
+            errors.append("Category is not set — cannot generate valid category URL")
+        elif category not in CANONICAL_CATEGORIES:
+            errors.append(
+                f"Category '{category}' is not a canonical site category — "
+                f"publishing would generate a 404 category URL. "
+                f"Valid slugs: {', '.join(CANONICAL_CATEGORIES.keys())}"
+            )
         if not meta:
             warnings.append("Meta description is empty — SEO impact")
         if len(content) < 500:
@@ -1429,12 +1456,20 @@ def validate_article_for_review(article_id: str) -> dict:
         keyword  = str(row.get("keyword") or "")
         category = str(row.get("category") or "")
 
+        from shopee_engine.taxonomy import CANONICAL_CATEGORIES
         if not title:
             errors.append("Title ยังว่างอยู่")
         if not keyword:
             errors.append("Keyword ยังว่างอยู่")
         if not category:
-            warnings.append("Category ไม่ได้ระบุ — กระทบ URL routing")
+            errors.append("Category ไม่ได้ระบุ — ต้องกำหนด canonical category ก่อน review")
+        elif category not in CANONICAL_CATEGORIES:
+            errors.append(
+                f"Category '{category}' ไม่ใช่ canonical site category — "
+                f"ห้าม review/publish จนกว่าจะ map ถูกต้อง. "
+                f"Canonical ที่รองรับ: {', '.join(CANONICAL_CATEGORIES.keys())}. "
+                f"raw Shopee category ที่มี & หรือ space ไม่สามารถใช้เป็น URL ได้โดยตรง"
+            )
         if not meta:
             warnings.append("Meta description ยังว่างอยู่ — กระทบ SEO")
         if len(content) < 500:

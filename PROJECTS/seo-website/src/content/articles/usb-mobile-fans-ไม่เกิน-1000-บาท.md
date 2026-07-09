@@ -1,17 +1,20 @@
 ---
 article_id: "usb-mobile-fans-ไม่เกิน-1000-บาท"
 keyword: "USB & Mobile Fans ไม่เกิน 1,000 บาท"
-category: "USB & Mobile Fans"
+category: "mobile-gadgets"
+category_label: "มือถือ & แกดเจ็ต"
+subcategory: "usb-mobile-fans"
+subcategory_label: "USB & Mobile Fans"
 title: "5 USB & Mobile Fans ไม่เกิน 1,000 บาท ที่ดีที่สุด (อัปเดต 2026)"
 description: "รวม 5 USB & Mobile Fans ไม่เกิน 1,000 บาท คัดสรรจากข้อมูลยอดขายจริงบน Shopee พร้อมตารางเปรียบเทียบราคาและรีวิว"
 product_ids: [25759848418, 26284540752, 26633396208, 6480267967, 40959376984]
 created_at: "2026-07-09 01:24:31.948970"
-updated_at: "2026-07-09T06:15:28.463536+00:00"
+updated_at: "2026-07-09T10:12:56.182261+00:00"
 last_product_sync: "2026-07-09 12:23:48.322021"
-published_at: "2026-07-09T06:15:28.463464+00:00"
+published_at: "2026-07-09T10:12:56.182234+00:00"
 article_status: "published"
 affiliate_disclosure: true
-canonical: "https://khongdee-guide.pages.dev/usb-mobile-fans-ไม่เกิน-1000-บาท"
+canonical: "https://suenaidee.com/usb-mobile-fans-ไม่เกิน-1000-บาท"
 ---
 
 ## บทนำ

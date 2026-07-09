@@ -219,23 +219,29 @@ def _build_frontmatter(
     def _esc(v: str) -> str:
         return v.replace("\\", "\\\\").replace('"', '\\"')
 
-    article_id  = str(article.get("article_id", ""))
-    keyword     = _esc(str(article.get("keyword", "")))
-    category    = _esc(str(article.get("category", "") or ""))
-    title       = _esc(str(article.get("title", "")))
-    description = _esc(str(article.get("meta_description", "") or ""))
-    created_at  = str(article.get("created_at", ""))
-    updated_at  = datetime.now(timezone.utc).isoformat()
-    last_sync   = str(article.get("last_product_sync", "") or "")
-    disclosure  = "true" if article.get("affiliate_disclosure", True) else "false"
-    canonical   = f"{site_url}/{article_id}"
-    ids_str     = "[" + ", ".join(str(i) for i in product_ids) + "]"
+    article_id   = str(article.get("article_id", ""))
+    keyword      = _esc(str(article.get("keyword", "")))
+    category     = _esc(str(article.get("category", "") or ""))
+    cat_label    = _esc(str(article.get("category_label", "") or ""))
+    subcategory  = _esc(str(article.get("subcategory", "") or ""))
+    sub_label    = _esc(str(article.get("subcategory_label", "") or ""))
+    title        = _esc(str(article.get("title", "")))
+    description  = _esc(str(article.get("meta_description", "") or ""))
+    created_at   = str(article.get("created_at", ""))
+    updated_at   = datetime.now(timezone.utc).isoformat()
+    last_sync    = str(article.get("last_product_sync", "") or "")
+    disclosure   = "true" if article.get("affiliate_disclosure", True) else "false"
+    canonical    = f"{site_url}/{article_id}"
+    ids_str      = "[" + ", ".join(str(i) for i in product_ids) + "]"
 
     lines = [
         "---",
         f'article_id: "{article_id}"',
         f'keyword: "{keyword}"',
         f'category: "{category}"',
+        f'category_label: "{cat_label}"',
+        f'subcategory: "{subcategory}"',
+        f'subcategory_label: "{sub_label}"',
         f'title: "{title}"',
         f'description: "{description}"',
         f"product_ids: {ids_str}",

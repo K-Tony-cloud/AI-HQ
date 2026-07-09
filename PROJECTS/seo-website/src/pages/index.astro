@@ -12,9 +12,9 @@ const CATEGORIES = [
   { name: 'มือถือ & แกดเจ็ต',    slug: 'mobile-gadgets', emoji: '📱' },
   { name: 'ความงาม',             slug: 'beauty',         emoji: '💄' },
   { name: 'สุขภาพ',              slug: 'health',         emoji: '💊' },
-  { name: 'แม่และเด็ก',          slug: 'mom-baby',       emoji: '👶' },
+  { name: 'แม่และเด็ก',          slug: 'baby-kids',      emoji: '👶' },
   { name: 'กีฬา',                slug: 'sports',         emoji: '⚽' },
-  { name: 'อาหาร & เครื่องดื่ม', slug: 'food',           emoji: '🍜' },
+  { name: 'อาหาร & เครื่องดื่ม', slug: 'food-drinks',    emoji: '🍜' },
 ];
 ---
 
@@ -78,7 +78,9 @@ const CATEGORIES = [
                 {article.data.title}
               </a>
               <div class="article-list__meta">
-                {article.data.category && <span>{article.data.category} · </span>}
+                {(article.data.subcategory_label || article.data.category_label) && (
+                  <span>{article.data.subcategory_label || article.data.category_label} · </span>
+                )}
                 {new Date(article.data.updated_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}
               </div>
               {article.data.description && (

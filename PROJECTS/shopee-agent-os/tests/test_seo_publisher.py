@@ -97,7 +97,7 @@ def _make_test_db() -> str:
 
 def _insert_article(db_path: str, article_id: str, status: str = "draft",
                     content: str = "A" * 600, keyword: str = "test keyword",
-                    title: str = "Test Title", category: str = "Beauty") -> None:
+                    title: str = "Test Title", category: str = "beauty") -> None:
     import duckdb
     # Use a hash-based id to avoid PRIMARY KEY conflicts across different article_ids in same DB
     row_id = abs(hash(article_id)) % 1_000_000 + 1

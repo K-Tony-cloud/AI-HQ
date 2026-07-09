@@ -4,13 +4,13 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 
 export async function getStaticPaths() {
   const CATEGORIES = [
-    { slug: 'home-living',    label: 'บ้านและครัว',          emoji: '🏠', match: 'Home & Living' },
-    { slug: 'mobile-gadgets', label: 'มือถือ & แกดเจ็ต',     emoji: '📱', match: 'Mobile & Gadgets' },
-    { slug: 'beauty',         label: 'ความงาม',              emoji: '💄', match: 'Beauty' },
-    { slug: 'health',         label: 'สุขภาพ',               emoji: '💊', match: 'Health' },
-    { slug: 'mom-baby',       label: 'แม่และเด็ก',           emoji: '👶', match: 'Mom & Baby' },
-    { slug: 'sports',         label: 'กีฬา',                 emoji: '⚽', match: 'Sports & Outdoors' },
-    { slug: 'food',           label: 'อาหาร & เครื่องดื่ม',  emoji: '🍜', match: 'Food & Beverages' },
+    { slug: 'home-living',    label: 'บ้านและครัว',          emoji: '🏠' },
+    { slug: 'mobile-gadgets', label: 'มือถือ & แกดเจ็ต',     emoji: '📱' },
+    { slug: 'beauty',         label: 'ความงาม',              emoji: '💄' },
+    { slug: 'health',         label: 'สุขภาพ',               emoji: '💊' },
+    { slug: 'baby-kids',      label: 'แม่และเด็ก',           emoji: '👶' },
+    { slug: 'sports',         label: 'กีฬา',                 emoji: '⚽' },
+    { slug: 'food-drinks',    label: 'อาหาร & เครื่องดื่ม',  emoji: '🍜' },
   ];
 
   const allArticles = await getCollection('articles', ({ data }) => data.article_status === 'published');
@@ -20,8 +20,9 @@ export async function getStaticPaths() {
     props: {
       label: cat.label,
       emoji: cat.emoji,
+      // category in frontmatter is already the canonical slug — exact match only
       articles: allArticles.filter(a =>
-        a.data.category?.includes(cat.match) || a.data.category === cat.match
+        a.data.category === cat.slug
       ).sort((a, b) => new Date(b.data.updated_at).getTime() - new Date(a.data.updated_at).getTime()),
     },
   }));

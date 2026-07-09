@@ -1,14 +1,17 @@
 ---
 article_id: "usb-mobile-fans-ไม่เกิน-500-บาท"
 keyword: "USB & Mobile Fans ไม่เกิน 500 บาท"
-category: "USB & Mobile Fans"
+category: "mobile-gadgets"
+category_label: "มือถือ & แกดเจ็ต"
+subcategory: "usb-mobile-fans"
+subcategory_label: "USB & Mobile Fans"
 title: "5 USB & Mobile Fans ไม่เกิน 500 บาท ที่ดีที่สุด (อัปเดต 2026)"
 description: "รวม 5 USB & Mobile Fans ไม่เกิน 500 บาท คัดสรรจากข้อมูลยอดขายจริงบน Shopee พร้อมตารางเปรียบเทียบราคาและรีวิว"
 product_ids: [26284540752, 6480267967, 40959376984, 25626042159, 43629027976]
 created_at: "2026-07-09 16:38:36.609725"
-updated_at: "2026-07-09T09:50:34.491840+00:00"
+updated_at: "2026-07-09T10:12:56.159514+00:00"
 last_product_sync: "2026-07-09 16:48:55.470942"
-published_at: "2026-07-09T09:50:34.491806+00:00"
+published_at: "2026-07-09T10:12:56.159478+00:00"
 article_status: "published"
 affiliate_disclosure: true
 canonical: "https://suenaidee.com/usb-mobile-fans-ไม่เกิน-500-บาท"

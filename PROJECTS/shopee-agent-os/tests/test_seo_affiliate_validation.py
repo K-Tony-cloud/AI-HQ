@@ -92,7 +92,7 @@ def _make_test_db(
     # Insert the article
     con.execute("""
         INSERT INTO seo_articles (id, article_id, keyword, category, title, meta_description, content_md, status)
-        VALUES (1, 'art-001', 'test keyword', 'Electronics',
+        VALUES (1, 'art-001', 'test keyword', 'mobile-gadgets',
                 'Test Article Title',
                 'Test meta description for SEO',
                 '## Introduction\n' || repeat('y', 700),
