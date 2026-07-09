@@ -935,13 +935,18 @@ def _build_product_blocks(products: list[dict]) -> str:
             block += f" ~~{orig}~~"
         block += f"{disc}\n\n"
         block += f"**คะแนน:** {rating:.1f} ⭐ | **ยอดขาย:** {sold} ชิ้น\n\n"
-        cta_url = aff or p.get("product_link", "")
+        cta_url      = aff or p.get("product_link", "")
+        is_affiliate = bool(aff)
         if cta_url:
+            rel = "sponsored nofollow noopener" if is_affiliate else "nofollow noopener"
             block += (
                 f'<a href="{cta_url}" class="affiliate-btn" '
-                f'target="_blank" rel="sponsored nofollow noopener">'
-                f"ดูสินค้าบน Shopee</a>\n\n"
+                f'target="_blank" rel="{rel}">'
+                f"ดูสินค้าบน Shopee</a>"
             )
+            if not is_affiliate:
+                block += ' <span class="non-affiliate-note">(ลิงก์ตรง Shopee)</span>'
+            block += "\n\n"
         blocks.append(block)
 
     return "\n---\n\n".join(blocks)

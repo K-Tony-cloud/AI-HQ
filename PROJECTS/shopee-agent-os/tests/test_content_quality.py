@@ -92,10 +92,136 @@ class TestBuildProductBlocksCTA(unittest.TestCase):
         result = self._blocks([product])
         self.assertIn('target="_blank"', result)
 
+    def test_non_affiliate_fallback_shows_note(self):
+        product = _make_product(
+            affiliate_link="",
+            product_link="https://shopee.co.th/product/100/1001",
+        )
+        result = self._blocks([product])
+        self.assertIn('non-affiliate-note', result)
+        self.assertIn('ลิงก์ตรง Shopee', result)
+
+    def test_non_affiliate_fallback_no_sponsored_rel(self):
+        product = _make_product(
+            affiliate_link="",
+            product_link="https://shopee.co.th/product/100/1001",
+        )
+        result = self._blocks([product])
+        self.assertNotIn('rel="sponsored', result)
+        self.assertIn('rel="nofollow noopener"', result)
+
+    def test_affiliate_cta_no_non_affiliate_note(self):
+        product = _make_product(affiliate_link="https://s.shopee.co.th/TEST123")
+        result = self._blocks([product])
+        self.assertNotIn('non-affiliate-note', result)
+
 
 # ---------------------------------------------------------------------------
 # Tests: no duplicate disclosure in exported body
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Tests: _build_template_summary
+# ---------------------------------------------------------------------------
+
+class TestBuildTemplateSummary(unittest.TestCase):
+
+    def _summary(self, products):
+        from shopee_engine.article_exporter import _build_template_summary
+        return _build_template_summary("พัดลม USB", products)
+
+    def test_never_empty(self):
+        result = self._summary([_make_product(sale_price=500)])
+        self.assertTrue(len(result) > 0)
+
+    def test_empty_products_returns_fallback(self):
+        result = self._summary([])
+        self.assertTrue(len(result) > 0)
+        self.assertNotIn("บทความนี้มีลิงก์ Affiliate", result)
+
+    def test_references_cheapest_price(self):
+        cheap = _make_product(sale_price=100)
+        cheap["sale_price_fmt"] = "฿100"
+        cheap["title"] = "พัดลมราคาถูก"
+        result = self._summary([cheap, _make_product(sale_price=500)])
+        self.assertIn("฿100", result)
+
+    def test_references_product_title(self):
+        p = _make_product(sale_price=300)
+        p["title"] = "พัดลมพกพารุ่นพิเศษ"
+        p["item_rating"] = 4.9
+        result = self._summary([p])
+        self.assertIn("พัดลมพกพา", result)
+
+    def test_different_products_give_different_summaries(self):
+        products_a = [_make_product(sale_price=100), _make_product(sale_price=300)]
+        products_a[0]["title"] = "รุ่น A ราคาถูก"
+        products_a[0]["sale_price_fmt"] = "฿100"
+        products_a[1]["title"] = "รุ่น A กลาง"
+        products_a[1]["sale_price_fmt"] = "฿300"
+
+        products_b = [_make_product(sale_price=500), _make_product(sale_price=900)]
+        products_b[0]["title"] = "รุ่น B เริ่มต้น"
+        products_b[0]["sale_price_fmt"] = "฿500"
+        products_b[1]["title"] = "รุ่น B พรีเมียม"
+        products_b[1]["sale_price_fmt"] = "฿900"
+
+        from shopee_engine.article_exporter import _build_template_summary
+        s_a = _build_template_summary("พัดลม", products_a)
+        s_b = _build_template_summary("พัดลม", products_b)
+        self.assertNotEqual(s_a, s_b)
+
+    def test_no_disclosure_text_in_summary(self):
+        result = self._summary([_make_product(sale_price=500)])
+        self.assertNotIn("Affiliate", result)
+        self.assertNotIn("คอมมิชชัน", result)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _build_export_body always includes ## บทสรุป
+# ---------------------------------------------------------------------------
+
+class TestExportBodyAlwaysHasSummary(unittest.TestCase):
+
+    def _body(self, products=None, prose=None):
+        from shopee_engine.article_exporter import _build_export_body
+        products = products or [_make_product(sale_price=500)]
+        return _build_export_body({"keyword": "พัดลม"}, products, prose or {})
+
+    def test_summary_heading_always_present(self):
+        body = self._body()
+        self.assertIn("## บทสรุป", body)
+
+    def test_summary_heading_appears_exactly_once(self):
+        body = self._body()
+        self.assertEqual(body.count("## บทสรุป"), 1)
+
+    def test_summary_content_non_empty(self):
+        body = self._body()
+        idx = body.index("## บทสรุป")
+        rest = body[idx + len("## บทสรุป"):].lstrip("\n")
+        # Should have at least one non-empty line before next heading
+        summary_text = rest.split("\n## ")[0].strip()
+        self.assertTrue(len(summary_text) > 10)
+
+    def test_summary_before_faq(self):
+        body = self._body()
+        idx_summary = body.index("## บทสรุป")
+        idx_faq = body.index("## คำถามที่พบบ่อย")
+        self.assertLess(idx_summary, idx_faq)
+
+    def test_stored_prose_summary_used_when_non_empty(self):
+        body = self._body(prose={"บทสรุป": "สรุปพิเศษที่เขียนไว้แล้ว"})
+        self.assertIn("สรุปพิเศษที่เขียนไว้แล้ว", body)
+
+    def test_template_summary_used_when_prose_empty(self):
+        body = self._body(prose={"บทสรุป": ""})
+        # Should still have summary heading and non-empty content
+        self.assertIn("## บทสรุป", body)
+        idx = body.index("## บทสรุป")
+        rest = body[idx + len("## บทสรุป"):].split("\n## ")[0].strip()
+        self.assertTrue(len(rest) > 10)
+
 
 class TestNoDisclosureInBody(unittest.TestCase):
 

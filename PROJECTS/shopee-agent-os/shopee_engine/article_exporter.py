@@ -280,26 +280,83 @@ def _build_frontmatter(
 # Body builder (prose from content_md + data rebuilt from DB products)
 # ---------------------------------------------------------------------------
 
+def _build_template_summary(keyword: str, products: list[dict]) -> str:
+    """Build a product-specific summary from actual article data. Never returns empty."""
+    if not products:
+        return f"สินค้าทุกรุ่นในบทความนี้คัดสรรจากข้อมูลจริงบน Shopee เพื่อช่วยผู้ซื้อตัดสินใจได้ง่ายขึ้น"
+
+    count      = len(products)
+    by_price   = sorted(products, key=lambda p: p["sale_price"] or 9_999_999)
+    by_rating  = sorted(products, key=lambda p: p.get("item_rating") or 0, reverse=True)
+    by_sold    = sorted(products, key=lambda p: p.get("item_sold") or 0, reverse=True)
+
+    cheapest   = by_price[0]
+    priciest   = by_price[-1]
+    top_rated  = by_rating[0]
+    top_sold   = by_sold[0]
+
+    price_range = (
+        cheapest["sale_price_fmt"]
+        if cheapest["sale_price"] == priciest["sale_price"]
+        else f"{cheapest['sale_price_fmt']}–{priciest['sale_price_fmt']}"
+    )
+
+    para1 = (
+        f"ทั้ง {count} รุ่นที่แนะนำในบทความนี้คัดสรรจากยอดขายและรีวิวจริงบน Shopee "
+        f"ราคาอยู่ในช่วง {price_range} เหมาะสำหรับ {keyword} หลากหลายงบประมาณ"
+    )
+
+    parts: list[str] = []
+    if cheapest.get("sale_price") and cheapest is not top_rated:
+        parts.append(
+            f"สำหรับผู้ที่ต้องการประหยัดงบ **{cheapest['title'][:35]}** "
+            f"ราคา {cheapest['sale_price_fmt']} ถือเป็นตัวเลือกที่คุ้มค่าที่สุดในกลุ่มนี้"
+        )
+    if top_rated.get("item_rating", 0) >= 4.0:
+        sold_note = (
+            f" และมียอดขายสูงสุด {top_sold['item_sold']:,} ชิ้น"
+            if top_sold is top_rated and top_sold.get("item_sold")
+            else ""
+        )
+        parts.append(
+            f"**{top_rated['title'][:35]}** ได้คะแนนรีวิวสูงสุดที่ {top_rated['item_rating']:.1f}⭐"
+            f"{sold_note} ราคา {top_rated['sale_price_fmt']} "
+            f"เหมาะสำหรับผู้ที่เน้นคุณภาพและความน่าเชื่อถือจากผู้ใช้จริง"
+        )
+    elif top_sold is not cheapest and top_sold.get("item_sold"):
+        parts.append(
+            f"**{top_sold['title'][:35]}** มียอดขายสูงสุด {top_sold['item_sold']:,} ชิ้น "
+            f"ราคา {top_sold['sale_price_fmt']} บ่งบอกว่าเป็นตัวเลือกยอดนิยมในหมู่ผู้ซื้อจริง"
+        )
+
+    para2 = (
+        " ".join(parts) if parts
+        else f"แนะนำให้เปรียบเทียบสเปกและรีวิวของแต่ละรุ่นผ่านลิงก์ดูสินค้าก่อนตัดสินใจ"
+    )
+
+    return f"{para1}\n\n{para2}"
+
+
 def _build_export_body(article: dict, products: list[dict], prose: dict[str, str]) -> str:
     keyword = str(article.get("keyword", ""))
 
     intro        = prose.get("บทนำ") or f"บทความคัดสรร {keyword} จากข้อมูลจริงบน Shopee"
     buying_guide = prose.get("คำแนะนำการเลือกซื้อ", "")
-    summary      = prose.get("บทสรุป", "")
+    # Use stored prose summary only if non-empty; always fall back to product-specific template
+    summary      = prose.get("บทสรุป", "") or _build_template_summary(keyword, products)
     comp_table   = _build_comparison_table(products)
     prod_blocks  = _build_product_blocks(products)
     faq          = _build_faq(keyword, products)
 
-    buying_section  = f"\n## คำแนะนำการเลือกซื้อ\n\n{buying_guide}\n" if buying_guide else ""
-    summary_section = f"\n## บทสรุป\n\n{summary}\n" if summary else ""
+    buying_section = f"\n## คำแนะนำการเลือกซื้อ\n\n{buying_guide}\n" if buying_guide else ""
 
     return (
         f"## บทนำ\n\n{intro}\n\n"
         f"## ตารางเปรียบเทียบ\n\n{comp_table}\n\n"
         f"## แนะนำสินค้า\n\n{prod_blocks}\n"
         f"{buying_section}"
-        f"\n{faq}\n"
-        f"{summary_section}"
+        f"\n## บทสรุป\n\n{summary}\n\n"
+        f"{faq}\n"
     )
 
 
