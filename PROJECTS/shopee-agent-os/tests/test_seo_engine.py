@@ -94,14 +94,19 @@ def _make_test_db() -> Path:
          "", "สินค้าไม่มี affiliate link", 10),
     ])
 
-    # Insert one confirmed affiliate product
-    con.execute("""
+    # Insert confirmed affiliate products for ALL test products so validation passes
+    con.executemany("""
         INSERT INTO affiliate_products
         (id, itemid, shopid, title, category, identification_url, affiliate_short_url)
-        VALUES (1, 1001, 5001, 'เมาส์เกมมิ่ง ราคาถูก', 'Gaming Mice',
-                'https://shopee.co.th/product/5001/1001',
-                'https://s.shopee.co.th/TestMouse001')
-    """)
+        VALUES (?, ?, ?, ?, 'Gaming Mice', ?, ?)
+    """, [
+        (1, 1001, 5001, 'เมาส์เกมมิ่ง ราคาถูก',
+         'https://shopee.co.th/product/5001/1001', 'https://s.shopee.co.th/TestMouse001'),
+        (2, 1002, 5002, 'เมาส์ไร้สาย RGB',
+         'https://shopee.co.th/product/5002/1002', 'https://s.shopee.co.th/TestMouse002'),
+        (3, 1003, 5003, 'เมาส์เกมมิ่ง DPI สูง',
+         'https://shopee.co.th/product/5003/1003', 'https://s.shopee.co.th/TestMouse003'),
+    ])
 
     con.close()
     return tmp

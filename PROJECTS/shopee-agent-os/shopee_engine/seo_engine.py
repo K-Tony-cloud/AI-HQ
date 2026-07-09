@@ -1168,6 +1168,76 @@ def get_article_product_count(article_id: str) -> int:
         raise
 
 
+def get_article_link_status(article_id: str) -> dict:
+    """Return per-product affiliate link status for a draft article.
+
+    Includes product_url (canonical Shopee URL) so the operator can open the
+    product page and generate an affiliate link in the portal.
+    """
+    con = _connect(read_only=True)
+    try:
+        article_row = con.execute(
+            f"SELECT title, keyword, status FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+            [article_id],
+        ).fetchone()
+        if not article_row:
+            con.close()
+            return {"success": False, "error": f"Article '{article_id}' not found"}
+
+        article_title, keyword, status = article_row
+
+        products_df = con.execute(
+            f"""SELECT rank_in_article, itemid, shopid, product_title,
+                       sale_price, affiliate_link, affiliate_link_type
+                FROM {SEO_ARTICLE_PRODUCTS_TABLE}
+                WHERE article_id = ?
+                ORDER BY rank_in_article""",
+            [article_id],
+        ).fetchdf()
+        con.close()
+    except Exception as exc:
+        con.close()
+        return {"success": False, "error": str(exc)}
+
+    products: list[dict] = []
+    for _, r in products_df.iterrows():
+        itemid = int(r["itemid"])
+        shopid = int(r["shopid"])
+        link_type = str(r["affiliate_link_type"] or "none")
+        products.append({
+            "rank":          int(r["rank_in_article"]),
+            "itemid":        itemid,
+            "shopid":        shopid,
+            "product_title": str(r["product_title"] or ""),
+            "sale_price":    int(r["sale_price"] or 0),
+            "link_type":     link_type,
+            "affiliate_link": str(r["affiliate_link"] or ""),
+            "product_url":   f"https://shopee.co.th/product/{shopid}/{itemid}",
+        })
+
+    confirmed_count = sum(1 for p in products if p["link_type"] == "confirmed")
+    datafeed_count  = sum(1 for p in products if p["link_type"] == "datafeed")
+    missing_count   = sum(1 for p in products if p["link_type"] == "none")
+    total_count     = len(products)
+
+    missing_products = [p for p in products if p["link_type"] != "confirmed"]
+
+    return {
+        "success":         True,
+        "article_id":      article_id,
+        "article_title":   str(article_title or ""),
+        "keyword":         str(keyword or ""),
+        "status":          str(status or ""),
+        "products":        products,
+        "confirmed_count": confirmed_count,
+        "datafeed_count":  datafeed_count,
+        "missing_count":   missing_count,
+        "total_count":     total_count,
+        "all_confirmed":   confirmed_count == total_count,
+        "missing_products": missing_products,
+    }
+
+
 def list_articles(status: str | None = None, limit: int = 20) -> list[dict]:
     con = _connect(read_only=True)
     try:
@@ -1307,17 +1377,19 @@ def validate_article_for_publish(article_id: str) -> dict:
                     + ", ".join(str(r) for r in no_link["product_title"].head(3))
                 )
             confirmed_count = int((products["affiliate_link_type"] == "confirmed").sum())
-            datafeed_count  = len(products) - confirmed_count
-            if confirmed_count == 0:
+            total_count     = len(products)
+            if confirmed_count < total_count:
+                missing_df = products[products["affiliate_link_type"] != "confirmed"]
+                missing_titles = [str(t)[:40] for t in missing_df["product_title"].tolist()]
+                missing_ids    = [str(int(i)) for i in missing_df["itemid"].tolist()]
+                names_str = ", ".join(missing_titles[:3])
+                if len(missing_titles) > 3:
+                    names_str += f" (+{len(missing_titles) - 3} รายการ)"
                 errors.append(
-                    f"Zero confirmed affiliate links — all {len(products)} product(s) use "
-                    f"datafeed links (shope.ee/an_redir) which are NOT commission-tracked to "
-                    f"our account. Add real affiliate links from the Shopee Affiliate Portal "
-                    f"before publishing."
-                )
-            elif datafeed_count > 0:
-                warnings.append(
-                    f"{datafeed_count} product(s) use datafeed links (commission not guaranteed)"
+                    f"ต้องมี confirmed affiliate link ครบทุกสินค้า ก่อน publish — "
+                    f"ขาด {total_count - confirmed_count}/{total_count} รายการ: {names_str}. "
+                    f"itemid ที่ขาด: {', '.join(missing_ids)}. "
+                    f"ใช้ /affiliate-link-add หรือ /seo-link-status เพื่อดูรายละเอียด"
                 )
 
         con.close()
@@ -1381,17 +1453,19 @@ def validate_article_for_review(article_id: str) -> dict:
             if not no_link.empty:
                 warnings.append(f"{len(no_link)} สินค้าไม่มี affiliate link")
             confirmed_count = int((products["affiliate_link_type"] == "confirmed").sum())
-            datafeed_count  = len(products) - confirmed_count
-            if confirmed_count == 0:
+            total_count     = len(products)
+            if confirmed_count < total_count:
+                missing_df = products[products["affiliate_link_type"] != "confirmed"]
+                missing_titles = [str(t)[:40] for t in missing_df["product_title"].tolist()]
+                missing_ids    = [str(int(i)) for i in missing_df["itemid"].tolist()]
+                names_str = ", ".join(missing_titles[:3])
+                if len(missing_titles) > 3:
+                    names_str += f" (+{len(missing_titles) - 3} รายการ)"
                 errors.append(
-                    f"ไม่มี confirmed affiliate link แม้แต่รายการเดียว — "
-                    f"ลิงก์ทั้ง {len(products)} รายการเป็น datafeed (shope.ee/an_redir) "
-                    f"ซึ่งไม่ผูกกับบัญชี affiliate ของเรา ต้องเพิ่มลิงก์จริงจาก "
-                    f"Shopee Affiliate Portal ก่อน review"
-                )
-            elif datafeed_count > 0:
-                warnings.append(
-                    f"{datafeed_count} สินค้าใช้ datafeed link (คอมมิชชันไม่รับประกัน)"
+                    f"ต้องมี confirmed affiliate link ครบทุกสินค้า ก่อน review — "
+                    f"ขาด {total_count - confirmed_count}/{total_count} รายการ: {names_str}. "
+                    f"itemid ที่ขาด: {', '.join(missing_ids)}. "
+                    f"ใช้ /affiliate-link-add หรือ /seo-link-status เพื่อดูรายละเอียด"
                 )
 
         con.close()
@@ -1524,10 +1598,19 @@ def refresh_article_products(article_id: str) -> dict:
     if article_products.empty:
         return {"success": False, "error": "No products found for this article"}
 
-    aff_lookup = _get_affiliate_lookup()
-    updated = 0
-    not_found = 0
+    # Snapshot old link types before refresh
+    old_link_types: dict[int, str] = {}
+    for _, prod_row in article_products.iterrows():
+        iid = int(prod_row.get("itemid") or 0)
+        old_link_types[iid] = str(prod_row.get("affiliate_link_type") or "none")
+
+    aff_lookup   = _get_affiliate_lookup()
+    updated      = 0
+    not_found    = 0
     out_of_stock = 0
+
+    # Collect products that upgrade from datafeed/none → confirmed
+    newly_confirmed: list[dict] = []
 
     con2 = _connect(read_only=False)
     try:
@@ -1565,6 +1648,14 @@ def refresh_article_products(article_id: str) -> dict:
                 aff_lookup,
             )
 
+            if link_type == "confirmed" and old_link_types.get(itemid, "none") != "confirmed":
+                newly_confirmed.append({
+                    "itemid":        itemid,
+                    "shopid":        shopid,
+                    "product_title": str(prod_row.get("product_title") or ""),
+                    "affiliate_link": aff_link,
+                })
+
             con2.execute(f"""
                 UPDATE {SEO_ARTICLE_PRODUCTS_TABLE}
                 SET sale_price = ?,
@@ -1595,15 +1686,17 @@ def refresh_article_products(article_id: str) -> dict:
 
     needs_review = not_found > 0 or out_of_stock > 0
     return {
-        "success":       True,
-        "updated":       updated,
-        "not_found":     not_found,
-        "out_of_stock":  out_of_stock,
-        "needs_review":  needs_review,
-        "message":       (
+        "success":         True,
+        "updated":         updated,
+        "not_found":       not_found,
+        "out_of_stock":    out_of_stock,
+        "needs_review":    needs_review,
+        "newly_confirmed": newly_confirmed,
+        "message":         (
             f"Refreshed {updated} products. "
             + (f"{not_found} not found. " if not_found else "")
             + (f"{out_of_stock} out of stock. " if out_of_stock else "")
+            + (f"{len(newly_confirmed)} newly confirmed. " if newly_confirmed else "")
             + ("Manual review required." if needs_review else "All products active.")
         ),
     }

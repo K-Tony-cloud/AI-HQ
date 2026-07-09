@@ -15,6 +15,7 @@ from discord_bot.embeds.seo_embeds import (
     build_draft_duplicate_embed,
     build_draft_embed,
     build_ideas_embed,
+    build_link_status_embed,
     build_list_embed,
     build_preview_embed,
     build_publish_embed,
@@ -288,6 +289,42 @@ class SeoCog(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /seo-link-status
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-link-status",
+        description="แสดง affiliate link status รายสินค้าของ draft article",
+    )
+    @app_commands.describe(article_id="Article ID ที่ต้องการตรวจ")
+    async def cmd_seo_link_status(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.get_link_status, article_id)
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "ไม่พบบทความ")))
+                return
+            embed = build_link_status_embed(result)
+
+            # Attach CSV for missing products if any
+            if not result.get("all_confirmed"):
+                csv_bytes = await asyncio.to_thread(seo_service.export_missing_links_csv, article_id)
+                if csv_bytes:
+                    f = discord.File(
+                        io.BytesIO(csv_bytes),
+                        filename=f"{article_id}-missing-links.csv",
+                    )
+                    await interaction.followup.send(embed=embed, file=f)
+                    return
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
 
     # ------------------------------------------------------------------
     # /seo-list

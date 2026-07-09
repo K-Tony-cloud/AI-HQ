@@ -284,18 +284,31 @@ def build_publish_failed_embed(result: dict) -> discord.Embed:
 
 
 def build_refresh_embed(result: dict) -> discord.Embed:
-    article_id = result.get("article_id", "")
-    updated    = result.get("updated", 0)
-    not_found  = result.get("not_found", 0)
-    oos        = result.get("out_of_stock", 0)
-    demoted    = result.get("demoted_to_reviewed", False)
-    prev_st    = result.get("previous_status", "")
+    article_id      = result.get("article_id", "")
+    updated         = result.get("updated", 0)
+    not_found       = result.get("not_found", 0)
+    oos             = result.get("out_of_stock", 0)
+    demoted         = result.get("demoted_to_reviewed", False)
+    prev_st         = result.get("previous_status", "")
+    newly_confirmed = result.get("newly_confirmed", [])
 
     color = "trend" if (not_found or oos) else "success"
     e = make_embed(f"🔄 Refresh: `{article_id}`", color_key=color)
     e.add_field(name="Updated",       value=str(updated),    inline=True)
     e.add_field(name="Not Found",     value=str(not_found),  inline=True)
     e.add_field(name="Out of Stock",  value=str(oos),        inline=True)
+
+    if newly_confirmed:
+        names = "\n".join(
+            f"✅ {p['product_title'][:50]}" for p in newly_confirmed[:5]
+        )
+        if len(newly_confirmed) > 5:
+            names += f"\n(+{len(newly_confirmed) - 5} รายการ)"
+        e.add_field(
+            name=f"🎉 Newly Confirmed ({len(newly_confirmed)} รายการ)",
+            value=names,
+            inline=False,
+        )
 
     if demoted:
         e.add_field(name="⚠️ Status Changed",
@@ -307,6 +320,69 @@ def build_refresh_embed(result: dict) -> discord.Embed:
                     inline=False)
     elif not demoted:
         e.add_field(name="✅ สถานะ", value="สินค้าทุกรายการยังคงใช้งานได้", inline=False)
+    return e
+
+
+def build_link_status_embed(result: dict) -> discord.Embed:
+    article_id    = result.get("article_id", "")
+    article_title = result.get("article_title", "")
+    status        = result.get("status", "draft")
+    confirmed     = result.get("confirmed_count", 0)
+    datafeed      = result.get("datafeed_count", 0)
+    missing       = result.get("missing_count", 0)
+    total         = result.get("total_count", 0)
+    all_ok        = result.get("all_confirmed", False)
+
+    color = "success" if all_ok else "error"
+    status_line = "✅ พร้อม publish" if all_ok else f"❌ ขาด {total - confirmed}/{total} confirmed links"
+
+    e = make_embed(
+        f"🔗 Link Status: `{article_id}`",
+        color_key=color,
+        description=f"**{article_title[:80]}**\n{status_line}",
+    )
+    e.add_field(name="✅ Confirmed", value=str(confirmed), inline=True)
+    e.add_field(name="📋 Datafeed",  value=str(datafeed),  inline=True)
+    e.add_field(name="❌ Missing",   value=str(missing),   inline=True)
+
+    products = result.get("products", [])
+    if products:
+        _TYPE_ICON = {"confirmed": "✅", "datafeed": "📋", "none": "❌"}
+        rows: list[str] = []
+        for p in products:
+            icon  = _TYPE_ICON.get(p["link_type"], "❓")
+            title = p["product_title"][:32]
+            price = f"฿{p['sale_price']:,}"
+            rows.append(f"{icon} **{p['rank']}.** {title} ({price})")
+        e.add_field(name="สินค้าทั้งหมด", value="\n".join(rows)[:1024], inline=False)
+
+    missing_products = result.get("missing_products", [])
+    if missing_products:
+        cmd_lines: list[str] = []
+        for p in missing_products[:5]:
+            cmd_lines.append(
+                f"`/affiliate-link-add` itemid:`{p['itemid']}` "
+                f"— {p['product_title'][:30]}"
+            )
+        if len(missing_products) > 5:
+            cmd_lines.append(f"(+{len(missing_products) - 5} รายการ — ดูไฟล์ CSV ที่แนบ)")
+        e.add_field(
+            name="คำสั่งที่ต้องใช้",
+            value="\n".join(cmd_lines)[:1024],
+            inline=False,
+        )
+        e.add_field(
+            name="วิธีสร้าง Affiliate Link",
+            value=(
+                "1. เปิด shopee.co.th/product/<shopid>/<itemid> (ดูจาก CSV)\n"
+                "2. ไปที่ affiliate.shopee.co.th → สร้างลิงก์\n"
+                "3. วาง URL สินค้า → รับ s.shopee.co.th/... \n"
+                "4. `/affiliate-link-add link:<s.shopee.co.th/...>`\n"
+                "5. `/seo-refresh " + article_id + "` → ตรวจ confirmed count"
+            ),
+            inline=False,
+        )
+
     return e
 
 

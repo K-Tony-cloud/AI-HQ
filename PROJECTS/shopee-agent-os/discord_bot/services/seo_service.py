@@ -157,6 +157,46 @@ def unpublish_article(article_id: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def get_link_status(article_id: str) -> dict:
+    """Return per-product affiliate link status for a draft article."""
+    try:
+        from shopee_engine.seo_engine import get_article_link_status
+        return get_article_link_status(article_id)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def export_missing_links_csv(article_id: str) -> bytes | None:
+    """Return CSV bytes for products missing confirmed affiliate links, or None if all confirmed."""
+    import csv
+    import io
+    result = get_link_status(article_id)
+    if not result.get("success"):
+        return None
+    missing = result.get("missing_products", [])
+    if not missing:
+        return None
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=[
+        "article_id", "rank", "itemid", "shopid",
+        "product_title", "sale_price", "product_url", "affiliate_url",
+    ])
+    writer.writeheader()
+    for p in missing:
+        writer.writerow({
+            "article_id":    article_id,
+            "rank":          p["rank"],
+            "itemid":        p["itemid"],
+            "shopid":        p["shopid"],
+            "product_title": p["product_title"],
+            "sale_price":    p["sale_price"],
+            "product_url":   p["product_url"],
+            "affiliate_url": "",
+        })
+    return buf.getvalue().encode("utf-8")
+
+
 def list_seo_articles(
     status: str | None = None,
     limit: int = 10,
