@@ -144,6 +144,25 @@ SEO_ARTICLE_PRODUCTS_TABLE = "seo_article_products"
 
 ARTICLE_STATUSES = ("draft", "reviewed", "published", "archived")
 
+# Only these hostnames carry Shopee affiliate commission tracking
+AFFILIATE_HOSTS = {"s.shopee.co.th", "shope.ee"}
+
+
+def _validate_affiliate_url(url: str) -> str | None:
+    """Return an error string if url is not a valid commission-tracked affiliate URL, else None."""
+    from urllib.parse import urlparse
+    if not url:
+        return None  # missing link handled separately
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return f"URL ไม่ถูกต้อง (ไม่มี scheme/host): '{url[:60]}'"
+    if parsed.netloc not in AFFILIATE_HOSTS:
+        return (
+            f"URL ไม่ใช่ affiliate host ที่รองรับ ('{parsed.netloc}' ≠ {sorted(AFFILIATE_HOSTS)}): "
+            f"'{url[:60]}'"
+        )
+    return None
+
 # Allowed status transitions — all others are forbidden
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "draft":     frozenset({"reviewed"}),
@@ -916,10 +935,13 @@ def _build_product_blocks(products: list[dict]) -> str:
             block += f" ~~{orig}~~"
         block += f"{disc}\n\n"
         block += f"**คะแนน:** {rating:.1f} ⭐ | **ยอดขาย:** {sold} ชิ้น\n\n"
-        if aff:
-            block += f"[ดูสินค้าบน Shopee]({aff}){{.affiliate-btn}}\n\n"
-        else:
-            block += f"[ดูสินค้าบน Shopee]({p['product_link']}){{.affiliate-btn}}\n\n"
+        cta_url = aff or p.get("product_link", "")
+        if cta_url:
+            block += (
+                f'<a href="{cta_url}" class="affiliate-btn" '
+                f'target="_blank" rel="sponsored nofollow noopener">'
+                f"ดูสินค้าบน Shopee</a>\n\n"
+            )
         blocks.append(block)
 
     return "\n---\n\n".join(blocks)
@@ -1076,10 +1098,6 @@ def generate_article_draft(
 ## บทสรุป
 
 {summary}
-
----
-
-*บทความนี้มีลิงก์ Affiliate — เมื่อซื้อสินค้าผ่านลิงก์ในบทความ ผู้เขียนอาจได้รับค่าคอมมิชชัน โดยไม่มีผลต่อราคาสินค้าสำหรับผู้ซื้อ*
 """
 
     content_md = frontmatter + "\n" + body
@@ -1418,6 +1436,14 @@ def validate_article_for_publish(article_id: str) -> dict:
                     f"itemid ที่ขาด: {', '.join(missing_ids)}. "
                     f"ใช้ /affiliate-link-add หรือ /seo-link-status เพื่อดูรายละเอียด"
                 )
+            # Check URL format for confirmed links
+            confirmed_rows = products[products["affiliate_link_type"] == "confirmed"]
+            for _, prow in confirmed_rows.iterrows():
+                url_err = _validate_affiliate_url(str(prow.get("affiliate_link") or ""))
+                if url_err:
+                    errors.append(
+                        f"itemid {int(prow['itemid'])}: {url_err}"
+                    )
 
         con.close()
     except Exception as exc:
@@ -1502,6 +1528,14 @@ def validate_article_for_review(article_id: str) -> dict:
                     f"itemid ที่ขาด: {', '.join(missing_ids)}. "
                     f"ใช้ /affiliate-link-add หรือ /seo-link-status เพื่อดูรายละเอียด"
                 )
+            # Check URL format for confirmed links
+            confirmed_rows = products[products["affiliate_link_type"] == "confirmed"]
+            for _, prow in confirmed_rows.iterrows():
+                url_err = _validate_affiliate_url(str(prow.get("affiliate_link") or ""))
+                if url_err:
+                    errors.append(
+                        f"itemid {int(prow['itemid'])}: {url_err}"
+                    )
 
         con.close()
     except Exception as exc:

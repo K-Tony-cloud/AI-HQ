@@ -91,13 +91,18 @@ def _safe_article_path(article_id: str, articles_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 _PLACEHOLDER_PATTERNS = [
-    (re.compile(r'\btodo\b', re.IGNORECASE),           "TODO placeholder"),
-    (re.compile(r'\blorem ipsum\b', re.IGNORECASE),    "Lorem ipsum placeholder"),
-    (re.compile(r'\bexample\.com\b', re.IGNORECASE),   "example.com placeholder"),
-    (re.compile(r'\{ARTICLE_ID\}'),                     "Unresolved {ARTICLE_ID}"),
-    (re.compile(r'\bsk-ant-[A-Za-z0-9_-]{10,}'),      "Anthropic API key"),
-    (re.compile(r'\bsk-[A-Za-z0-9]{20,}'),            "OpenAI-style API key"),
-    (re.compile(r'/Users/[A-Za-z0-9_.-]+/'),           "Local absolute path"),
+    (re.compile(r'\btodo\b', re.IGNORECASE),                    "TODO placeholder"),
+    (re.compile(r'\blorem ipsum\b', re.IGNORECASE),             "Lorem ipsum placeholder"),
+    (re.compile(r'\bexample\.com\b', re.IGNORECASE),            "example.com placeholder"),
+    (re.compile(r'\{ARTICLE_ID\}'),                              "Unresolved {ARTICLE_ID}"),
+    (re.compile(r'\bsk-ant-[A-Za-z0-9_-]{10,}'),               "Anthropic API key"),
+    (re.compile(r'\bsk-[A-Za-z0-9]{20,}'),                     "OpenAI-style API key"),
+    (re.compile(r'/Users/[A-Za-z0-9_.-]+/'),                    "Local absolute path"),
+    (re.compile(r'\{\.affiliate-btn\}'),                         "Pandoc {.affiliate-btn} literal"),
+    (re.compile(r'href="/[^"]*affiliate[^"]*"'),                 "Internal/relative affiliate path in href"),
+    (re.compile(r'href="/seo-'),                                 "Discord command path in href"),
+    (re.compile(r'href="/affiliate-'),                           "Internal affiliate route in href"),
+    (re.compile(r'href="(\d+)"'),                               "Numeric itemid used as href"),
 ]
 
 
@@ -117,6 +122,16 @@ def detect_placeholders(content: str) -> list[str]:
 
 _PROSE_SECTIONS = {"บทนำ", "คำแนะนำการเลือกซื้อ", "บทสรุป"}
 _DATA_SECTIONS  = {"ตารางเปรียบเทียบ", "แนะนำสินค้า", "คำถามที่พบบ่อย (FAQ)"}
+
+_DISCLOSURE_RE = re.compile(
+    r"---\s*\n\s*\*บทความนี้มีลิงก์ Affiliate[^\n]*\n?",
+    re.MULTILINE,
+)
+
+
+def _clean_disclosure(text: str) -> str:
+    """Strip embedded affiliate disclosure text from prose sections."""
+    return _DISCLOSURE_RE.sub("", text).strip()
 
 
 def _extract_prose(content_md: str) -> dict[str, str]:
@@ -145,7 +160,7 @@ def _extract_prose(content_md: str) -> dict[str, str]:
     if current and current in _PROSE_SECTIONS:
         sections[current] = "\n".join(buf).strip()
 
-    return sections
+    return {k: _clean_disclosure(v) for k, v in sections.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -285,10 +300,6 @@ def _build_export_body(article: dict, products: list[dict], prose: dict[str, str
         f"{buying_section}"
         f"\n{faq}\n"
         f"{summary_section}"
-        "\n---\n\n"
-        "*บทความนี้มีลิงก์ Affiliate — "
-        "เมื่อซื้อสินค้าผ่านลิงก์ในบทความ ผู้เขียนอาจได้รับค่าคอมมิชชัน "
-        "โดยไม่มีผลต่อราคาสินค้าสำหรับผู้ซื้อ*\n"
     )
 
 
