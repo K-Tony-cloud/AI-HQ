@@ -139,10 +139,15 @@ def normalize_search_terms(keyword: str) -> dict:
 # Constants
 # ---------------------------------------------------------------------------
 
-SEO_ARTICLES_TABLE         = "seo_articles"
-SEO_ARTICLE_PRODUCTS_TABLE = "seo_article_products"
+SEO_ARTICLES_TABLE          = "seo_articles"
+SEO_ARTICLE_PRODUCTS_TABLE  = "seo_article_products"
+SEO_ARTICLE_REVISIONS_TABLE = "seo_article_revisions"
 
 ARTICLE_STATUSES = ("draft", "reviewed", "published", "archived")
+
+# Fields that /seo-edit may change; 'intro' and 'summary' map to content_md sections
+EDITABLE_FIELDS = frozenset({"title", "intro", "summary", "meta_description", "category", "category_label"})
+_PROSE_FIELD_TO_SECTION: dict[str, str] = {"intro": "บทนำ", "summary": "บทสรุป"}
 
 # Only these hostnames carry Shopee affiliate commission tracking
 AFFILIATE_HOSTS = {"s.shopee.co.th", "shope.ee"}
@@ -326,6 +331,23 @@ def _init_seo_tables(con: duckdb.DuckDBPyConnection) -> None:
             )
         except Exception:
             pass
+
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {SEO_ARTICLE_REVISIONS_TABLE} (
+            id               INTEGER PRIMARY KEY,
+            article_id       VARCHAR NOT NULL,
+            revision_number  INTEGER NOT NULL,
+            title            VARCHAR DEFAULT '',
+            meta_description VARCHAR DEFAULT '',
+            content_md       TEXT    DEFAULT '',
+            category         VARCHAR DEFAULT '',
+            category_label   VARCHAR DEFAULT '',
+            status           VARCHAR DEFAULT '',
+            saved_by         VARCHAR DEFAULT 'system',
+            change_summary   VARCHAR DEFAULT '',
+            created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
 
 # ---------------------------------------------------------------------------
@@ -1773,4 +1795,607 @@ def refresh_article_products(article_id: str) -> dict:
             + (f"{len(newly_confirmed)} newly confirmed. " if newly_confirmed else "")
             + ("Manual review required." if needs_review else "All products active.")
         ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Article revision history
+# ---------------------------------------------------------------------------
+
+def save_revision(
+    article_id: str,
+    change_summary: str = "",
+    saved_by: str = "system",
+) -> int:
+    """Snapshot current article state as a new revision. Returns revision_number."""
+    article = get_article(article_id)
+    if not article:
+        raise ValueError(f"Article '{article_id}' not found")
+
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        last = con.execute(
+            f"SELECT COALESCE(MAX(revision_number), 0) FROM {SEO_ARTICLE_REVISIONS_TABLE} "
+            f"WHERE article_id = ?",
+            [article_id],
+        ).fetchone()[0]
+        rev_num = int(last) + 1
+        next_id = con.execute(
+            f"SELECT COALESCE(MAX(id), 0) + 1 FROM {SEO_ARTICLE_REVISIONS_TABLE}"
+        ).fetchone()[0]
+        con.execute(f"""
+            INSERT INTO {SEO_ARTICLE_REVISIONS_TABLE}
+                (id, article_id, revision_number, title, meta_description, content_md,
+                 category, category_label, status, saved_by, change_summary, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, [
+            next_id, article_id, rev_num,
+            str(article.get("title") or ""),
+            str(article.get("meta_description") or ""),
+            str(article.get("content_md") or ""),
+            str(article.get("category") or ""),
+            str(article.get("category_label") or ""),
+            str(article.get("status") or ""),
+            saved_by, change_summary,
+        ])
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    prune_old_revisions(article_id)
+    return rev_num
+
+
+def prune_old_revisions(article_id: str, keep: int = 5) -> int:
+    """Delete oldest revisions keeping only the N most recent. Returns count deleted."""
+    con = _connect(read_only=False)
+    try:
+        rows = con.execute(
+            f"SELECT revision_number FROM {SEO_ARTICLE_REVISIONS_TABLE} "
+            f"WHERE article_id = ? ORDER BY revision_number DESC",
+            [article_id],
+        ).fetchall()
+        if len(rows) <= keep:
+            con.close()
+            return 0
+        to_delete = [r[0] for r in rows[keep:]]
+        placeholders = ",".join("?" * len(to_delete))
+        con.execute(
+            f"DELETE FROM {SEO_ARTICLE_REVISIONS_TABLE} "
+            f"WHERE article_id = ? AND revision_number IN ({placeholders})",
+            [article_id] + to_delete,
+        )
+        con.close()
+        return len(to_delete)
+    except Exception:
+        con.close()
+        raise
+
+
+def get_article_history(article_id: str) -> list[dict]:
+    """Return revision list for an article, newest first."""
+    con = _connect(read_only=True)
+    try:
+        df = con.execute(f"""
+            SELECT revision_number, title, category, status,
+                   saved_by, change_summary, created_at
+            FROM {SEO_ARTICLE_REVISIONS_TABLE}
+            WHERE article_id = ?
+            ORDER BY revision_number DESC
+        """, [article_id]).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if df.empty:
+        return []
+
+    return [
+        {
+            "revision_number": int(row.get("revision_number") or 0),
+            "title":           str(row.get("title") or ""),
+            "category":        str(row.get("category") or ""),
+            "status":          str(row.get("status") or ""),
+            "saved_by":        str(row.get("saved_by") or ""),
+            "change_summary":  str(row.get("change_summary") or ""),
+            "created_at":      str(row.get("created_at") or "")[:19],
+        }
+        for _, row in df.iterrows()
+    ]
+
+
+def rollback_article(article_id: str, revision_number: int) -> dict:
+    """Restore article to a saved revision. Auto-saves current state first. Demotes to draft."""
+    con = _connect(read_only=True)
+    try:
+        rev_df = con.execute(
+            f"SELECT * FROM {SEO_ARTICLE_REVISIONS_TABLE} "
+            f"WHERE article_id = ? AND revision_number = ?",
+            [article_id, revision_number],
+        ).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if rev_df.empty:
+        return {
+            "success": False,
+            "error": f"Revision #{revision_number} ไม่พบสำหรับบทความ '{article_id}'",
+        }
+
+    row = rev_df.iloc[0]
+
+    # Auto-save current state before overwriting
+    try:
+        save_revision(article_id, f"Auto-save before rollback to #{revision_number}", "system")
+    except Exception:
+        pass  # non-blocking
+
+    con_w = _connect(read_only=False)
+    try:
+        _init_seo_tables(con_w)
+        con_w.execute(f"""
+            UPDATE {SEO_ARTICLES_TABLE}
+            SET title            = ?,
+                meta_description = ?,
+                content_md       = ?,
+                category         = ?,
+                category_label   = ?,
+                status           = 'draft',
+                updated_at       = CURRENT_TIMESTAMP
+            WHERE article_id = ?
+        """, [
+            str(row.get("title") or ""),
+            str(row.get("meta_description") or ""),
+            str(row.get("content_md") or ""),
+            str(row.get("category") or ""),
+            str(row.get("category_label") or ""),
+            article_id,
+        ])
+        con_w.close()
+    except Exception:
+        con_w.close()
+        raise
+
+    return {
+        "success":         True,
+        "article_id":      article_id,
+        "revision_number": revision_number,
+        "restored_title":  str(row.get("title") or ""),
+        "status_after":    "draft",
+        "message":         f"Rolled back to revision #{revision_number}. Status → draft.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Article field editing
+# ---------------------------------------------------------------------------
+
+def _update_prose_section(content_md: str, section_name: str, new_text: str) -> str:
+    """Replace the body of a ## section in content_md without touching other sections."""
+    lines = content_md.split("\n")
+    start = None
+    end   = None
+
+    for i, line in enumerate(lines):
+        if re.match(rf"^##\s+{re.escape(section_name)}\s*$", line):
+            start = i
+        elif start is not None and re.match(r"^##\s+", line):
+            end = i
+            break
+
+    if start is not None:
+        before = lines[: start + 1]
+        after  = lines[end:] if end is not None else []
+        return "\n".join(before + ["", new_text, ""] + after)
+
+    # Section absent — insert before FAQ, or at end
+    faq_idx = next(
+        (i for i, l in enumerate(lines) if re.match(r"^##\s+คำถามที่พบบ่อย", l)),
+        None,
+    )
+    if faq_idx is not None:
+        return "\n".join(
+            lines[:faq_idx] + [f"## {section_name}", "", new_text, "", ""] + lines[faq_idx:]
+        )
+    return "\n".join(lines + ["", f"## {section_name}", "", new_text, ""])
+
+
+def edit_article_field(
+    article_id: str,
+    field: str,
+    value: str,
+    editor: str = "discord",
+) -> dict:
+    """Edit one field in the article DB record. Never edits the generated Markdown file.
+
+    Supported fields: title, intro, summary, meta_description, category, category_label.
+    - title: updates column; article_id (slug) is never changed.
+    - intro/summary: patches the corresponding ## section inside content_md.
+    - category: validated against CANONICAL_CATEGORIES.
+    Saves a revision before any change. Updates updated_at.
+
+    Returns {success, article_id, field, old_value, new_value,
+             revision_saved, requires_republish, slug_unchanged, error}
+    """
+    if field not in EDITABLE_FIELDS:
+        return {
+            "success": False,
+            "error": (
+                f"Field '{field}' ไม่รองรับ. "
+                f"รองรับ: {', '.join(sorted(EDITABLE_FIELDS))}"
+            ),
+        }
+
+    article = get_article(article_id)
+    if not article:
+        return {"success": False, "error": f"Article '{article_id}' not found"}
+
+    # Capture old value
+    if field in _PROSE_FIELD_TO_SECTION:
+        from shopee_engine.article_exporter import _extract_prose
+        prose     = _extract_prose(str(article.get("content_md") or ""))
+        section   = _PROSE_FIELD_TO_SECTION[field]
+        old_value = prose.get(section, "")
+    else:
+        old_value = str(article.get(field) or "")
+
+    value = value.strip()
+
+    # Field-specific validation
+    if field == "title" and not value:
+        return {"success": False, "error": "Title ห้ามว่าง"}
+    if field == "category" and value:
+        from shopee_engine.taxonomy import CANONICAL_CATEGORIES
+        if value not in CANONICAL_CATEGORIES:
+            return {
+                "success": False,
+                "error": (
+                    f"'{value}' ไม่ใช่ canonical category slug. "
+                    f"รองรับ: {', '.join(sorted(CANONICAL_CATEGORIES.keys()))}"
+                ),
+            }
+
+    # Snapshot current state before any change
+    try:
+        rev_num = save_revision(article_id, f"Before edit: {field}", editor)
+    except Exception as exc:
+        return {"success": False, "error": f"Failed to save revision: {exc}"}
+
+    # Apply
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        if field in _PROSE_FIELD_TO_SECTION:
+            section     = _PROSE_FIELD_TO_SECTION[field]
+            content_md  = str(article.get("content_md") or "")
+            new_content = _update_prose_section(content_md, section, value)
+            con.execute(
+                f"UPDATE {SEO_ARTICLES_TABLE} "
+                f"SET content_md = ?, updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+                [new_content, article_id],
+            )
+        else:
+            # field is validated against EDITABLE_FIELDS whitelist — safe interpolation
+            con.execute(
+                f"UPDATE {SEO_ARTICLES_TABLE} "
+                f"SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+                [value, article_id],
+            )
+        con.close()
+    except Exception as exc:
+        con.close()
+        return {"success": False, "error": str(exc)}
+
+    current_status    = str(article.get("status") or "")
+    requires_republish = current_status in ("published", "reviewed")
+
+    return {
+        "success":           True,
+        "article_id":        article_id,
+        "field":             field,
+        "old_value":         old_value[:300],
+        "new_value":         value[:300],
+        "revision_saved":    rev_num,
+        "requires_republish": requires_republish,
+        "slug_unchanged":    True,
+        "editor":            editor,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Article product management
+# ---------------------------------------------------------------------------
+
+def _demote_if_needed(article_id: str, current_status: str, con) -> bool:
+    """Demote article to draft if it was reviewed or published. Returns True if demoted."""
+    if current_status in ("reviewed", "published"):
+        con.execute(
+            f"UPDATE {SEO_ARTICLES_TABLE} "
+            f"SET status = 'draft', updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+            [article_id],
+        )
+        return True
+    con.execute(
+        f"UPDATE {SEO_ARTICLES_TABLE} SET updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+        [article_id],
+    )
+    return False
+
+
+def add_product_to_article(
+    article_id: str,
+    itemid: int,
+    rank: int | None = None,
+) -> dict:
+    """Add a product to an article. Validates existence in products table and non-duplication."""
+    article = get_article(article_id)
+    if not article:
+        return {"success": False, "error": f"Article '{article_id}' not found"}
+
+    con = _connect(read_only=True)
+    try:
+        product_df = con.execute(
+            "SELECT itemid, shopid, title, sale_price, image_link, product_link, "
+            '"product_short link" AS datafeed_link '
+            "FROM products WHERE itemid = ? LIMIT 1",
+            [itemid],
+        ).fetchdf()
+        if product_df.empty:
+            con.close()
+            return {"success": False, "error": f"itemid {itemid} ไม่พบในฐานข้อมูลสินค้า"}
+
+        dup = con.execute(
+            f"SELECT itemid FROM {SEO_ARTICLE_PRODUCTS_TABLE} "
+            f"WHERE article_id = ? AND itemid = ?",
+            [article_id, itemid],
+        ).fetchone()
+        if dup:
+            con.close()
+            return {"success": False, "error": f"itemid {itemid} มีอยู่ในบทความนี้แล้ว"}
+
+        max_rank = int(
+            con.execute(
+                f"SELECT COALESCE(MAX(rank_in_article), 0) "
+                f"FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?",
+                [article_id],
+            ).fetchone()[0]
+        )
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    p = product_df.iloc[0]
+    aff_link, link_type = _resolve_affiliate_link(
+        str(p.get("product_link") or ""),
+        str(p.get("datafeed_link") or ""),
+        _get_affiliate_lookup(),
+    )
+    target_rank = rank if rank is not None else max_rank + 1
+
+    try:
+        rev_num = save_revision(article_id, f"Before add itemid={itemid}", "discord")
+    except Exception:
+        rev_num = None
+
+    con_w = _connect(read_only=False)
+    try:
+        _init_seo_tables(con_w)
+        next_id = int(
+            con_w.execute(
+                f"SELECT COALESCE(MAX(id), 0) + 1 FROM {SEO_ARTICLE_PRODUCTS_TABLE}"
+            ).fetchone()[0]
+        )
+        con_w.execute(f"""
+            INSERT INTO {SEO_ARTICLE_PRODUCTS_TABLE}
+                (id, article_id, itemid, shopid, product_title, sale_price,
+                 image_link, affiliate_link, affiliate_link_type,
+                 rank_in_article, product_status, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+        """, [
+            next_id, article_id, int(p["itemid"]), int(p.get("shopid") or 0),
+            str(p.get("title") or "")[:200], int(p.get("sale_price") or 0),
+            str(p.get("image_link") or ""), aff_link, link_type, target_rank,
+        ])
+        demoted = _demote_if_needed(article_id, str(article.get("status") or ""), con_w)
+        con_w.close()
+    except Exception:
+        con_w.close()
+        raise
+
+    return {
+        "success":           True,
+        "article_id":        article_id,
+        "action":            "add",
+        "itemid":            int(p["itemid"]),
+        "product_title":     str(p.get("title") or "")[:80],
+        "rank_in_article":   target_rank,
+        "affiliate_link_type": link_type,
+        "demoted_to_draft":  demoted,
+        "revision_saved":    rev_num,
+    }
+
+
+def remove_product_from_article(article_id: str, itemid: int) -> dict:
+    """Remove a product from an article and re-rank remaining products."""
+    article = get_article(article_id)
+    if not article:
+        return {"success": False, "error": f"Article '{article_id}' not found"}
+
+    con = _connect(read_only=True)
+    try:
+        target = con.execute(
+            f"SELECT id, product_title, rank_in_article FROM {SEO_ARTICLE_PRODUCTS_TABLE} "
+            f"WHERE article_id = ? AND itemid = ?",
+            [article_id, itemid],
+        ).fetchone()
+        if not target:
+            con.close()
+            return {"success": False, "error": f"itemid {itemid} ไม่อยู่ในบทความนี้"}
+
+        count = int(
+            con.execute(
+                f"SELECT COUNT(*) FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?",
+                [article_id],
+            ).fetchone()[0]
+        )
+        if count <= 1:
+            con.close()
+            return {"success": False, "error": "ไม่สามารถลบสินค้าสุดท้ายในบทความได้"}
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    removed_title = str(target[1] or "")
+    removed_rank  = int(target[2] or 0)
+
+    try:
+        rev_num = save_revision(article_id, f"Before remove itemid={itemid}", "discord")
+    except Exception:
+        rev_num = None
+
+    con_w = _connect(read_only=False)
+    try:
+        _init_seo_tables(con_w)
+        con_w.execute(
+            f"DELETE FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ? AND itemid = ?",
+            [article_id, itemid],
+        )
+        remaining = con_w.execute(
+            f"SELECT id FROM {SEO_ARTICLE_PRODUCTS_TABLE} "
+            f"WHERE article_id = ? ORDER BY rank_in_article ASC",
+            [article_id],
+        ).fetchall()
+        for new_rank, (row_id,) in enumerate(remaining, 1):
+            con_w.execute(
+                f"UPDATE {SEO_ARTICLE_PRODUCTS_TABLE} "
+                f"SET rank_in_article = ? WHERE id = ?",
+                [new_rank, row_id],
+            )
+        demoted = _demote_if_needed(article_id, str(article.get("status") or ""), con_w)
+        con_w.close()
+    except Exception:
+        con_w.close()
+        raise
+
+    return {
+        "success":        True,
+        "article_id":     article_id,
+        "action":         "remove",
+        "itemid":         itemid,
+        "removed_title":  removed_title[:80],
+        "removed_rank":   removed_rank,
+        "demoted_to_draft": demoted,
+        "revision_saved": rev_num,
+        "remaining_count": count - 1,
+    }
+
+
+def replace_product_in_article(
+    article_id: str,
+    old_itemid: int,
+    new_itemid: int,
+) -> dict:
+    """Replace a product with another at the same rank position."""
+    if old_itemid == new_itemid:
+        return {"success": False, "error": "old_itemid และ new_itemid ต้องไม่เหมือนกัน"}
+
+    article = get_article(article_id)
+    if not article:
+        return {"success": False, "error": f"Article '{article_id}' not found"}
+
+    con = _connect(read_only=True)
+    try:
+        old_row = con.execute(
+            f"SELECT id, product_title, rank_in_article FROM {SEO_ARTICLE_PRODUCTS_TABLE} "
+            f"WHERE article_id = ? AND itemid = ?",
+            [article_id, old_itemid],
+        ).fetchone()
+        if not old_row:
+            con.close()
+            return {"success": False, "error": f"itemid {old_itemid} ไม่อยู่ในบทความนี้"}
+
+        new_df = con.execute(
+            "SELECT itemid, shopid, title, sale_price, image_link, product_link, "
+            '"product_short link" AS datafeed_link FROM products WHERE itemid = ? LIMIT 1',
+            [new_itemid],
+        ).fetchdf()
+        if new_df.empty:
+            con.close()
+            return {"success": False, "error": f"itemid {new_itemid} ไม่พบในฐานข้อมูลสินค้า"}
+
+        dup = con.execute(
+            f"SELECT itemid FROM {SEO_ARTICLE_PRODUCTS_TABLE} "
+            f"WHERE article_id = ? AND itemid = ?",
+            [article_id, new_itemid],
+        ).fetchone()
+        if dup:
+            con.close()
+            return {"success": False, "error": f"itemid {new_itemid} มีอยู่ในบทความนี้แล้ว"}
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    target_rank = int(old_row[2] or 0)
+    old_title   = str(old_row[1] or "")
+    p = new_df.iloc[0]
+    aff_link, link_type = _resolve_affiliate_link(
+        str(p.get("product_link") or ""),
+        str(p.get("datafeed_link") or ""),
+        _get_affiliate_lookup(),
+    )
+
+    try:
+        rev_num = save_revision(article_id, f"Before replace {old_itemid}→{new_itemid}", "discord")
+    except Exception:
+        rev_num = None
+
+    con_w = _connect(read_only=False)
+    try:
+        _init_seo_tables(con_w)
+        con_w.execute(
+            f"DELETE FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ? AND itemid = ?",
+            [article_id, old_itemid],
+        )
+        next_id = int(
+            con_w.execute(
+                f"SELECT COALESCE(MAX(id), 0) + 1 FROM {SEO_ARTICLE_PRODUCTS_TABLE}"
+            ).fetchone()[0]
+        )
+        con_w.execute(f"""
+            INSERT INTO {SEO_ARTICLE_PRODUCTS_TABLE}
+                (id, article_id, itemid, shopid, product_title, sale_price,
+                 image_link, affiliate_link, affiliate_link_type,
+                 rank_in_article, product_status, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+        """, [
+            next_id, article_id, int(p["itemid"]), int(p.get("shopid") or 0),
+            str(p.get("title") or "")[:200], int(p.get("sale_price") or 0),
+            str(p.get("image_link") or ""), aff_link, link_type, target_rank,
+        ])
+        demoted = _demote_if_needed(article_id, str(article.get("status") or ""), con_w)
+        con_w.close()
+    except Exception:
+        con_w.close()
+        raise
+
+    return {
+        "success":           True,
+        "article_id":        article_id,
+        "action":            "replace",
+        "old_itemid":        old_itemid,
+        "old_title":         old_title[:80],
+        "new_itemid":        int(p["itemid"]),
+        "new_title":         str(p.get("title") or "")[:80],
+        "rank_in_article":   target_rank,
+        "affiliate_link_type": link_type,
+        "demoted_to_draft":  demoted,
+        "revision_saved":    rev_num,
     }

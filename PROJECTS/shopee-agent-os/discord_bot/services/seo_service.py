@@ -208,3 +208,81 @@ def list_seo_articles(
         return {"success": True, "data": articles, "total": len(articles), "stats": stats}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Article editing
+# ---------------------------------------------------------------------------
+
+def edit_article_field(
+    article_id: str,
+    field: str,
+    value: str,
+    editor: str = "discord",
+) -> dict:
+    try:
+        from shopee_engine.seo_engine import edit_article_field as _edit
+        return _edit(article_id, field, value, editor)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Product management
+# ---------------------------------------------------------------------------
+
+def add_product(article_id: str, itemid: int, rank: int | None = None) -> dict:
+    try:
+        from shopee_engine.seo_engine import add_product_to_article
+        return add_product_to_article(article_id, itemid, rank)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def remove_product(article_id: str, itemid: int) -> dict:
+    try:
+        from shopee_engine.seo_engine import remove_product_from_article
+        return remove_product_from_article(article_id, itemid)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def replace_product(article_id: str, old_itemid: int, new_itemid: int) -> dict:
+    try:
+        from shopee_engine.seo_engine import replace_product_in_article
+        return replace_product_in_article(article_id, old_itemid, new_itemid)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Republish
+# ---------------------------------------------------------------------------
+
+def republish_article(article_id: str) -> dict:
+    try:
+        from shopee_engine.git_publish_service import safe_republish
+        return safe_republish(article_id)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Version history & rollback
+# ---------------------------------------------------------------------------
+
+def get_article_history(article_id: str) -> dict:
+    try:
+        from shopee_engine.seo_engine import get_article_history as _history
+        revisions = _history(article_id)
+        return {"success": True, "article_id": article_id, "revisions": revisions}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def rollback_article(article_id: str, revision_number: int) -> dict:
+    try:
+        from shopee_engine.seo_engine import rollback_article as _rollback
+        return _rollback(article_id, revision_number)
+    except Exception as e:
+        return {"success": False, "error": str(e)}

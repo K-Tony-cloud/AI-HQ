@@ -471,6 +471,202 @@ def safe_publish(article_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Safe republish pipeline (published articles only, preserves published_at)
+# ---------------------------------------------------------------------------
+
+def _mark_republished(article_id: str, commit_hash: str, file_path: str) -> None:
+    """Update git metadata and updated_at; published_at is intentionally NOT changed."""
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        con.execute(f"""
+            UPDATE {SEO_ARTICLES_TABLE}
+            SET git_commit_hash = ?,
+                published_path  = ?,
+                updated_at      = CURRENT_TIMESTAMP
+            WHERE article_id = ?
+        """, [commit_hash, file_path, article_id])
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+
+def safe_republish(article_id: str) -> dict:
+    """Re-publish a published article after content edits.
+
+    Differences from safe_publish:
+    - Requires status == 'published' (not 'reviewed').
+    - Preserves original published_at; only updates git_commit_hash and updated_at.
+    - Git commit message uses 'republish' prefix.
+    """
+    published_enabled = is_publish_enabled()
+
+    try:
+        lock_ctx = _PublishLock()
+        lock_ctx.__enter__()
+    except RuntimeError as e:
+        return _pub_err(article_id, str(e))
+
+    exported_path: str | None = None
+
+    try:
+        # 1. Git environment
+        env = check_git_environment()
+        if not env["ok"]:
+            return _pub_err(article_id, "Git environment check failed: " + "; ".join(env["errors"]))
+
+        # 2. Verify article is published
+        con = _connect(read_only=True)
+        try:
+            row = con.execute(
+                f"SELECT status, published_at FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+                [article_id],
+            ).fetchone()
+            con.close()
+        except Exception as exc:
+            con.close()
+            return _pub_err(article_id, str(exc))
+
+        if not row:
+            return _pub_err(article_id, f"Article '{article_id}' not found")
+
+        current_status, original_published_at = row[0], row[1]
+        if current_status != "published":
+            return _pub_err(
+                article_id,
+                f"/seo-republish ใช้ได้เฉพาะบทความ status 'published' "
+                f"(ปัจจุบัน: '{current_status}'). "
+                f"สำหรับบทความ draft/reviewed ให้ใช้ /seo-publish แทน",
+            )
+
+        # 3. Pre-publish validation — filter out the status=='reviewed' error since we ARE published
+        val = validate_article_for_publish(article_id)
+        real_errors = [e for e in val["errors"] if "must be 'reviewed'" not in e]
+        if real_errors:
+            return _pub_err(article_id,
+                            "Pre-publish validation failed: " + "; ".join(real_errors),
+                            warnings=val.get("warnings", []))
+
+        # 4. Export — pass original published_at so frontmatter retains it
+        pub_ts = str(original_published_at) if original_published_at else None
+        export_result = export_article(article_id, as_status="published", published_at=pub_ts)
+        if not export_result["success"]:
+            return _pub_err(article_id, "Export failed: " + export_result["error"])
+        exported_path = export_result["file_path"]
+
+        # 5. Astro build
+        build_result = run_astro_build()
+        if not build_result["success"]:
+            delete_article_file(article_id)
+            exported_path = None
+            return _pub_err(article_id, "Astro build failed: " + build_result["error"])
+
+        # 6. Verify
+        verify = verify_article_in_build(article_id)
+        if not verify["success"]:
+            delete_article_file(article_id)
+            exported_path = None
+            return _pub_err(article_id, verify["error"])
+
+        # ── DRY-RUN EXIT ────────────────────────────────────────────────────
+        if not published_enabled:
+            delete_article_file(article_id)
+            exported_path = None
+            return {
+                "success":     True,
+                "dry_run":     True,
+                "republished": True,
+                "article_id":  article_id,
+                "commit_hash": None,
+                "pushed":      False,
+                "page_url":    None,
+                "warnings":    val.get("warnings", []),
+                "in_sitemap":  verify.get("in_sitemap", False),
+                "message": (
+                    "Dry-run republish: validation ✅, export ✅, build ✅, page ✅ — "
+                    "SEO_PUBLISH_ENABLED=false → no commit/push"
+                ),
+            }
+
+        # 7. Git commit
+        rel_path = Path(exported_path).relative_to(_git_root()).as_posix()
+        try:
+            _git("add", rel_path)
+        except RuntimeError as e:
+            delete_article_file(article_id)
+            exported_path = None
+            return _pub_err(article_id, f"git add failed: {e}")
+
+        staged_files = _git_staged_files()
+        bad_files    = _verify_staged_allowlist(staged_files)
+        if bad_files:
+            _git("reset", "HEAD", rel_path)
+            delete_article_file(article_id)
+            exported_path = None
+            return _pub_err(article_id, "Staged allowlist violation: " + ", ".join(bad_files))
+
+        commit_msg = f"seo: republish article {article_id}"
+        try:
+            _git("commit", "-m", commit_msg)
+        except RuntimeError as e:
+            try:
+                _git("reset", "HEAD", rel_path)
+            except RuntimeError:
+                pass
+            delete_article_file(article_id)
+            exported_path = None
+            return _pub_err(article_id, f"git commit failed: {e}")
+
+        commit_hash = _git("rev-parse", "HEAD").stdout.strip()
+
+        # 8. Git push
+        try:
+            _git("push", get_git_remote(), get_git_branch())
+        except RuntimeError as e:
+            return {
+                "success":     False,
+                "dry_run":     False,
+                "republished": True,
+                "article_id":  article_id,
+                "commit_hash": commit_hash,
+                "pushed":      False,
+                "page_url":    None,
+                "warnings":    val.get("warnings", []),
+                "error": (
+                    f"git push failed — commit {commit_hash[:8]} exists locally. "
+                    f"Run `git push` to retry. Original error: {e}"
+                ),
+            }
+
+        # 9. Update DB — only git_commit_hash + updated_at, NOT published_at
+        from shopee_engine.article_exporter import get_site_url
+        try:
+            site_url = get_site_url()
+            page_url = f"{site_url}/{article_id}/"
+        except ValueError:
+            page_url = None
+
+        _mark_republished(article_id, commit_hash, rel_path)
+
+        return {
+            "success":     True,
+            "dry_run":     False,
+            "republished": True,
+            "article_id":  article_id,
+            "commit_hash": commit_hash,
+            "pushed":      True,
+            "page_url":    page_url,
+            "warnings":    val.get("warnings", []),
+            "in_sitemap":  verify.get("in_sitemap", False),
+            "message":     f"Republished: {page_url or article_id}",
+        }
+
+    finally:
+        lock_ctx.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------------
 # Safe unpublish pipeline
 # ---------------------------------------------------------------------------
 

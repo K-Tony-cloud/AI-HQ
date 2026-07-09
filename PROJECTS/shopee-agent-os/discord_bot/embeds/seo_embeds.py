@@ -411,6 +411,170 @@ def build_unpublish_embed(result: dict) -> discord.Embed:
     return e
 
 
+def build_edit_embed(result: dict) -> discord.Embed:
+    article_id  = result.get("article_id", "")
+    field       = result.get("field", "")
+    old_val     = str(result.get("old_value", "") or "")[:200] or "—"
+    new_val     = str(result.get("new_value", "") or "")[:200] or "—"
+    rev         = result.get("revision_saved")
+    req_repub   = result.get("requires_republish", False)
+
+    e = make_embed(
+        f"✏️ Edited: `{article_id}`",
+        color_key="success",
+        description=f"**{field}** อัปเดตสำเร็จ",
+    )
+    e.add_field(name="Field",     value=f"`{field}`", inline=True)
+    e.add_field(name="Revision",  value=f"#{rev}" if rev else "—", inline=True)
+    e.add_field(name="ค่าเดิม",   value=f"```{old_val}```", inline=False)
+    e.add_field(name="ค่าใหม่",   value=f"```{new_val}```", inline=False)
+    if result.get("slug_unchanged"):
+        e.add_field(name="🔗 Slug", value="ไม่เปลี่ยน (article_id คงเดิม)", inline=False)
+    if req_repub:
+        e.add_field(
+            name="⚠️ ต้อง republish",
+            value=f"บทความนี้ถูกเผยแพร่แล้ว ต้อง `/seo-republish {article_id}` เพื่อให้การแก้ไขมีผลบนเว็บ",
+            inline=False,
+        )
+    return e
+
+
+def build_product_manage_embed(result: dict) -> discord.Embed:
+    action      = result.get("action", "")
+    article_id  = result.get("article_id", "")
+    demoted     = result.get("demoted_to_draft", False)
+    rev         = result.get("revision_saved")
+
+    _ACTION_EMOJI = {"add": "➕", "remove": "🗑️", "replace": "🔄"}
+    _ACTION_LABEL = {"add": "Added", "remove": "Removed", "replace": "Replaced"}
+    emoji = _ACTION_EMOJI.get(action, "✏️")
+    label = _ACTION_LABEL.get(action, action.title())
+
+    e = make_embed(
+        f"{emoji} Product {label}: `{article_id}`",
+        color_key="success" if not demoted else "trend",
+    )
+
+    if action == "add":
+        e.add_field(name="itemid",    value=str(result.get("itemid", "")),          inline=True)
+        e.add_field(name="ลำดับที่",  value=str(result.get("rank_in_article", "")), inline=True)
+        e.add_field(name="Link Type", value=result.get("affiliate_link_type", ""),  inline=True)
+        e.add_field(name="สินค้า",    value=str(result.get("product_title", ""))[:80], inline=False)
+    elif action == "remove":
+        e.add_field(name="itemid",        value=str(result.get("itemid", "")),          inline=True)
+        e.add_field(name="ลำดับเดิม",    value=str(result.get("removed_rank", "")),    inline=True)
+        e.add_field(name="คงเหลือ",       value=str(result.get("remaining_count", "")), inline=True)
+        e.add_field(name="สินค้าที่ลบ",  value=str(result.get("removed_title", ""))[:80], inline=False)
+    elif action == "replace":
+        e.add_field(name="Old itemid", value=str(result.get("old_itemid", "")), inline=True)
+        e.add_field(name="New itemid", value=str(result.get("new_itemid", "")), inline=True)
+        e.add_field(name="ลำดับที่",   value=str(result.get("rank_in_article", "")), inline=True)
+        e.add_field(name="เปลี่ยนจาก", value=str(result.get("old_title", ""))[:80], inline=False)
+        e.add_field(name="เป็น",        value=str(result.get("new_title", ""))[:80], inline=False)
+
+    if rev:
+        e.add_field(name="Revision Saved", value=f"#{rev}", inline=True)
+    if demoted:
+        e.add_field(
+            name="⚠️ Status → draft",
+            value="บทความถูก demote เพราะสินค้าเปลี่ยน ต้อง review และ publish ใหม่",
+            inline=False,
+        )
+    return e
+
+
+def build_republish_embed(result: dict) -> discord.Embed:
+    dry_run     = result.get("dry_run", False)
+    article_id  = result.get("article_id", "")
+    page_url    = result.get("page_url")
+    commit_hash = result.get("commit_hash", "")
+    warnings    = result.get("warnings", [])
+    in_sitemap  = result.get("in_sitemap", False)
+
+    if dry_run:
+        color = "info"
+        title = f"🧪 Dry-Run Republish: `{article_id}`"
+        desc  = result.get("message", "Dry-run complete — SEO_PUBLISH_ENABLED=false")
+    else:
+        color = "opportunity"
+        title = f"🔁 Republished: `{article_id}`"
+        desc  = f"**{page_url}**" if page_url else "Republished successfully"
+
+    e = make_embed(title, color_key=color, description=desc)
+    e.add_field(name="published_at", value="คงเดิม (ไม่เปลี่ยน)", inline=True)
+    e.add_field(name="updated_at",   value="อัปเดตแล้ว",           inline=True)
+    if not dry_run and commit_hash:
+        e.add_field(name="Commit", value=f"`{commit_hash[:8]}`", inline=True)
+    e.add_field(name="Sitemap", value="✅ included" if in_sitemap else "⏳ pending", inline=True)
+    if warnings:
+        e.add_field(name="⚠️ Warnings",
+                    value="\n".join(f"• {w}" for w in warnings)[:1024], inline=False)
+    return e
+
+
+def build_history_embed(result: dict) -> discord.Embed:
+    article_id = result.get("article_id", "")
+    revisions  = result.get("revisions", [])
+
+    if not revisions:
+        return make_embed(
+            f"📜 History: `{article_id}`",
+            color_key="info",
+            description="ยังไม่มี revision history สำหรับบทความนี้",
+        )
+
+    e = make_embed(
+        f"📜 History: `{article_id}`",
+        color_key="operator",
+        description=f"**{len(revisions)}** revision(s) บันทึกล่าสุด (เก็บสูงสุด 5 รายการ)",
+    )
+    for rev in revisions[:5]:
+        rev_num   = rev.get("revision_number", "?")
+        title_str = str(rev.get("title", ""))[:50] or "—"
+        summary   = str(rev.get("change_summary", ""))[:60] or "—"
+        by        = str(rev.get("saved_by", "system"))
+        ts        = str(rev.get("created_at", ""))[:16]
+        status    = str(rev.get("status", ""))
+        e.add_field(
+            name=f"#{rev_num} — {ts}",
+            value=f"**{title_str}**\n{summary}\nby {by} | status: {status}",
+            inline=False,
+        )
+
+    e.add_field(
+        name="Rollback",
+        value=f"ใช้ `/seo-rollback article_id:{article_id} revision_number:<#>` เพื่อย้อนกลับ",
+        inline=False,
+    )
+    return e
+
+
+def build_rollback_embed(result: dict) -> discord.Embed:
+    article_id  = result.get("article_id", "")
+    rev_num     = result.get("revision_number", "?")
+    title_after = result.get("restored_title", "")
+
+    e = make_embed(
+        f"⏪ Rollback: `{article_id}`",
+        color_key="trend",
+        description=f"Rolled back to revision **#{rev_num}**",
+    )
+    e.add_field(name="Article ID",     value=f"`{article_id}`",              inline=True)
+    e.add_field(name="Restored To",    value=f"Revision #{rev_num}",         inline=True)
+    e.add_field(name="Status After",   value="📝 draft",                     inline=True)
+    if title_after:
+        e.add_field(name="Title Restored", value=title_after[:100], inline=False)
+    e.add_field(
+        name="Next Step",
+        value=(
+            f"ตรวจสอบด้วย `/seo-preview {article_id}` แล้ว "
+            f"`/seo-review {article_id} action:approve` ก่อน publish ใหม่"
+        ),
+        inline=False,
+    )
+    return e
+
+
 def build_list_embed(
     articles: list[dict],
     stats: dict,

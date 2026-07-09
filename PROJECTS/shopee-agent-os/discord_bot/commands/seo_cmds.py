@@ -14,15 +14,20 @@ from discord_bot.embeds.base import error_embed, send_and_confirm
 from discord_bot.embeds.seo_embeds import (
     build_draft_duplicate_embed,
     build_draft_embed,
+    build_edit_embed,
+    build_history_embed,
     build_ideas_embed,
     build_link_status_embed,
     build_list_embed,
     build_preview_embed,
+    build_product_manage_embed,
     build_publish_embed,
     build_publish_failed_embed,
     build_refresh_embed,
+    build_republish_embed,
     build_review_blocked_embed,
     build_review_embed,
+    build_rollback_embed,
     build_unpublish_embed,
 )
 from discord_bot.services import seo_service
@@ -323,6 +328,234 @@ class SeoCog(commands.Cog):
                     await interaction.followup.send(embed=embed, file=f)
                     return
             await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-edit
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-edit",
+        description="แก้ไข field ของบทความใน DB (ไม่แก้ Markdown โดยตรง)",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการแก้ไข",
+        field="Field ที่ต้องการแก้ (title/intro/summary/meta_description/category/category_label)",
+        value="ค่าใหม่",
+    )
+    @app_commands.choices(field=[
+        Choice(name="title",             value="title"),
+        Choice(name="intro (บทนำ)",      value="intro"),
+        Choice(name="summary (บทสรุป)",  value="summary"),
+        Choice(name="meta_description",  value="meta_description"),
+        Choice(name="category (slug)",   value="category"),
+        Choice(name="category_label",    value="category_label"),
+    ])
+    async def cmd_seo_edit(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+        field: str,
+        value: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        editor = str(interaction.user) if interaction.user else "discord"
+        try:
+            result = await asyncio.to_thread(
+                seo_service.edit_article_field, article_id, field, value, editor
+            )
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Edit failed")))
+                return
+            embed = build_edit_embed(result)
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-product-add
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-product-add",
+        description="เพิ่มสินค้าเข้าบทความ (ตรวจสอบว่ามีอยู่ใน DB และไม่ซ้ำ)",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการเพิ่มสินค้า",
+        itemid="itemid ของสินค้าที่ต้องการเพิ่ม",
+        rank="ลำดับที่ต้องการ (default: ต่อท้าย)",
+    )
+    async def cmd_seo_product_add(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+        itemid: str,
+        rank: int | None = None,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            iid = int(itemid)
+        except ValueError:
+            await interaction.followup.send(embed=error_embed(f"itemid ต้องเป็นตัวเลข: {itemid}"))
+            return
+        try:
+            result = await asyncio.to_thread(seo_service.add_product, article_id, iid, rank)
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Failed")))
+                return
+            await interaction.followup.send(embed=build_product_manage_embed(result))
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-product-remove
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-product-remove",
+        description="ลบสินค้าออกจากบทความ (re-rank สินค้าที่เหลือ)",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการแก้ไข",
+        itemid="itemid ของสินค้าที่ต้องการลบ",
+    )
+    async def cmd_seo_product_remove(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+        itemid: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            iid = int(itemid)
+        except ValueError:
+            await interaction.followup.send(embed=error_embed(f"itemid ต้องเป็นตัวเลข: {itemid}"))
+            return
+        try:
+            result = await asyncio.to_thread(seo_service.remove_product, article_id, iid)
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Failed")))
+                return
+            await interaction.followup.send(embed=build_product_manage_embed(result))
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-product-replace
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-product-replace",
+        description="แทนที่สินค้าด้วยสินค้าใหม่ในลำดับเดิม",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการแก้ไข",
+        old_itemid="itemid ของสินค้าที่ต้องการแทนที่",
+        new_itemid="itemid ของสินค้าใหม่",
+    )
+    async def cmd_seo_product_replace(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+        old_itemid: str,
+        new_itemid: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            old_iid = int(old_itemid)
+            new_iid = int(new_itemid)
+        except ValueError:
+            await interaction.followup.send(embed=error_embed("itemid ต้องเป็นตัวเลข"))
+            return
+        try:
+            result = await asyncio.to_thread(
+                seo_service.replace_product, article_id, old_iid, new_iid
+            )
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Failed")))
+                return
+            await interaction.followup.send(embed=build_product_manage_embed(result))
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-republish
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-republish",
+        description="Republish บทความที่ published อยู่แล้วหลังแก้ไขเนื้อหา (คง published_at เดิม)",
+    )
+    @app_commands.describe(article_id="Article ID ที่มี status 'published'")
+    async def cmd_seo_republish(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.republish_article, article_id)
+            if not result.get("success"):
+                await interaction.followup.send(
+                    embed=build_publish_failed_embed({**result, "article_id": article_id})
+                )
+                return
+            await interaction.followup.send(embed=build_republish_embed(result))
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /seo-history
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-history",
+        description="แสดง revision history ของบทความ (สูงสุด 5 รายการล่าสุด)",
+    )
+    @app_commands.describe(article_id="Article ID ที่ต้องการดู history")
+    async def cmd_seo_history(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.get_article_history, article_id)
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Failed")))
+                return
+            await interaction.followup.send(embed=build_history_embed(result))
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-rollback
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-rollback",
+        description="ย้อนกลับบทความไปยัง revision ที่ระบุ (บันทึก state ปัจจุบันก่อนเสมอ)",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการ rollback",
+        revision_number="หมายเลข revision ที่ต้องการกลับไป (ดูจาก /seo-history)",
+    )
+    async def cmd_seo_rollback(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+        revision_number: int,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(
+                seo_service.rollback_article, article_id, revision_number
+            )
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Rollback failed")))
+                return
+            await interaction.followup.send(embed=build_rollback_embed(result))
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))
 
