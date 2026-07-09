@@ -139,11 +139,11 @@ def check_git_environment() -> dict:
 
     # Pre-existing staged changes (would contaminate our commit)
     try:
-        staged = _git("diff", "--cached", "--name-only")
-        if staged.stdout.strip():
+        staged_files = _git_staged_files()
+        if staged_files:
             errors.append(
                 "Staging area is not clean — commit or unstage existing changes first:\n"
-                + staged.stdout.strip()[:500]
+                + "\n".join(staged_files)[:500]
             )
     except RuntimeError as e:
         warnings.append(f"Could not check staged changes: {e}")
@@ -164,8 +164,22 @@ def check_git_environment() -> dict:
 _ARTICLES_REL = "PROJECTS/seo-website/src/content/articles"
 
 
+def _git_staged_files() -> list[str]:
+    """Return currently staged file paths as proper Unicode strings.
+
+    Uses -z (NUL-delimited output) and core.quotepath=false so that
+    non-ASCII filenames (Thai, CJK, etc.) are returned as real UTF-8
+    strings rather than octal-escaped sequences like \\340\\271\\204.
+    """
+    result = _git("-c", "core.quotepath=false", "diff", "--cached", "--name-only", "-z")
+    return [f for f in result.stdout.split("\0") if f]
+
+
 def _verify_staged_allowlist(staged_files: list[str]) -> list[str]:
-    """Return list of files that are outside the allowed staging paths."""
+    """Return list of files that are outside the allowed staging paths.
+
+    Expects paths as proper Unicode strings (not octal-escaped).
+    """
     bad = []
     for f in staged_files:
         if not f.startswith(_ARTICLES_REL):
@@ -383,9 +397,8 @@ def safe_publish(article_id: str) -> dict:
             return _pub_err(article_id, f"git add failed: {e}")
 
         # Verify staged allowlist
-        staged_result = _git("diff", "--cached", "--name-only")
-        staged_files  = [f for f in staged_result.stdout.strip().split("\n") if f]
-        bad_files     = _verify_staged_allowlist(staged_files)
+        staged_files = _git_staged_files()
+        bad_files    = _verify_staged_allowlist(staged_files)
         if bad_files:
             _git("reset", "HEAD", rel_path)
             delete_article_file(article_id)
@@ -533,9 +546,8 @@ def safe_unpublish(article_id: str) -> dict:
             export_article(article_id, as_status="published")
             return _pub_err(article_id, f"git add (deletion) failed: {e}")
 
-        staged_result = _git("diff", "--cached", "--name-only")
-        staged_files  = [f for f in staged_result.stdout.strip().split("\n") if f]
-        bad_files     = _verify_staged_allowlist(staged_files)
+        staged_files = _git_staged_files()
+        bad_files    = _verify_staged_allowlist(staged_files)
         if bad_files:
             _git("reset", "HEAD", rel_path)
             export_article(article_id, as_status="published")
