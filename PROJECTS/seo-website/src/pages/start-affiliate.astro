@@ -1,0 +1,224 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import referral from '../config/referral';
+
+const { referralCode, disclaimer, campaignImages } = referral;
+
+const siteUrl      = import.meta.env.SITE || 'http://localhost:4321';
+const canonicalUrl = `${siteUrl}/start-affiliate`;
+
+// CTA links with UTM context
+const heroCta    = '/go/shopee-affiliate?utm_source=start-affiliate&utm_medium=hero&utm_campaign=referral';
+const bottomCta  = '/go/shopee-affiliate?utm_source=start-affiliate&utm_medium=bottom-cta&utm_campaign=referral';
+
+const STEPS = [
+  {
+    title: 'สมัครเข้าร่วม Shopee Affiliate',
+    desc:  'กรอกข้อมูลและรอการอนุมัติจาก Shopee เพื่อเข้าถึงระบบสร้างลิงก์',
+  },
+  {
+    title: 'เลือกสินค้าที่ต้องการแนะนำ',
+    desc:  'เลือกสินค้าที่คุณสนใจหรือตรงกับกลุ่มผู้ติดตามของคุณ',
+  },
+  {
+    title: 'สร้างลิงก์และแชร์ผ่านช่องทางของตัวเอง',
+    desc:  'สร้าง Affiliate Link แล้วนำไปแชร์บน Facebook, TikTok, Instagram หรือบล็อก',
+  },
+  {
+    title: 'รับค่าคอมมิชชันจากคำสั่งซื้อที่เข้าเงื่อนไข',
+    desc:  'เมื่อมีคนซื้อสินค้าผ่านลิงก์ของคุณและคำสั่งซื้อเป็นไปตามเงื่อนไข คุณจะได้รับค่าคอมมิชชัน',
+  },
+];
+
+const RESOURCES = [
+  {
+    icon:    '🛍️',
+    title:   'ดูสินค้าแนะนำทั้งหมด',
+    desc:    'บทความรีวิวและเปรียบเทียบสินค้าคัดสรรจากข้อมูลยอดขายจริง',
+    href:    '/',
+    enabled: true,
+  },
+  {
+    icon:    '📱',
+    title:   'มือถือ & แกดเจ็ต',
+    desc:    'พัดลม USB แก็ดเจ็ตพกพา อุปกรณ์ชาร์จ สินค้าไอที',
+    href:    '/category/mobile-gadgets',
+    enabled: true,
+  },
+  {
+    icon:    '🏠',
+    title:   'บ้านและครัว',
+    desc:    'เครื่องใช้ในบ้าน ของตกแต่ง เครื่องครัว',
+    href:    '/category/home-living',
+    enabled: true,
+  },
+  {
+    icon:    '💄',
+    title:   'ความงาม',
+    desc:    'สกินแคร์ เซรั่ม เครื่องสำอาง น่าแนะนำ',
+    href:    '/category/beauty',
+    enabled: true,
+  },
+  {
+    icon:    '🔍',
+    title:   'วิธีเลือกสินค้าขายดี',
+    desc:    'เทคนิคหาสินค้ายอดขายสูงและเลือกสินค้าที่ขายง่าย',
+    href:    null,
+    enabled: false,
+  },
+  {
+    icon:    '✍️',
+    title:   'ตัวอย่าง Hook & Caption',
+    desc:    'ข้อความเรียกความสนใจสำเร็จรูปพร้อมนำไปใช้',
+    href:    null,
+    enabled: false,
+  },
+  {
+    icon:    '📖',
+    title:   'คู่มือมือใหม่ Affiliate',
+    desc:    'เริ่มต้นตั้งแต่ศูนย์ ทำตามได้ทันที',
+    href:    null,
+    enabled: false,
+  },
+];
+---
+
+<BaseLayout
+  title="เริ่มต้นทำ Shopee Affiliate | สมัครและเรียนรู้วิธีสร้างรายได้"
+  description="คู่มือเริ่มต้นทำ Shopee Affiliate สำหรับมือใหม่ พร้อมขั้นตอนสมัคร วิธีเลือกสินค้า และแนวทางสร้างคอนเทนต์ออนไลน์"
+  canonicalUrl={canonicalUrl}
+>
+  <!-- ── Hero ── -->
+  <section class="aff-hero">
+    <div class="container">
+      <p class="aff-hero__label">Shopee Affiliate Program</p>
+      <h1>เปลี่ยนการแชร์สินค้า<br/>ให้เป็นโอกาสสร้างรายได้</h1>
+      <p class="aff-hero__sub">
+        สมัคร Shopee Affiliate แล้วเริ่มแนะนำสินค้าที่คุณสนใจ<br/>
+        ผ่าน Facebook, TikTok และช่องทางออนไลน์ของคุณ
+      </p>
+      <div class="aff-hero__ctas">
+        <a href={heroCta} class="btn btn--primary btn--lg" rel="nofollow noopener">
+          สมัคร Shopee Affiliate
+        </a>
+      </div>
+
+      <!-- Referral code -->
+      <div class="referral-code-box">
+        <div class="referral-code-box__label">รหัสแนะนำ (Referral Code)</div>
+        <div class="referral-code-box__inner">
+          <span class="referral-code-box__code" id="ref-code">{referralCode}</span>
+          <button class="referral-code-box__copy" id="copy-btn" type="button" aria-label="คัดลอกรหัสแนะนำ">
+            คัดลอก
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Campaign images (if provided in referral.ts) ── -->
+  {campaignImages.length > 0 && (
+    <section class="campaign-images">
+      <div class="container">
+        <div class="campaign-images__grid">
+          {campaignImages.map((src) => (
+            <img
+              src={src}
+              alt="สมัคร Shopee Affiliate ผ่านรหัสแนะนำ DB773VP"
+              width="600"
+              height="400"
+              loading="lazy"
+              decoding="async"
+              class="campaign-images__img"
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <div class="container">
+
+    <!-- ── How it works ── -->
+    <section class="section">
+      <h2 class="section-title">Affiliate ทำงานอย่างไร</h2>
+      <div class="steps-grid">
+        {STEPS.map((step, i) => (
+          <div class="step-card">
+            <div class="step-card__num">{i + 1}</div>
+            <h3>{step.title}</h3>
+            <p>{step.desc}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- ── Disclaimer ── -->
+    <div class="aff-disclaimer" role="note">
+      <span class="aff-disclaimer__icon" aria-hidden="true">ℹ️</span>
+      <span>{disclaimer}</span>
+    </div>
+
+    <!-- ── What's next ── -->
+    <section class="section">
+      <h2 class="section-title">สมัครแล้วเริ่มต้นอย่างไรต่อ</h2>
+      <p class="section-desc">ใช้บทความและสินค้าในเว็บของเราเป็นจุดเริ่มต้นแนะนำสินค้า</p>
+      <div class="resource-grid">
+        {RESOURCES.map(r => r.enabled ? (
+          <a href={r.href!} class="resource-card">
+            <span class="resource-card__icon" aria-hidden="true">{r.icon}</span>
+            <h3 class="resource-card__title">{r.title}</h3>
+            <p class="resource-card__desc">{r.desc}</p>
+          </a>
+        ) : (
+          <div class="resource-card resource-card--disabled" aria-disabled="true">
+            <span class="resource-card__icon" aria-hidden="true">{r.icon}</span>
+            <h3 class="resource-card__title">{r.title}</h3>
+            <p class="resource-card__desc">{r.desc}</p>
+            <span class="coming-soon-badge">เร็ว ๆ นี้</span>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- ── Bottom CTA ── -->
+    <section class="aff-bottom-cta">
+      <h2>พร้อมเริ่มต้นหรือยัง?</h2>
+      <p>
+        สมัคร Shopee Affiliate ผ่านลิงก์ด้านล่าง แล้วกลับมาใช้บทความและข้อมูลสินค้าในเว็บของเรา
+        เป็นแรงบันดาลใจในการสร้างคอนเทนต์
+      </p>
+      <a href={bottomCta} class="btn btn--primary btn--lg" rel="nofollow noopener">
+        สมัคร Shopee Affiliate
+      </a>
+    </section>
+
+  </div>
+
+  <script>
+    const btn  = document.getElementById('copy-btn')  as HTMLButtonElement | null;
+    const code = document.getElementById('ref-code');
+    if (btn && code) {
+      btn.addEventListener('click', async () => {
+        const text = code.textContent?.trim() ?? '';
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          // Fallback for older browsers
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          window.getSelection()?.removeAllRanges();
+          window.getSelection()?.addRange(range);
+          document.execCommand('copy');
+          window.getSelection()?.removeAllRanges();
+        }
+        btn.textContent = 'คัดลอกแล้ว ✓';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'คัดลอก';
+          btn.classList.remove('copied');
+        }, 2200);
+      });
+    }
+  </script>
+</BaseLayout>

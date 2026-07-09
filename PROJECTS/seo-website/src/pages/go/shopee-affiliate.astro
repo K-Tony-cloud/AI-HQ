@@ -1,0 +1,87 @@
+---
+/**
+ * /go/shopee-affiliate — Referral redirect page.
+ *
+ * Passes UTM params through to Shopee, logs the click to localStorage,
+ * then redirects via JS (meta-refresh fallback for no-JS browsers).
+ *
+ * To change the destination URL, edit src/config/referral.ts only.
+ */
+import referral from '../../config/referral';
+
+const dest = referral.referralUrl;
+---
+
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>กำลังพาไปยัง Shopee Affiliate…</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta http-equiv="refresh" content={`0; url=${dest}`} />
+  <style>
+    body {
+      font-family: 'Sarabun', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f8fafc;
+      color: #64748b;
+      text-align: center;
+    }
+    .msg { max-width: 320px; }
+    .msg p { margin: 0.5rem 0 0; font-size: 0.9rem; }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #0d9488;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; border-top-color: #0d9488; }
+    }
+  </style>
+</head>
+<body>
+  <div class="msg">
+    <div class="spinner"></div>
+    <strong>กำลังพาไปยัง Shopee Affiliate</strong>
+    <p>ถ้าหน้าไม่เปลี่ยน <a href={dest}>คลิกที่นี่</a></p>
+  </div>
+
+  <script define:vars={{ dest }}>
+    (function () {
+      // Log click with UTM params + referrer
+      try {
+        var p = new URLSearchParams(location.search);
+        var entry = {
+          ts:           new Date().toISOString(),
+          utm_source:   p.get('utm_source')   || '',
+          utm_medium:   p.get('utm_medium')   || '',
+          utm_campaign: p.get('utm_campaign') || '',
+          ref_page:     p.get('ref')          || document.referrer || 'direct',
+        };
+        var stored = JSON.parse(localStorage.getItem('aff_ref_clicks') || '[]');
+        stored.push(entry);
+        // Keep last 100 entries
+        localStorage.setItem('aff_ref_clicks', JSON.stringify(stored.slice(-100)));
+      } catch (_) {}
+
+      // Build final URL — append UTM params that were passed to this page
+      var destUrl = new URL(dest);
+      var src = new URLSearchParams(location.search);
+      if (src.get('utm_source'))   destUrl.searchParams.set('utm_source',   src.get('utm_source'));
+      if (src.get('utm_medium'))   destUrl.searchParams.set('utm_medium',   src.get('utm_medium'));
+      if (src.get('utm_campaign')) destUrl.searchParams.set('utm_campaign', src.get('utm_campaign'));
+
+      location.replace(destUrl.toString());
+    })();
+  </script>
+</body>
+</html>
