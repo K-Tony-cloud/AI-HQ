@@ -412,41 +412,84 @@ def _det_highlights(products: list[dict]) -> dict[str, str]:
     return highlights
 
 
+# Feature → typical usage context (for intro sentence)
+_FEATURE_SITUATIONS: dict[str, str] = {
+    "พกพาสะดวก":         "เดินทาง โต๊ะทำงาน หรือพื้นที่แอร์ไม่ถึง",
+    "ขนาดมินิ":           "ใช้ได้ทุกที่โดยไม่เปลืองพื้นที่",
+    "ไร้สาย":             "ใช้งานได้ทุกที่โดยไม่ต้องหาปลั๊กไฟ",
+    "ชาร์จ USB-C":        "ชาร์จร่วมกับโทรศัพท์ได้เลย",
+    "มีระบบหมอกเย็น":     "ต้องการทั้งลมเย็นและความชื้นในอากาศ",
+    "ปรับลมหลายระดับ":    "ปรับลมแรง-เบาได้ตามต้องการ",
+    "เงียบขณะใช้งาน":     "ห้องทำงานหรือห้องนอน",
+    "หนีบติดได้":          "หนีบขอบโต๊ะหรือรถเข็นได้สะดวก",
+    "แบตเตอรี่ความจุสูง":  "ใช้งานต่อเนื่องได้นานโดยไม่ต้องชาร์จบ่อย",
+    "ชาร์จเร็ว":           "ชาร์จเสร็จเร็วพร้อมใช้ทันที",
+    "กันน้ำ":              "ใช้ได้แม้ในที่ชื้นหรือระหว่างออกกำลังกาย",
+}
+
+# Feature → buyer intent description (for for_whom bullets)
+_FEATURE_FOR_WHOM: dict[str, str] = {
+    "เงียบขณะใช้งาน":     "ใช้ในห้องทำงานหรือห้องนอนโดยไม่รบกวนการประชุมหรือการนอน",
+    "พกพาสะดวก":          "พกพาติดตัวไปทำงานหรือเดินทาง",
+    "ขนาดมินิ":            "ใส่กระเป๋าได้ ใช้พื้นที่น้อย",
+    "ไร้สาย":              "ใช้งานโดยไม่ต้องหาปลั๊กหรือสายพ่วง",
+    "ชาร์จ USB-C":         "ชาร์จร่วมกับโทรศัพท์ได้ ไม่ต้องพกสายพิเศษ",
+    "มีระบบหมอกเย็น":      "ต้องการทั้งลมเย็นและความชื้นช่วงอากาศร้อนแห้ง",
+    "ปรับลมหลายระดับ":     "ต้องการควบคุมความแรงลมได้ละเอียด",
+    "หนีบติดได้":           "ต้องการติดตั้งโดยไม่ต้องวางบนโต๊ะ",
+    "แบตเตอรี่ความจุสูง":   "ต้องการใช้งานต่อเนื่องนานหลายชั่วโมง",
+    "ชาร์จเร็ว":            "ต้องการเติมแบตเตอรี่ได้เร็ว",
+    "กันน้ำ":               "ใช้งานในที่ชื้นหรือระหว่างออกกำลังกาย",
+}
+
+
 def _det_intro(keyword: str, products: list[dict], cat_ctx: dict) -> str:
     stats = _price_stats(products)
     n = len(products)
 
-    # Gather top features across all products for a concrete opener
+    # Collect all features from product titles
     all_features: list[str] = []
     for p in products:
         all_features.extend(_title_features(str(p.get("title", ""))))
-    unique_features = list(dict.fromkeys(all_features))[:2]
-    feat_mention = f"มาพร้อมฟีเจอร์ {' '.join(unique_features)} " if unique_features else ""
+    unique_features = list(dict.fromkeys(all_features))
 
     ranks = _rank_products(products)
-    sold_p = ranks.get("sold_leader", (None,))[0]
+    sold_p = ranks.get("sold_leader", (None, 0))[0]
+
+    # Build context-first opener from feature situations
+    situations = [(f, _FEATURE_SITUATIONS[f]) for f in unique_features if f in _FEATURE_SITUATIONS]
+    if situations and stats["has_range"] and stats["min"] > 0:
+        if len(situations) >= 2:
+            feat_text = (
+                f"ทั้งรุ่นที่{situations[0][0]}สำหรับ{situations[0][1]} "
+                f"และรุ่น{situations[1][0]}สำหรับ{situations[1][1]}"
+            )
+        else:
+            feat_text = f"รุ่นที่{situations[0][0]}สำหรับ{situations[0][1]}"
+        opener = (
+            f"ถ้ากำลังมองหา {keyword} ในงบ ฿{stats['min']:,}–฿{stats['max']:,} "
+            f"มีตัวเลือกหลายแบบ {feat_text}"
+        )
+    elif stats["has_range"] and stats["min"] > 0:
+        opener = (
+            f"ถ้ากำลังมองหา {keyword} ราคาในกลุ่มนี้อยู่ระหว่าง "
+            f"฿{stats['min']:,}–฿{stats['max']:,} มีหลายแบบให้เลือก"
+        )
+    else:
+        opener = f"สำหรับ {keyword} มีตัวเลือกหลายแบบในฐานข้อมูลนี้"
+
+    body = (
+        f"บทความนี้คัดมา {n} ตัวเลือกจากข้อมูลยอดขายและคะแนนรีวิวจริงบน Shopee "
+        f"เพื่อช่วยเปรียบเทียบก่อนตัดสินใจ"
+    )
+
     sold_note = ""
     if sold_p:
         sold = _safe_int(sold_p.get("item_sold"))
         if sold > 500:
-            sold_note = f" สินค้าที่ได้รับความนิยมสูงสุดในกลุ่มขายไปแล้วกว่า {sold:,} ชิ้น"
+            sold_note = f"ตัวเลือกที่ขายดีสุดในกลุ่มมียอดขายแล้วกว่า {sold:,} ชิ้น"
 
-    parts: list[str] = [
-        f"บทความนี้รวบรวม {keyword} จำนวน {n} รายการ "
-        f"คัดสรรจากข้อมูลยอดขายและคะแนนรีวิวจริงบน Shopee เพื่อช่วยให้เปรียบเทียบตัวเลือกได้ง่ายขึ้น"
-    ]
-
-    if stats["has_range"] and stats["min"] > 0:
-        parts.append(
-            f"ราคาในกลุ่มนี้อยู่ระหว่าง ฿{stats['min']:,} ถึง ฿{stats['max']:,} "
-            + feat_mention
-            + f"ครอบคลุมทั้งตัวเลือกประหยัดและรุ่นที่มีฟีเจอร์ครบกว่า"
-        )
-
-    if sold_note:
-        parts.append(sold_note.strip())
-
-    return " ".join(parts)
+    return " ".join(filter(None, [opener, body, sold_note]))
 
 
 def _det_buying_scenario(keyword: str, products: list[dict], cat_ctx: dict) -> str:
@@ -492,53 +535,73 @@ def _det_for_whom(keyword: str, products: list[dict], cat_ctx: dict) -> str:
     stats = _price_stats(products)
     ranks = _rank_products(products)
 
-    cheap_p   = ranks.get("cheapest", (None,))[0]
-    premium_p = ranks.get("premium", (None,))[0]
-    sold_p    = ranks.get("sold_leader", (None,))[0]
+    cheap_entry   = ranks.get("cheapest",    (None, 0))
+    sold_entry    = ranks.get("sold_leader", (None, 0))
+    premium_entry = ranks.get("premium",     (None, 0))
+
+    cheap_p,   cheap_idx   = cheap_entry
+    sold_p,    sold_idx    = sold_entry
+    premium_p, premium_idx = premium_entry
+
+    def _short(p: dict, chars: int = 18) -> str:
+        t = str(p.get("title", ""))
+        return t[:chars] + "..." if len(t) > chars else t
 
     items: list[str] = []
+    mentioned_idxs: set[int] = set()
 
-    # Budget segment
+    # Build feature → (first product with that feature, 1-based article rank)
+    feature_product_map: dict[str, tuple[dict, int]] = {}
+    for i, p in enumerate(products):
+        for feat in _title_features(str(p.get("title", ""))):
+            if feat not in feature_product_map:
+                feature_product_map[feat] = (p, i + 1)
+
+    # 1. Budget/entry buyer — combines cheapest+sold when they're the same product
     if cheap_p:
         cp = _safe_int(cheap_p.get("sale_price"))
-        if cp > 0:
+        cr = cheap_idx + 1
+        if cheap_idx == sold_idx and sold_p:
+            sold = _safe_int(sold_p.get("item_sold"))
             items.append(
-                f"- **คนที่ต้องการทดลองก่อน** — มีตัวเลือกราคาเริ่มต้น ฿{cp:,} "
-                f"ที่คุ้มค่าสำหรับการใช้งานพื้นฐาน"
+                f"- **คนที่เน้นประหยัดหรืออยากลองก่อน** — "
+                f"สินค้า #{cr} ราคา ฿{cp:,} เป็นทั้งตัวถูกสุดและขายดีสุดในกลุ่ม ({sold:,} ชิ้น)"
             )
+        else:
+            items.append(
+                f"- **คนที่เน้นประหยัดหรืออยากลองก่อน** — "
+                f"สินค้า #{cr} ({_short(cheap_p)}) ราคา ฿{cp:,}"
+            )
+        mentioned_idxs.add(cheap_idx)
 
-    # Mid-range or popular pick
-    if sold_p and sold_p is not cheap_p:
-        sold = _safe_int(sold_p.get("item_sold"))
-        sold_name = str(sold_p.get("title", ""))[:20]
-        if sold > 200:
-            items.append(
-                f"- **คนที่ต้องการสินค้าที่ผ่านการพิสูจน์จากผู้ซื้อจริง** — "
-                f"'{sold_name}' ขายแล้ว {sold:,} ชิ้น เหมาะสำหรับคนที่ไม่อยากเสี่ยง"
-            )
-
-    # Feature-based segments from product titles
-    all_features: list[str] = []
-    for p in products:
-        all_features.extend(_title_features(str(p.get("title", ""))))
-    seen: set[str] = set()
-    for feat in all_features:
-        if feat not in seen:
-            seen.add(feat)
-            items.append(
-                f"- **คนที่ต้องการฟีเจอร์ {feat}** — มีตัวเลือกในกลุ่มนี้ที่ตอบโจทย์"
-            )
-        if len(items) >= 4:
+    # 2. Feature-based bullets — each points to the first product that has that feature
+    feat_count = 0
+    for feat, (feat_p, feat_rank) in feature_product_map.items():
+        if feat_count >= 3:
             break
+        feat_idx = feat_rank - 1
+        if feat_idx in mentioned_idxs:
+            continue
+        usage = _FEATURE_FOR_WHOM.get(feat, f"ต้องการฟีเจอร์{feat}")
+        price = _safe_int(feat_p.get("sale_price"))
+        items.append(
+            f"- **คนที่{usage}** — "
+            f"สินค้า #{feat_rank} ({_short(feat_p)}) ฿{price:,}"
+        )
+        mentioned_idxs.add(feat_idx)
+        feat_count += 1
 
-    # Premium segment
-    if premium_p and premium_p is not sold_p:
+    # 3. Premium buyer — only if a different product from those already mentioned
+    if premium_p and premium_idx not in mentioned_idxs and stats["has_range"]:
         pp = _safe_int(premium_p.get("sale_price"))
-        if pp > 0 and stats["has_range"]:
-            items.append(
-                f"- **คนที่เน้นคุณภาพและฟีเจอร์ครบ** — ตัวเลือกระดับ ฿{pp:,} "
-                f"ให้ประสบการณ์การใช้งานที่ดีกว่าในระยะยาว"
-            )
+        pr = premium_idx + 1
+        prem_feats = _title_features(str(premium_p.get("title", "")))
+        feat_note = f"มาพร้อม{prem_feats[0]}" if prem_feats else "ฟีเจอร์ครบกว่า"
+        items.append(
+            f"- **คนที่งบมากขึ้นและต้องการฟีเจอร์ครบ** — "
+            f"สินค้า #{pr} ({_short(premium_p)}) ฿{pp:,} {feat_note}"
+        )
+        mentioned_idxs.add(premium_idx)
 
     if not items:
         items = [
@@ -617,32 +680,50 @@ def _det_buying_guide(keyword: str, products: list[dict], cat_ctx: dict) -> str:
 
 
 def _det_summary(keyword: str, products: list[dict]) -> str:
-    n = len(products)
     ranks = _rank_products(products)
-    sold_p  = ranks.get("sold_leader", (None,))[0]
-    cheap_p = ranks.get("cheapest", (None,))[0]
+    sold_entry  = ranks.get("sold_leader", (None, 0))
+    cheap_entry = ranks.get("cheapest",    (None, 0))
+    prem_entry  = ranks.get("premium",     (None, 0))
+    sold_p,  sold_idx  = sold_entry
+    cheap_p, cheap_idx = cheap_entry
+    prem_p,  prem_idx  = prem_entry
 
     parts: list[str] = []
+    mentioned_idxs: set[int] = set()
 
-    if sold_p and cheap_p and sold_p is not cheap_p:
-        cheap_price = _safe_int(cheap_p.get("sale_price"))
-        sold_name   = str(sold_p.get("title", ""))[:28]
-        sold_count  = _safe_int(sold_p.get("item_sold"))
+    if sold_p:
+        sold       = _safe_int(sold_p.get("item_sold"))
+        sold_price = _safe_int(sold_p.get("sale_price"))
+        sold_rank  = sold_idx + 1
+        if sold_idx == cheap_idx:
+            parts.append(
+                f"สินค้า #{sold_rank} ราคา ฿{sold_price:,} เป็นทั้งตัวเลือกที่ราคาต่ำสุดในกลุ่ม "
+                f"และขายดีสุดด้วยยอดขายกว่า {sold:,} ชิ้น — น่าสนใจสำหรับคนที่เพิ่งเริ่มใช้"
+            )
+        else:
+            if cheap_p:
+                cp        = _safe_int(cheap_p.get("sale_price"))
+                cheap_rank = cheap_idx + 1
+                parts.append(f"ถ้างบจำกัด สินค้า #{cheap_rank} ราคา ฿{cp:,} เป็นจุดเริ่มต้นที่คุ้มค่า")
+                mentioned_idxs.add(cheap_idx)
+            parts.append(
+                f"ถ้าเน้นสินค้าผ่านการพิสูจน์ สินค้า #{sold_rank} ขายแล้ว {sold:,} ชิ้น "
+                f"เป็นตัวเลือกที่ผู้ซื้อไว้วางใจมากที่สุดในกลุ่ม"
+            )
+        mentioned_idxs.add(sold_idx)
+
+    if prem_p and prem_idx not in mentioned_idxs:
+        pp        = _safe_int(prem_p.get("sale_price"))
+        prem_rank = prem_idx + 1
+        prem_feats = _title_features(str(prem_p.get("title", "")))
+        feat_note = f"มาพร้อม{prem_feats[0]}" if prem_feats else "ฟีเจอร์ครบกว่า"
         parts.append(
-            f"จาก {n} ตัวเลือกในบทความนี้ ถ้างบจำกัดให้เริ่มจากตัวเลือกราคา ฿{cheap_price:,} "
-            f"ถ้าต้องการสินค้าที่พิสูจน์แล้วจากผู้ซื้อจริง '{sold_name}' ขายแล้ว {sold_count:,} ชิ้น"
+            f"คนที่งบมากขึ้น สินค้า #{prem_rank} ฿{pp:,} {feat_note} "
+            f"— เหมาะสำหรับการใช้งานในระยะยาว"
         )
-    else:
-        parts.append(
-            f"ทั้ง {n} ตัวเลือกในบทความนี้คัดสรรจากข้อมูลยอดขายและรีวิวจริงบน Shopee "
-            f"แต่ละรายการตอบโจทย์การใช้งานที่ต่างกัน ขึ้นอยู่กับงบและบริบท"
-        )
+        mentioned_idxs.add(prem_idx)
 
-    parts.append(
-        "ราคาบน Shopee เปลี่ยนแปลงตาม Flash Sale และโปรโมชั่น "
-        "แนะนำตรวจราคาปัจจุบันก่อนตัดสินใจ เพื่อให้ได้ดีลที่ดีที่สุด"
-    )
-
+    parts.append("ราคาบน Shopee เปลี่ยนตาม Flash Sale ควรตรวจราคาและคูปองล่าสุดก่อนสั่งซื้อ")
     return " ".join(parts)
 
 
