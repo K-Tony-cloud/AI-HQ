@@ -290,3 +290,149 @@ def rollback_article(article_id: str, revision_number: int) -> dict:
         return _rollback(article_id, revision_number)
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Editorial Team upgrade
+# ---------------------------------------------------------------------------
+
+def upgrade_article_prose(article_id: str) -> dict:
+    """Regenerate article prose with the 7-persona editorial team.
+
+    Saves a revision first, then rewrites prose sections in content_md.
+    Does NOT republish — user reviews via /seo-preview then /seo-republish.
+    """
+    try:
+        import json
+        from shopee_engine.seo_engine import (
+            SEO_ARTICLES_TABLE,
+            _connect,
+            _init_seo_tables,
+            _update_prose_section,
+            get_article,
+            save_revision,
+        )
+        from shopee_engine.article_exporter import (
+            SEO_ARTICLE_PRODUCTS_TABLE,
+            _extract_prose,
+            _load_enriched_products,
+        )
+        from shopee_engine.editorial_team import generate_article_content
+
+        # 1. Load article
+        article = get_article(article_id)
+        if not article:
+            return {"success": False, "error": f"Article '{article_id}' not found"}
+
+        # 2. Load products from DB
+        con_r = _connect(read_only=True)
+        try:
+            products = _load_enriched_products(article_id, con_r)
+        finally:
+            con_r.close()
+
+        if not products:
+            return {"success": False, "error": "No active products found for this article"}
+
+        keyword  = str(article.get("keyword", ""))
+        category = str(article.get("category", ""))
+
+        # 3. Capture old intro for diff display
+        old_prose = _extract_prose(str(article.get("content_md", "")))
+        old_intro = old_prose.get("บทนำ", "")[:200]
+
+        # 4. Save revision before any change
+        rev_num = save_revision(article_id, "Before upgrade: editorial team", "discord")
+
+        # 5. Run editorial team
+        editorial = generate_article_content(keyword, category, products)
+        if not editorial["_success"]:
+            return {
+                "success": False,
+                "error": f"Editorial team failed: {editorial.get('_error', 'unknown')}",
+            }
+
+        # 6. Build new content_md — replace prose sections + append highlights comment
+        content_md = str(article.get("content_md", ""))
+
+        # Update/insert each prose section
+        sections_updated = []
+        for section, key in [
+            ("บทนำ",                 "intro"),
+            ("บริบทการซื้อ",         "buying_scenario"),
+            ("คำแนะนำการเลือกซื้อ", "buying_guide"),
+            ("บทสรุป",              "summary"),
+        ]:
+            value = editorial.get(key, "").strip()
+            if not value:
+                continue
+            content_md = _update_prose_section(content_md, section, value)
+            sections_updated.append(section)
+
+        # Append for_whom / not_for_whom inside บริบทการซื้อ block if both exist
+        for_whom     = editorial.get("for_whom", "").strip()
+        not_for_whom = editorial.get("not_for_whom", "").strip()
+        if for_whom or not_for_whom:
+            extras = ""
+            if for_whom:
+                extras += f"\n\n**เหมาะกับ:**\n\n{for_whom}"
+            if not_for_whom:
+                extras += f"\n\n**อาจไม่ใช่ตัวเลือกที่ดีถ้า:**\n\n{not_for_whom}"
+            # Append extras after the บริบทการซื้อ section
+            content_md = _update_prose_section(
+                content_md,
+                "บริบทการซื้อ",
+                (editorial.get("buying_scenario", "") + extras).strip(),
+            )
+
+        # Replace or append editorial product_highlights comment
+        highlights = editorial.get("product_highlights", {})
+        if highlights:
+            import re as _re
+            comment_block = (
+                f"<!-- editorial:product_highlights\n"
+                f"{json.dumps(highlights, ensure_ascii=False, indent=2)}\n"
+                f"-->"
+            )
+            # Remove old comment if present
+            content_md = _re.sub(
+                r"<!--\s*editorial:product_highlights\s*\n\{.*?\}\s*-->",
+                "",
+                content_md,
+                flags=_re.DOTALL,
+            ).rstrip()
+            content_md += f"\n{comment_block}\n"
+
+        # 7. Persist to DB
+        con_w = _connect(read_only=False)
+        try:
+            _init_seo_tables(con_w)
+            con_w.execute(
+                f"UPDATE {SEO_ARTICLES_TABLE} "
+                f"SET content_md = ?, updated_at = CURRENT_TIMESTAMP "
+                f"WHERE article_id = ?",
+                [content_md, article_id],
+            )
+            con_w.close()
+        except Exception as exc:
+            con_w.close()
+            return {"success": False, "error": f"DB update failed: {exc}"}
+
+        new_intro = editorial.get("intro", "")[:200]
+        current_status = str(article.get("status", ""))
+
+        return {
+            "success":          True,
+            "article_id":       article_id,
+            "revision_saved":   rev_num,
+            "sections_added":   sections_updated,
+            "model_used":       editorial.get("_model", ""),
+            "old_intro":        old_intro,
+            "new_intro":        new_intro,
+            "has_buying_context": bool(editorial.get("buying_scenario")),
+            "has_highlights":   bool(highlights),
+            "current_status":   current_status,
+            "requires_republish": current_status in ("published", "reviewed"),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}

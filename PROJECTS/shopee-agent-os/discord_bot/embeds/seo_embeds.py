@@ -576,6 +576,54 @@ def build_rollback_embed(result: dict) -> discord.Embed:
     return e
 
 
+def build_upgrade_embed(result: dict) -> discord.Embed:
+    article_id = result.get("article_id", "")
+    model      = result.get("model_used", "")
+    rev_num    = result.get("revision_saved", "?")
+    sections   = result.get("sections_added", [])
+    old_intro  = result.get("old_intro", "")[:120]
+    new_intro  = result.get("new_intro", "")[:120]
+    has_ctx    = result.get("has_buying_context", False)
+    has_hl     = result.get("has_highlights", False)
+    needs_pub  = result.get("requires_republish", False)
+
+    e = make_embed(
+        f"✨ Editorial Upgrade: `{article_id}`",
+        color_key="success",
+        description=(
+            f"บทความถูกอัปเกรดด้วย **AI Editorial Team** ({model})\n"
+            f"Revision #{rev_num} บันทึกก่อนแก้ไขแล้ว"
+        ),
+    )
+
+    badges = []
+    if "บทนำ" in sections:
+        badges.append("✅ บทนำใหม่")
+    if has_ctx:
+        badges.append("✅ บริบทการซื้อ + เหมาะกับ/ไม่เหมาะกับ")
+    if "คำแนะนำการเลือกซื้อ" in sections:
+        badges.append("✅ คำแนะนำการเลือกซื้อ")
+    if has_hl:
+        badges.append("✅ Product highlights รายสินค้า")
+    if "บทสรุป" in sections:
+        badges.append("✅ บทสรุปใหม่")
+    if badges:
+        e.add_field(name="Sections Updated", value="\n".join(badges), inline=False)
+
+    if old_intro:
+        e.add_field(name="บทนำเดิม", value=f"_{old_intro}…_", inline=False)
+    if new_intro:
+        e.add_field(name="บทนำใหม่", value=f"_{new_intro}…_", inline=False)
+
+    next_step = f"`/seo-preview {article_id}` → ตรวจ → "
+    if needs_pub:
+        next_step += f"`/seo-republish {article_id}`"
+    else:
+        next_step += f"`/seo-review {article_id} action:approve` → `/seo-publish {article_id}`"
+    e.add_field(name="Next Step", value=next_step, inline=False)
+    return e
+
+
 def build_list_embed(
     articles: list[dict],
     stats: dict,

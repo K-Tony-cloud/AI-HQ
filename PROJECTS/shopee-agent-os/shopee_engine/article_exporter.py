@@ -120,7 +120,7 @@ def detect_placeholders(content: str) -> list[str]:
 # Prose extraction from content_md
 # ---------------------------------------------------------------------------
 
-_PROSE_SECTIONS = {"บทนำ", "คำแนะนำการเลือกซื้อ", "บทสรุป"}
+_PROSE_SECTIONS = {"บทนำ", "บริบทการซื้อ", "คำแนะนำการเลือกซื้อ", "บทสรุป"}
 _DATA_SECTIONS  = {"ตารางเปรียบเทียบ", "แนะนำสินค้า", "คำถามที่พบบ่อย (FAQ)"}
 
 _DISCLOSURE_RE = re.compile(
@@ -132,6 +132,25 @@ _DISCLOSURE_RE = re.compile(
 def _clean_disclosure(text: str) -> str:
     """Strip embedded affiliate disclosure text from prose sections."""
     return _DISCLOSURE_RE.sub("", text).strip()
+
+
+_HIGHLIGHTS_RE = re.compile(
+    r"<!--\s*editorial:product_highlights\s*\n(\{.*?\})\s*-->",
+    re.DOTALL,
+)
+
+
+def _extract_product_highlights(content_md: str) -> dict[str, str]:
+    """Parse per-product editorial highlights from HTML comment in content_md."""
+    import json
+    m = _HIGHLIGHTS_RE.search(content_md)
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(1))
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, ValueError):
+        return {}
 
 
 def _extract_prose(content_md: str) -> dict[str, str]:
@@ -344,14 +363,28 @@ def _build_export_body(article: dict, products: list[dict], prose: dict[str, str
     buying_guide = prose.get("คำแนะนำการเลือกซื้อ", "")
     # Use stored prose summary only if non-empty; always fall back to product-specific template
     summary      = prose.get("บทสรุป", "") or _build_template_summary(keyword, products)
+
+    # Editorial team sections (new — absent in legacy articles, gracefully empty)
+    buying_context = prose.get("บริบทการซื้อ", "")
+
+    # Product highlights from HTML comment in content_md
+    product_highlights = _extract_product_highlights(str(article.get("content_md", "")))
     comp_table   = _build_comparison_table(products)
-    prod_blocks  = _build_product_blocks(products)
+    prod_blocks  = _build_product_blocks(products, product_highlights=product_highlights)
     faq          = _build_faq(keyword, products)
 
-    buying_section = f"\n## คำแนะนำการเลือกซื้อ\n\n{buying_guide}\n" if buying_guide else ""
+    buying_context_section = (
+        f"## บริบทการซื้อ\n\n{buying_context}\n\n"
+        if buying_context else ""
+    )
+    buying_section = (
+        f"\n## คำแนะนำการเลือกซื้อ\n\n{buying_guide}\n"
+        if buying_guide else ""
+    )
 
     return (
         f"## บทนำ\n\n{intro}\n\n"
+        f"{buying_context_section}"
         f"## ตารางเปรียบเทียบ\n\n{comp_table}\n\n"
         f"## แนะนำสินค้า\n\n{prod_blocks}\n"
         f"{buying_section}"

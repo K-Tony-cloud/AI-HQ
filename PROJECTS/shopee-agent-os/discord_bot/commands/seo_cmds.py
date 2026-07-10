@@ -29,6 +29,7 @@ from discord_bot.embeds.seo_embeds import (
     build_review_embed,
     build_rollback_embed,
     build_unpublish_embed,
+    build_upgrade_embed,
 )
 from discord_bot.services import seo_service
 
@@ -595,6 +596,33 @@ class SeoCog(commands.Cog):
                 await interaction.followup.send(embed=error_embed(result["error"]))
                 return
             embed = build_list_embed(result["data"], result["stats"], status_filter, limit)
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ── /seo-upgrade ────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="seo-upgrade",
+        description="อัปเกรด prose บทความด้วย AI Editorial Team (Nova/Cipher/Luna/Roxi/Kiki/Speedy)",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการอัปเกรด",
+    )
+    async def cmd_seo_upgrade(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(
+                seo_service.upgrade_article_prose, article_id
+            )
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Unknown error")))
+                return
+            embed = build_upgrade_embed(result)
             await interaction.followup.send(embed=embed)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))
