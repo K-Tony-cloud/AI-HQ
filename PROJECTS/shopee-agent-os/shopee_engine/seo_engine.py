@@ -70,6 +70,53 @@ _SYNONYM_MAP: dict[str, list[str]] = {
     "พัดลม usb":          ["usb fan", "mobile fan", "พัดลมพกพา"],
 }
 
+# Normalized synonym map: connector-stripped + de-pluralized keys for robust lookup
+def _normalize_phrase(p: str) -> str:
+    return re.sub(r" +", " ", _CONNECTOR_RE.sub(" ", p).lower()).strip()
+
+_SYNONYM_MAP_NORM: dict[str, list[str]] = {}
+for _k, _v in _SYNONYM_MAP.items():
+    _kn = _normalize_phrase(_k)
+    _SYNONYM_MAP_NORM[_kn] = _v
+    if _kn.endswith("s") and not _kn.endswith("ss"):
+        _SYNONYM_MAP_NORM[_kn[:-1]] = _v
+del _k, _v, _kn
+
+
+def _keyword_to_term_groups(keyword: str) -> list[list[str]]:
+    """Return term groups for AND/OR SQL construction.
+
+    Each inner list is OR'd (synonyms for one concept).
+    The outer list is AND'd (all concept groups must match).
+
+    - Phrase synonym found  → 1 group (synonym terms only, no broad raw tokens)
+    - Multi-token, no match → N groups (one per token + its synonyms)
+    """
+    kw_clean = _CONNECTOR_RE.sub(" ", keyword).strip()
+    tokens = [t.strip().lower() for t in kw_clean.split() if t.strip()]
+    tokens = [t for t in tokens if t not in _STOPWORDS_TH and t not in _STOPWORDS_EN]
+    if not tokens:
+        return []
+
+    full_phrase = " ".join(tokens)
+
+    synonyms = _SYNONYM_MAP_NORM.get(full_phrase)
+    if synonyms is None and full_phrase.endswith("s") and not full_phrase.endswith("ss"):
+        synonyms = _SYNONYM_MAP_NORM.get(full_phrase[:-1])
+
+    if synonyms is not None:
+        return [list(dict.fromkeys(synonyms))]
+
+    groups: list[list[str]] = []
+    for tok in tokens:
+        group = [tok]
+        if tok in _SYNONYM_MAP:
+            group.extend(_SYNONYM_MAP[tok])
+        elif tok.endswith("s") and not tok.endswith("ss") and tok[:-1] in _SYNONYM_MAP:
+            group.extend(_SYNONYM_MAP[tok[:-1]])
+        groups.append(list(dict.fromkeys(group)))
+    return groups
+
 
 def _extract_price_max(keyword: str) -> tuple[str, int | None]:
     """Strip price constraint from keyword; return (cleaned_kw, price_max|None)."""
@@ -634,15 +681,14 @@ def fetch_products_for_keyword(
         if price_max is None:
             price_max = kw_price
 
-        # Normalize keyword to OR-matched search terms (no stopword/connector noise)
-        search_terms = _keyword_to_search_terms(cleaned_kw) if cleaned_kw else []
-        if search_terms:
-            term_conditions = []
-            for term in search_terms:
-                term_conditions.append("(title ILIKE ? OR description ILIKE ?)")
+        # AND between concept groups, OR within each group's synonym terms
+        term_groups = _keyword_to_term_groups(cleaned_kw) if cleaned_kw else []
+        for group in term_groups:
+            or_conditions = []
+            for term in group:
+                or_conditions.append("(title ILIKE ? OR description ILIKE ?)")
                 params.extend([f"%{term}%", f"%{term}%"])
-            # OR between all terms so any single match is enough
-            parts.append(f"({' OR '.join(term_conditions)})")
+            parts.append(f"({' OR '.join(or_conditions)})")
 
         if category:
             parts.append("(global_category1 ILIKE ? OR global_category2 ILIKE ? OR global_category3 ILIKE ?)")

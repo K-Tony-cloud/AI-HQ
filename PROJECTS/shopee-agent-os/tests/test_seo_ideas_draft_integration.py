@@ -386,5 +386,94 @@ class TestArticleDraftSafety(unittest.TestCase):
             self.assertIn("idea_id", result.get("error", "") + result.get("keyword", ""))
 
 
+# ---------------------------------------------------------------------------
+# Unit tests: _keyword_to_term_groups
+# ---------------------------------------------------------------------------
+
+class TestKeywordToTermGroups(unittest.TestCase):
+
+    def _groups(self, keyword):
+        from shopee_engine.seo_engine import _keyword_to_term_groups
+        return _keyword_to_term_groups(keyword)
+
+    def test_phrase_synonym_returns_one_group(self):
+        """Phrase match → single OR group (synonym terms only, no raw tokens)."""
+        groups = self._groups("USB & Mobile Fan")
+        self.assertEqual(len(groups), 1)
+        # Must include Thai fan terms, NOT just "usb" / "mobile"
+        all_terms = groups[0]
+        self.assertTrue(any("พัดลม" in t for t in all_terms), f"Expected พัดลม in {all_terms}")
+
+    def test_plural_fans_matches_phrase_synonym(self):
+        """'USB & Mobile Fans' (plural from Shopee category) must resolve same as singular."""
+        groups = self._groups("USB & Mobile Fans")
+        self.assertEqual(len(groups), 1)
+        all_terms = groups[0]
+        self.assertTrue(any("พัดลม" in t for t in all_terms), f"Expected พัดลม in {all_terms}")
+        # Must NOT include bare "usb" — too broad
+        self.assertNotIn("usb", all_terms)
+
+    def test_powerbanks_phrase_synonym(self):
+        """'Powerbanks' phrase maps to battery/powerbank synonyms."""
+        groups = self._groups("Powerbanks")
+        self.assertEqual(len(groups), 1)
+        all_terms = groups[0]
+        self.assertTrue(
+            any("แบตสำรอง" in t or "power bank" in t for t in all_terms),
+            f"Expected powerbank synonyms in {all_terms}",
+        )
+
+    def test_multi_token_no_phrase_returns_multiple_groups(self):
+        """Multi-token keyword without phrase synonym → AND between groups."""
+        groups = self._groups("หูฟัง ไร้สาย")
+        self.assertGreater(len(groups), 1, "Two concepts → two AND groups")
+
+    def test_empty_keyword_returns_empty(self):
+        groups = self._groups("")
+        self.assertEqual(groups, [])
+
+    def test_stopword_only_keyword_returns_empty(self):
+        groups = self._groups("ที่ดีที่สุด ราคา")
+        self.assertEqual(groups, [])
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: fetch_products with plural Shopee category keywords
+# ---------------------------------------------------------------------------
+
+class TestFetchProductsPluralKeyword(unittest.TestCase):
+
+    def setUp(self):
+        self.db_path = _make_test_db()
+
+    def tearDown(self):
+        os.unlink(self.db_path)
+
+    def _fetch(self, keyword):
+        with patch("shopee_engine.seo_engine.config") as mock_cfg, \
+             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}):
+            mock_cfg.db_path = self.db_path
+            from shopee_engine.seo_engine import fetch_products_for_keyword
+            return fetch_products_for_keyword(keyword, price_max=1500)
+
+    def test_usb_mobile_fans_plural_finds_fan_products(self):
+        """'USB & Mobile Fans' (plural Shopee category) must find fan products, not power strips."""
+        products = self._fetch("USB & Mobile Fans ไม่เกิน 500 บาท")
+        self.assertGreater(len(products), 0, "Must find products for USB & Mobile Fans")
+        titles = " ".join(p["title"].lower() for p in products)
+        self.assertTrue(
+            "fan" in titles or "พัดลม" in titles,
+            f"Expected fan products, got: {[p['title'] for p in products]}",
+        )
+
+    def test_usb_mobile_fans_singular_finds_same_category(self):
+        """Singular and plural forms must return equivalent product sets."""
+        products_plural   = self._fetch("USB & Mobile Fans")
+        products_singular = self._fetch("USB & Mobile Fan")
+        ids_plural   = {p["itemid"] for p in products_plural}
+        ids_singular = {p["itemid"] for p in products_singular}
+        self.assertEqual(ids_plural, ids_singular, "Plural and singular must return same products")
+
+
 if __name__ == "__main__":
     unittest.main()
