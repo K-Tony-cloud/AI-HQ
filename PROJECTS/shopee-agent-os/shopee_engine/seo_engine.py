@@ -681,13 +681,22 @@ def fetch_products_for_keyword(
         if price_max is None:
             price_max = kw_price
 
-        # AND between concept groups, OR within each group's synonym terms
+        # AND between concept groups, OR within each group's synonym terms.
+        # Single-group (phrase synonym): title-only to prevent description false positives
+        # (e.g. "ห้องพัดลม" in a pillow description passing a fan search).
+        # Multi-group (individual tokens): title+description so less-specific terms cast
+        # a wider net across both fields.
         term_groups = _keyword_to_term_groups(cleaned_kw) if cleaned_kw else []
+        title_only = len(term_groups) == 1
         for group in term_groups:
             or_conditions = []
             for term in group:
-                or_conditions.append("(title ILIKE ? OR description ILIKE ?)")
-                params.extend([f"%{term}%", f"%{term}%"])
+                if title_only:
+                    or_conditions.append("title ILIKE ?")
+                    params.append(f"%{term}%")
+                else:
+                    or_conditions.append("(title ILIKE ? OR description ILIKE ?)")
+                    params.extend([f"%{term}%", f"%{term}%"])
             parts.append(f"({' OR '.join(or_conditions)})")
 
         if category:
@@ -742,6 +751,7 @@ def fetch_products_for_keyword(
         return []
 
     aff_lookup = _get_affiliate_lookup()
+    all_search_terms = [t for g in term_groups for t in g]
     results = []
     for _, row in rows.iterrows():
         aff_link, link_type = _resolve_affiliate_link(
@@ -749,8 +759,12 @@ def fetch_products_for_keyword(
             str(row.get("datafeed_link") or ""),
             aff_lookup,
         )
+        title = str(row.get("title") or "")
+        title_lo = title.lower()
+        matched = [t for t in all_search_terms if t.lower() in title_lo]
+        match_reason = f"title:{','.join(matched)}" if matched else "desc-only"
         results.append({
-            "title":             str(row.get("title") or ""),
+            "title":             title,
             "itemid":            int(row.get("itemid") or 0),
             "shopid":            int(row.get("shopid") or 0),
             "sale_price":        int(row.get("sale_price") or 0),
@@ -769,6 +783,7 @@ def fetch_products_for_keyword(
             "affiliate_link_type": link_type,
             "opportunity_score": round(float(row.get("opportunity_score") or 0), 1),
             "description_raw":   str(row.get("description") or "")[:500],
+            "match_reason":      match_reason,
         })
 
     return results
