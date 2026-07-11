@@ -23,6 +23,12 @@ import duckdb
 import pandas as pd
 
 from shopee_engine.config import config
+from shopee_engine.taxonomy import _RAW_TO_CANONICAL
+
+# Canonical editorial slug → list of raw DB category strings (derived from taxonomy)
+_SLUG_TO_DB_CATS: dict[str, list[str]] = {}
+for _raw_cat, _slug in _RAW_TO_CANONICAL.items():
+    _SLUG_TO_DB_CATS.setdefault(_slug, []).append(_raw_cat)
 
 # ---------------------------------------------------------------------------
 # In-memory idea cache (volatile — valid for 1 hour within same process)
@@ -700,8 +706,18 @@ def fetch_products_for_keyword(
             parts.append(f"({' OR '.join(or_conditions)})")
 
         if category:
-            parts.append("(global_category1 ILIKE ? OR global_category2 ILIKE ? OR global_category3 ILIKE ?)")
-            params.extend([f"%{category}%", f"%{category}%", f"%{category}%"])
+            db_cats = _SLUG_TO_DB_CATS.get(category)
+            if db_cats:
+                # Known editorial slug → exact match against DB category values
+                ph = ", ".join("?" * len(db_cats))
+                parts.append(
+                    f"(global_category1 IN ({ph}) OR global_category2 IN ({ph}) OR global_category3 IN ({ph}))"
+                )
+                params.extend(db_cats * 3)
+            else:
+                # Raw DB category or subcategory — fall back to ILIKE
+                parts.append("(global_category1 ILIKE ? OR global_category2 ILIKE ? OR global_category3 ILIKE ?)")
+                params.extend([f"%{category}%", f"%{category}%", f"%{category}%"])
 
         if price_max:
             parts.append("sale_price <= ?")
@@ -1135,8 +1151,17 @@ def generate_article_draft(
     )
 
     # ── Editorial Team generation (Sonnet, 7-persona single call) ──────────
+    # Normalize raw category (e.g. "USB & Mobile Fans") to editorial slug (e.g. "mobile-gadgets")
+    _raw_cat_for_editorial = category or (products[0].get("category", "") if products else "")
+    _editorial_slug = category or ""
+    if _editorial_slug not in _SLUG_TO_DB_CATS:
+        from shopee_engine.taxonomy import map_to_canonical as _map
+        _mapped = _map(_raw_cat_for_editorial)
+        if _mapped:
+            _editorial_slug = _mapped[0]
+
     from shopee_engine.editorial_team import generate_article_content
-    editorial = generate_article_content(keyword, category or "", products)
+    editorial = generate_article_content(keyword, _editorial_slug, products)
 
     if editorial["_success"]:
         intro             = editorial["intro"]
