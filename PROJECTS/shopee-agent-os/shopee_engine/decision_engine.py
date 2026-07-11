@@ -34,10 +34,10 @@ import re
 
 _SECTION_TITLE: dict[str, str] = {
     "mobile-gadgets": "รุ่นไหนดี",
-    "home-living":    "รุ่นไหนดี",
-    "beauty":         "สูตรไหนดี",
-    "health":         "แบบไหนดี",
-    "sports":         "รุ่นไหนดี",
+    "home-living":    "แบบไหนดี",
+    "beauty":         "ตัวไหนดี",
+    "health":         "สูตรไหนดี",
+    "sports":         "ตัวไหนดี",
     "baby-kids":      "ชิ้นไหนดี",
     "food-drinks":    "แบบไหนดี",
 }
@@ -87,7 +87,7 @@ _PERSONA_CONFIGS: dict[str, list[dict]] = {
     ],
     "sports": [
         {"label": "งบน้อย",             "strategy": "cheapest"},
-        {"label": "นักกีฬาจริงจัง",     "strategy": "rating_leader"},
+        {"label": "ต้องการทนทาน",       "strategy": "rating_leader"},
         {"label": "ขายดีที่สุด",        "strategy": "sold_leader"},
         {"label": "พกพาบ่อย",           "strategy": "feature:portable"},
     ],

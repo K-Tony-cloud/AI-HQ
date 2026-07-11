@@ -81,10 +81,10 @@ class TestGetSectionTitle:
         assert get_section_title("mobile-gadgets") == "รุ่นไหนดี"
 
     def test_beauty(self):
-        assert get_section_title("beauty") == "สูตรไหนดี"
+        assert get_section_title("beauty") == "ตัวไหนดี"
 
     def test_health(self):
-        assert get_section_title("health") == "แบบไหนดี"
+        assert get_section_title("health") == "สูตรไหนดี"
 
     def test_baby_kids(self):
         assert get_section_title("baby-kids") == "ชิ้นไหนดี"
@@ -93,10 +93,10 @@ class TestGetSectionTitle:
         assert get_section_title("food-drinks") == "แบบไหนดี"
 
     def test_home_living(self):
-        assert get_section_title("home-living") == "รุ่นไหนดี"
+        assert get_section_title("home-living") == "แบบไหนดี"
 
     def test_sports(self):
-        assert get_section_title("sports") == "รุ่นไหนดี"
+        assert get_section_title("sports") == "ตัวไหนดี"
 
     def test_unknown_category_returns_default(self):
         assert get_section_title("unknown-xyz") == "ตัวไหนดี"
