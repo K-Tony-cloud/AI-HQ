@@ -19,10 +19,14 @@ from shopee_engine.seo_engine import (
     SEO_ARTICLE_PRODUCTS_TABLE,
     SEO_ARTICLES_TABLE,
     _build_comparison_table,
-    _build_faq,
     _build_product_blocks,
     _connect,
     format_price,
+)
+from shopee_engine.decision_engine import (
+    build_decision_faq,
+    build_shopping_advisor,
+    get_section_title,
 )
 
 # ---------------------------------------------------------------------------
@@ -369,9 +373,14 @@ def _build_export_body(article: dict, products: list[dict], prose: dict[str, str
 
     # Product highlights from HTML comment in content_md
     product_highlights = _extract_product_highlights(str(article.get("content_md", "")))
+    category     = str(article.get("category", ""))
     comp_table   = _build_comparison_table(products)
     prod_blocks  = _build_product_blocks(products, product_highlights=product_highlights)
-    faq          = _build_faq(keyword, products)
+
+    # Decision Engine sections
+    section_title   = get_section_title(category)
+    advisor_body    = build_shopping_advisor(keyword, category, products)
+    decision_faq    = build_decision_faq(keyword, category, products)
 
     buying_context_section = (
         f"## บริบทการซื้อ\n\n{buying_context}\n\n"
@@ -381,15 +390,20 @@ def _build_export_body(article: dict, products: list[dict], prose: dict[str, str
         f"\n## คำแนะนำการเลือกซื้อ\n\n{buying_guide}\n"
         if buying_guide else ""
     )
+    advisor_section = (
+        f"\n## {section_title}\n\n{advisor_body}\n"
+        if advisor_body else ""
+    )
 
     return (
         f"## บทนำ\n\n{intro}\n\n"
         f"{buying_context_section}"
         f"## ตารางเปรียบเทียบ\n\n{comp_table}\n\n"
         f"## แนะนำสินค้า\n\n{prod_blocks}\n"
+        f"{advisor_section}"
         f"{buying_section}"
         f"\n## บทสรุป\n\n{summary}\n\n"
-        f"{faq}\n"
+        f"{decision_faq}\n"
     )
 
 
