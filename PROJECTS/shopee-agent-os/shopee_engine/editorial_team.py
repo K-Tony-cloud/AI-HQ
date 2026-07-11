@@ -268,21 +268,126 @@ def _error_result(error: str, model: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _TITLE_FEATURES: list[tuple[list[str], str]] = [
+    # Connectivity / power
     (["ไร้สาย", "wireless"], "ไร้สาย"),
     (["type-c", "type c", "usb-c", "usb c", "usbc"], "ชาร์จ USB-C"),
-    (["หมอกเย็น", "ไอเย็น", "mist", "ไอน้ำ"], "มีระบบหมอกเย็น"),
+    (["ชาร์จเร็ว", "fast charge", "quick charge"], "ชาร์จเร็ว"),
+    (["4000mah", "5000mah", "6000mah", "8000mah", "10000mah", "20000mah"], "แบตเตอรี่ความจุสูง"),
+    (["แบตในตัว", "built-in battery", "in-built"], "แบตในตัว"),
+    # Form factor / portability
     (["พกพา", "portable", "handheld"], "พกพาสะดวก"),
     (["มินิ", "mini"], "ขนาดมินิ"),
-    (["4000mah", "5000mah", "6000mah", "8000mah", "10000mah"], "แบตเตอรี่ความจุสูง"),
+    (["พับได้", "foldable", "fold"], "พับเก็บได้"),
+    (["หนีบ", "clip"], "หนีบติดได้"),
+    # Fan / cooling features
+    (["หมอกเย็น", "ไอเย็น", "mist", "ไอน้ำ"], "มีระบบหมอกเย็น"),
     (["100 ระดับ", "หลายระดับ", "หน้าจอสัมผัส", "touch"], "ปรับลมหลายระดับ"),
     (["เงียบ", "silent", "quiet"], "เงียบขณะใช้งาน"),
-    (["หนีบ", "clip"], "หนีบติดได้"),
-    (["3 in1", "3in1", "fish eye", "wide angle", "macro"], "เลนส์ครบชุด"),
-    (["สีพาสเทล", "pastel"], "มีให้เลือกหลายสี"),
+    # Protection
     (["กันน้ำ", "waterproof", "ipx"], "กันน้ำ"),
-    (["ชาร์จเร็ว", "fast charge", "quick charge"], "ชาร์จเร็ว"),
-    (["แบตในตัว", "built-in battery", "in-built"], "แบตในตัว"),
+    (["กันน้ำกันเหงื่อ", "ไม่ตกร่อง", "ไม่หลุด"], "กันน้ำกันเหงื่อ"),
+    # Photography / selfie
+    (["3 in1", "3in1", "fish eye", "wide angle", "macro"], "เลนส์ครบชุด"),
+    (["magsafe", "magnetic", "แม่เหล็ก"], "ติดแม่เหล็กได้"),
+    (["360°", "360 °", "หมุน 360", "rotate 360"], "หมุน 360°"),
+    # Beauty / cosmetics
+    (["ติดทนนาน", "ทนนาน", "long lasting", "16ชม", "24ชม", "12ชม", "ติดทน"], "ติดทนนาน"),
+    (["แมท", "matte", "แมตต์", "เนื้อแมท", "แมทติดทน"], "เนื้อแมท"),
+    (["spf", "กันแดด uv", "pa++++", "pa+++"], "ป้องกันแสงแดด"),
+    (["สีพาสเทล", "pastel", "หลายสี", "หลายเฉดสี"], "มีให้เลือกหลายสี"),
+    # Health supplements
+    (["collagen", "คอลลาเจน"], "มีคอลลาเจน"),
+    (["coq10", "โคคิว", "coenzyme"], "มี CoQ10"),
+    (["50+", "silver 50", "สูงอายุ"], "สำหรับอายุ 50+"),
+    (["สตรี", "ferti w", "สำหรับผู้หญิง", "for women"], "สูตรสำหรับผู้หญิง"),
+    (["multivitamin", "วิตามิน 14", "วิตามิน 12", "วิตามิน 13"], "วิตามินหลายชนิด"),
+    # Home fragrance / living
+    (["ก้านไม้หอม", "reed diffuser", "ก้านหอม"], "แบบก้านไม้"),
+    (["60วัน", "90วัน", "60 วัน", "90 วัน", "หอมนาน"], "หอมนาน"),
+    (["กลิ่นโรงแรม", "กลิ่นหรู", "luxury scent"], "กลิ่นระดับโรงแรม"),
+    # Camping / outdoor
+    (["รับน้ำหนัก 300", "รับน้ำหนัก300", "รับน้ำหนัก200", "รับน้ำหนัก 200"], "รับน้ำหนักสูง"),
+    (["อลูมิเนียม", "aluminium", "aluminum"], "โครงอลูมิเนียม"),
 ]
+
+# ---------------------------------------------------------------------------
+# Category-scoped feature situations (intro sentence context)
+# ---------------------------------------------------------------------------
+
+_CAT_FEATURE_SITUATIONS: dict[str, dict[str, str]] = {
+    "mobile-gadgets": {
+        "พกพาสะดวก":     "พกใช้งานนอกบ้านหรือระหว่างเดินทาง",
+        "ขนาดมินิ":       "ใส่กระเป๋าได้ ใช้งานได้ทุกที่",
+        "ติดแม่เหล็กได้":  "ต่อเข้า MagSafe ได้ทันที ไม่ต้องแคลมป์หรือคลิป",
+        "หมุน 360°":      "ปรับมุมกล้องได้ทุกทิศ เหมาะกับ vlog และ live",
+        "ไร้สาย":         "ใช้รีโมตชัตเตอร์หรือเชื่อมต่อโดยไม่ต้องต่อสาย",
+        "ชาร์จ USB-C":    "ชาร์จร่วมกับโทรศัพท์ได้เลย",
+    },
+    "sports": {
+        "พกพาสะดวก":    "พกไปแคมป์ ปิคนิค เดินป่า หรือริมน้ำ",
+        "พับเก็บได้":    "เก็บท้ายรถหรือเต็นท์ได้ ไม่กินพื้นที่",
+        "รับน้ำหนักสูง":  "รองรับน้ำหนักได้มาก นั่งได้นานหลายชั่วโมง",
+        "โครงอลูมิเนียม": "เบาแต่แข็งแรง เหมาะกับเดินป่าหรือพกระยะไกล",
+        "กันน้ำ":         "ใช้งานได้แม้ฝนตกหรืออากาศชื้น",
+    },
+    "beauty": {
+        "ติดทนนาน":      "ใช้งานได้ตลอดวันโดยไม่ต้องแต้มซ้ำบ่อย",
+        "เนื้อแมท":       "ปากไม่มัน สีชัด ดูสะอาดตลอดวัน",
+        "ป้องกันแสงแดด":  "ออกแดดได้โดยไม่ต้องกังวลเรื่อง UV",
+        "กันน้ำกันเหงื่อ": "ใส่ได้แม้อากาศร้อนหรือวันที่ออกกำลังกาย",
+        "มีให้เลือกหลายสี": "เลือกสีให้เข้ากับผิวหรือ outfit ได้",
+    },
+    "health": {
+        "มีคอลลาเจน":        "บำรุงข้อต่อและผิวพรรณไปพร้อมกัน",
+        "มี CoQ10":           "ให้พลังงานระดับเซลล์และต้านอนุมูลอิสระ",
+        "สำหรับอายุ 50+":     "ออกแบบมาสำหรับความต้องการของร่างกายช่วงอายุ 50 ขึ้นไป",
+        "สูตรสำหรับผู้หญิง":  "มีส่วนผสมที่ตอบโจทย์เฉพาะสำหรับผู้หญิง",
+        "วิตามินหลายชนิด":   "ครอบคลุมวิตามินและแร่ธาตุหลายชนิดในเม็ดเดียว",
+    },
+    "home-living": {
+        "แบบก้านไม้":         "กระจายกลิ่นช้าๆ ต่อเนื่อง เหมาะกับห้องนอนหรือห้องนั่งเล่น",
+        "หอมนาน":             "ใช้งานได้นานโดยไม่ต้องเติมบ่อย",
+        "กลิ่นระดับโรงแรม":   "ให้บรรยากาศเหมือนโรงแรมหรูในบ้าน",
+    },
+}
+
+# Category-scoped buyer intent for for_whom bullets
+_CAT_FEATURE_FOR_WHOM: dict[str, dict[str, str]] = {
+    "mobile-gadgets": {
+        "พกพาสะดวก":     "พกใช้งานนอกบ้านหรือระหว่างเดินทาง",
+        "ขนาดมินิ":       "ใส่กระเป๋าได้ ไม่หนักมือขณะถือนาน",
+        "ติดแม่เหล็กได้":  "ใช้กับมือถือ MagSafe ได้ทันทีโดยไม่ต้องคลิป",
+        "หมุน 360°":      "ถ่ายวิดีโอ vlog หรือ live แบบหมุนติดตามได้",
+        "ไร้สาย":         "ใช้งานโดยไม่ต้องต่อสายหรือหาปลั๊ก",
+        "ชาร์จ USB-C":    "ชาร์จร่วมกับโทรศัพท์ ไม่ต้องพกสายพิเศษ",
+    },
+    "sports": {
+        "พกพาสะดวก":    "ต้องการพกไปแคมป์ ปิคนิค เดินป่า หรือเล่นริมน้ำ",
+        "พับเก็บได้":    "เก็บท้ายรถหรือใส่เป้ได้ง่าย ไม่เกะกะ",
+        "รับน้ำหนักสูง":  "คนน้ำหนักมาก หรือต้องการนั่งนานหลายชั่วโมง",
+        "โครงอลูมิเนียม": "ต้องการเก้าอี้เบาแต่แข็งแรงสำหรับเดินป่า",
+        "กันน้ำ":         "ใช้ในสภาพอากาศเปียกชื้นหรือกลางแจ้ง",
+    },
+    "beauty": {
+        "ติดทนนาน":      "ต้องการสีปากที่ติดทนตลอดวัน ไม่ต้องแต้มซ้ำบ่อย",
+        "เนื้อแมท":       "ชอบเนื้อลิปแห้งแมท สีชัด ดูสะอาดตลอดวัน",
+        "ป้องกันแสงแดด":  "ออกแดดบ่อยหรือต้องการ SPF รวมอยู่ในขั้นตอนเดียว",
+        "กันน้ำกันเหงื่อ": "ทนเหงื่อ ฝน หรืออากาศร้อนชื้น",
+        "มีให้เลือกหลายสี": "ต้องการเลือกสีหลายเฉดสำหรับ look ที่หลากหลาย",
+    },
+    "health": {
+        "มีคอลลาเจน":        "ต้องการบำรุงข้อและผิวพรรณไปพร้อมกัน",
+        "มี CoQ10":           "ต้องการสารต้านอนุมูลอิสระควบคู่กับวิตามินรวม",
+        "สำหรับอายุ 50+":     "วัย 50 ขึ้นไปที่ต้องการวิตามินเฉพาะสำหรับช่วงอายุนี้",
+        "สูตรสำหรับผู้หญิง":  "ผู้หญิงที่ต้องการวิตามินที่ออกแบบมาสำหรับเพศหญิงโดยเฉพาะ",
+        "วิตามินหลายชนิด":   "ต้องการวิตามินครบถ้วนในเม็ดเดียว ไม่ต้องกินหลายชนิด",
+    },
+    "home-living": {
+        "แบบก้านไม้":         "ต้องการกระจายกลิ่นต่อเนื่องโดยไม่ต้องจุดเทียนหรือฉีดสเปรย์",
+        "หอมนาน":             "ต้องการกลิ่นหอมในบ้านโดยไม่ต้องเปลี่ยนบ่อย",
+        "กลิ่นระดับโรงแรม":   "ต้องการบรรยากาศห้องพักโรงแรมในบ้านตัวเอง",
+    },
+}
 
 
 def _title_features(title: str) -> list[str]:
@@ -412,42 +517,140 @@ def _det_highlights(products: list[dict]) -> dict[str, str]:
     return highlights
 
 
-# Feature → typical usage context (for intro sentence)
+# Generic feature situations — used when no category-scoped entry exists
 _FEATURE_SITUATIONS: dict[str, str] = {
-    "พกพาสะดวก":         "เดินทาง โต๊ะทำงาน หรือพื้นที่แอร์ไม่ถึง",
-    "ขนาดมินิ":           "ใช้ได้ทุกที่โดยไม่เปลืองพื้นที่",
-    "ไร้สาย":             "ใช้งานได้ทุกที่โดยไม่ต้องหาปลั๊กไฟ",
-    "ชาร์จ USB-C":        "ชาร์จร่วมกับโทรศัพท์ได้เลย",
-    "มีระบบหมอกเย็น":     "ต้องการทั้งลมเย็นและความชื้นในอากาศ",
-    "ปรับลมหลายระดับ":    "ปรับลมแรง-เบาได้ตามต้องการ",
-    "เงียบขณะใช้งาน":     "ห้องทำงานหรือห้องนอน",
-    "หนีบติดได้":          "หนีบขอบโต๊ะหรือรถเข็นได้สะดวก",
-    "แบตเตอรี่ความจุสูง":  "ใช้งานต่อเนื่องได้นานโดยไม่ต้องชาร์จบ่อย",
-    "ชาร์จเร็ว":           "ชาร์จเสร็จเร็วพร้อมใช้ทันที",
-    "กันน้ำ":              "ใช้ได้แม้ในที่ชื้นหรือระหว่างออกกำลังกาย",
+    "พกพาสะดวก":          "พกพาใช้งานนอกบ้านหรือระหว่างเดินทาง",
+    "ขนาดมินิ":            "ใช้ได้ทุกที่โดยไม่เปลืองพื้นที่",
+    "ไร้สาย":              "ใช้งานได้ทุกที่โดยไม่ต้องหาปลั๊กไฟ",
+    "ชาร์จ USB-C":         "ชาร์จร่วมกับโทรศัพท์ได้เลย",
+    "มีระบบหมอกเย็น":      "ต้องการทั้งลมเย็นและความชื้นในอากาศ",
+    "ปรับลมหลายระดับ":     "ปรับลมแรง-เบาได้ตามต้องการ",
+    "เงียบขณะใช้งาน":      "ห้องทำงานหรือห้องนอน",
+    "หนีบติดได้":           "หนีบขอบโต๊ะหรือรถเข็นได้สะดวก",
+    "แบตเตอรี่ความจุสูง":   "ใช้งานต่อเนื่องได้นานโดยไม่ต้องชาร์จบ่อย",
+    "ชาร์จเร็ว":            "ชาร์จเสร็จเร็วพร้อมใช้ทันที",
+    "กันน้ำ":               "ใช้ได้แม้ในที่ชื้นหรือระหว่างออกกำลังกาย",
+    "พับเก็บได้":           "เก็บง่าย ไม่กินพื้นที่",
+    "โครงอลูมิเนียม":       "เบาแต่แข็งแรง",
+    "ติดทนนาน":            "ใช้งานได้ตลอดวัน",
+    "เนื้อแมท":             "สีชัด ปากไม่มัน",
+    "ป้องกันแสงแดด":        "ออกแดดได้ปลอดภัยขึ้น",
+    "มีคอลลาเจน":           "บำรุงข้อและผิวพรรณ",
+    "มี CoQ10":             "ต้านอนุมูลอิสระ",
+    "แบบก้านไม้":           "กระจายกลิ่นต่อเนื่องในห้อง",
+    "หอมนาน":              "ใช้งานได้นานโดยไม่ต้องเติมบ่อย",
 }
 
-# Feature → buyer intent description (for for_whom bullets)
+# Generic buyer intent — used when no category-scoped entry exists
 _FEATURE_FOR_WHOM: dict[str, str] = {
-    "เงียบขณะใช้งาน":     "ใช้ในห้องทำงานหรือห้องนอนโดยไม่รบกวนการประชุมหรือการนอน",
-    "พกพาสะดวก":          "พกพาติดตัวไปทำงานหรือเดินทาง",
-    "ขนาดมินิ":            "ใส่กระเป๋าได้ ใช้พื้นที่น้อย",
-    "ไร้สาย":              "ใช้งานโดยไม่ต้องหาปลั๊กหรือสายพ่วง",
-    "ชาร์จ USB-C":         "ชาร์จร่วมกับโทรศัพท์ได้ ไม่ต้องพกสายพิเศษ",
-    "มีระบบหมอกเย็น":      "ต้องการทั้งลมเย็นและความชื้นช่วงอากาศร้อนแห้ง",
-    "ปรับลมหลายระดับ":     "ต้องการควบคุมความแรงลมได้ละเอียด",
-    "หนีบติดได้":           "ต้องการติดตั้งโดยไม่ต้องวางบนโต๊ะ",
-    "แบตเตอรี่ความจุสูง":   "ต้องการใช้งานต่อเนื่องนานหลายชั่วโมง",
-    "ชาร์จเร็ว":            "ต้องการเติมแบตเตอรี่ได้เร็ว",
-    "กันน้ำ":               "ใช้งานในที่ชื้นหรือระหว่างออกกำลังกาย",
+    "เงียบขณะใช้งาน":      "ใช้ในห้องทำงานหรือห้องนอนโดยไม่รบกวนการประชุมหรือการนอน",
+    "พกพาสะดวก":           "พกพาติดตัวไปทำงานหรือเดินทาง",
+    "ขนาดมินิ":             "ใส่กระเป๋าได้ ใช้พื้นที่น้อย",
+    "ไร้สาย":               "ใช้งานโดยไม่ต้องหาปลั๊กหรือสายพ่วง",
+    "ชาร์จ USB-C":          "ชาร์จร่วมกับโทรศัพท์ได้ ไม่ต้องพกสายพิเศษ",
+    "มีระบบหมอกเย็น":       "ต้องการทั้งลมเย็นและความชื้นช่วงอากาศร้อนแห้ง",
+    "ปรับลมหลายระดับ":      "ต้องการควบคุมความแรงลมได้ละเอียด",
+    "หนีบติดได้":            "ต้องการติดตั้งโดยไม่ต้องวางบนโต๊ะ",
+    "แบตเตอรี่ความจุสูง":    "ต้องการใช้งานต่อเนื่องนานหลายชั่วโมง",
+    "ชาร์จเร็ว":             "ต้องการเติมแบตเตอรี่ได้เร็ว",
+    "กันน้ำ":                "ใช้งานในที่ชื้นหรือระหว่างออกกำลังกาย",
+    "พับเก็บได้":            "ต้องการเก็บสะดวก ไม่กินพื้นที่",
+    "โครงอลูมิเนียม":        "ต้องการน้ำหนักเบาแต่แข็งแรง",
+    "ติดทนนาน":             "ต้องการสีหรือผลลัพธ์ที่ติดทนตลอดวัน",
+    "เนื้อแมท":              "ชอบเนื้อสัมผัสแห้งแมท ไม่มัน",
+    "ป้องกันแสงแดด":         "ออกแดดบ่อยหรือต้องการ SPF ในผลิตภัณฑ์เดียว",
+    "มีคอลลาเจน":            "ต้องการบำรุงข้อและผิวพรรณ",
+    "มี CoQ10":              "ต้องการสารต้านอนุมูลอิสระเพิ่มเติม",
+    "แบบก้านไม้":            "ต้องการกลิ่นหอมต่อเนื่องในห้องโดยไม่ต้องจุดเทียน",
+    "หอมนาน":               "ต้องการกลิ่นหอมในบ้านโดยไม่ต้องเปลี่ยนบ่อย",
 }
 
 
-def _det_intro(keyword: str, products: list[dict], cat_ctx: dict) -> str:
+def _feature_situation(feature: str, category: str) -> str:
+    """Return category-scoped situation text, fall back to generic."""
+    return (
+        _CAT_FEATURE_SITUATIONS.get(category, {}).get(feature)
+        or _FEATURE_SITUATIONS.get(feature, "")
+    )
+
+
+def _feature_for_whom_text(feature: str, category: str) -> str:
+    """Return category-scoped buyer intent text, fall back to generic."""
+    return (
+        _CAT_FEATURE_FOR_WHOM.get(category, {}).get(feature)
+        or _FEATURE_FOR_WHOM.get(feature, f"ต้องการ{feature}")
+    )
+
+
+def _premium_descriptor(product: dict, category: str) -> str:
+    """Return a grounded descriptor for the premium product. Empty string → skip bullet."""
+    title = str(product.get("title", ""))
+    title_lo = title.lower()
+
+    if category == "health":
+        m = re.search(r'(\d+)\s*ชนิด', title)
+        if m:
+            return f"วิตามิน {m.group(1)} ชนิด"
+        for pattern, desc in [
+            (r'coq10|โคคิว',                 "มี CoQ10"),
+            (r'collagen|คอลลาเจน',           "มีคอลลาเจน"),
+            (r'50\+|silver',                  "สำหรับอายุ 50+"),
+            (r'สตรี|ferti\s*w|สำหรับผู้หญิง', "สูตรสำหรับผู้หญิง"),
+        ]:
+            if re.search(pattern, title_lo):
+                return desc
+
+    if category == "home-living":
+        m = re.search(r'(\d+)\s*ml', title_lo)
+        if m and int(m.group(1)) >= 100:
+            return f"ปริมาณ {m.group(1)} ml"
+        if re.search(r'60\s*วัน|90\s*วัน', title):
+            return "หอมได้นานถึง 60–90 วัน"
+        if re.search(r'premium|luxury|หรู', title_lo):
+            return "กลิ่นระดับพรีเมียม"
+
+    if category == "beauty":
+        m = re.search(r'spf\s*(\d+)', title_lo)
+        if m:
+            return f"SPF {m.group(1)}"
+        if re.search(r'pa\+{3,4}', title_lo):
+            return "PA++++ ป้องกัน UVA สูงสุด"
+        if re.search(r'แพ็กคู่|ซื้อ 1 แถม 1|2 ขวด|2 ชิ้น', title_lo):
+            return "มาแบบ 2 ชิ้น คุ้มกว่า"
+        if re.search(r'ติดทนนาน|ทนนาน|16ชม|24ชม', title_lo):
+            return "ติดทนนานกว่า"
+
+    if category in ("camping", "sports"):
+        m = re.search(r'รับน้ำหนัก\s*(\d+)', title)
+        if m:
+            return f"รับน้ำหนักได้ {m.group(1)} กก."
+        if re.search(r'ชุดโต๊ะ|โต๊ะ.*เก้าอี้|เก้าอี้.*โต๊ะ', title):
+            return "เป็นชุดโต๊ะและเก้าอี้"
+        if re.search(r'อลูมิเนียม|alumin', title_lo):
+            return "โครงอลูมิเนียม เบาแต่แข็งแรง"
+
+    if category == "mobile-gadgets":
+        m = re.search(r'(\d+\.?\d*)\s*ม\b|(\d+\.?\d*)\s*(?:m|metre)\b', title_lo)
+        if m:
+            length = m.group(1) or m.group(2)
+            return f"ยาว {length} เมตร ถ่ายได้ในระยะไกล"
+        if re.search(r'magsafe|แม่เหล็ก|magnetic', title_lo):
+            return "รองรับ MagSafe"
+        if re.search(r'\bled\b|ไฟ led', title_lo):
+            return "มีไฟ LED เสริม"
+
+    # Generic: fall back to first detected feature
+    feats = _title_features(title)
+    if feats:
+        return f"มาพร้อม{feats[0]}"
+
+    return ""  # No grounded descriptor → caller should skip premium bullet
+
+
+def _det_intro(keyword: str, products: list[dict], cat_ctx: dict, category: str = "") -> str:
     stats = _price_stats(products)
     n = len(products)
 
-    # Collect all features from product titles
     all_features: list[str] = []
     for p in products:
         all_features.extend(_title_features(str(p.get("title", ""))))
@@ -456,8 +659,13 @@ def _det_intro(keyword: str, products: list[dict], cat_ctx: dict) -> str:
     ranks = _rank_products(products)
     sold_p = ranks.get("sold_leader", (None, 0))[0]
 
-    # Build context-first opener from feature situations
-    situations = [(f, _FEATURE_SITUATIONS[f]) for f in unique_features if f in _FEATURE_SITUATIONS]
+    # Category-scoped feature situations
+    situations = [
+        (f, _feature_situation(f, category))
+        for f in unique_features
+        if _feature_situation(f, category)
+    ]
+
     if situations and stats["has_range"] and stats["min"] > 0:
         if len(situations) >= 2:
             feat_text = (
@@ -531,7 +739,7 @@ def _det_buying_scenario(keyword: str, products: list[dict], cat_ctx: dict) -> s
     return f"{para1}\n\n{para2}"
 
 
-def _det_for_whom(keyword: str, products: list[dict], cat_ctx: dict) -> str:
+def _det_for_whom(keyword: str, products: list[dict], cat_ctx: dict, category: str = "") -> str:
     stats = _price_stats(products)
     ranks = _rank_products(products)
 
@@ -550,14 +758,14 @@ def _det_for_whom(keyword: str, products: list[dict], cat_ctx: dict) -> str:
     items: list[str] = []
     mentioned_idxs: set[int] = set()
 
-    # Build feature → (first product with that feature, 1-based article rank)
+    # Build feature → (first product with that feature, 1-based rank)
     feature_product_map: dict[str, tuple[dict, int]] = {}
     for i, p in enumerate(products):
         for feat in _title_features(str(p.get("title", ""))):
             if feat not in feature_product_map:
                 feature_product_map[feat] = (p, i + 1)
 
-    # 1. Budget/entry buyer — combines cheapest+sold when they're the same product
+    # Slot 1: Budget buyer (cheapest, or cheapest+sold if same product)
     if cheap_p:
         cp = _safe_int(cheap_p.get("sale_price"))
         cr = cheap_idx + 1
@@ -574,15 +782,26 @@ def _det_for_whom(keyword: str, products: list[dict], cat_ctx: dict) -> str:
             )
         mentioned_idxs.add(cheap_idx)
 
-    # 2. Feature-based bullets — each points to the first product that has that feature
+    # Slot 2: Sold leader — always present if different from cheapest
+    if sold_p and sold_idx not in mentioned_idxs:
+        sold = _safe_int(sold_p.get("item_sold"))
+        sr = sold_idx + 1
+        items.append(
+            f"- **คนที่ให้ความสำคัญกับตัวเลือกที่มีผู้ซื้อจำนวนมาก** — "
+            f"สินค้า #{sr} ({_short(sold_p)}) มียอดขายกว่า {sold:,} ชิ้น "
+            f"ซึ่งเป็นสัญญาณว่ามีผู้ใช้จริงจำนวนมาก"
+        )
+        mentioned_idxs.add(sold_idx)
+
+    # Slot 3+: Feature-based bullets (category-scoped text)
     feat_count = 0
     for feat, (feat_p, feat_rank) in feature_product_map.items():
-        if feat_count >= 3:
+        if feat_count >= 2:
             break
         feat_idx = feat_rank - 1
         if feat_idx in mentioned_idxs:
             continue
-        usage = _FEATURE_FOR_WHOM.get(feat, f"ต้องการฟีเจอร์{feat}")
+        usage = _feature_for_whom_text(feat, category)
         price = _safe_int(feat_p.get("sale_price"))
         items.append(
             f"- **คนที่{usage}** — "
@@ -591,17 +810,17 @@ def _det_for_whom(keyword: str, products: list[dict], cat_ctx: dict) -> str:
         mentioned_idxs.add(feat_idx)
         feat_count += 1
 
-    # 3. Premium buyer — only if a different product from those already mentioned
+    # Slot last: Premium buyer — only when a grounded descriptor exists
     if premium_p and premium_idx not in mentioned_idxs and stats["has_range"]:
-        pp = _safe_int(premium_p.get("sale_price"))
-        pr = premium_idx + 1
-        prem_feats = _title_features(str(premium_p.get("title", "")))
-        feat_note = f"มาพร้อม{prem_feats[0]}" if prem_feats else "ฟีเจอร์ครบกว่า"
-        items.append(
-            f"- **คนที่งบมากขึ้นและต้องการฟีเจอร์ครบ** — "
-            f"สินค้า #{pr} ({_short(premium_p)}) ฿{pp:,} {feat_note}"
-        )
-        mentioned_idxs.add(premium_idx)
+        desc = _premium_descriptor(premium_p, category)
+        if desc:
+            pp = _safe_int(premium_p.get("sale_price"))
+            pr = premium_idx + 1
+            items.append(
+                f"- **คนที่งบมากขึ้น** — "
+                f"สินค้า #{pr} ({_short(premium_p)}) ฿{pp:,} {desc}"
+            )
+            mentioned_idxs.add(premium_idx)
 
     if not items:
         items = [
@@ -679,7 +898,7 @@ def _det_buying_guide(keyword: str, products: list[dict], cat_ctx: dict) -> str:
     return "\n\n".join(paras)
 
 
-def _det_summary(keyword: str, products: list[dict]) -> str:
+def _det_summary(keyword: str, products: list[dict], category: str = "") -> str:
     ranks = _rank_products(products)
     sold_entry  = ranks.get("sold_leader", (None, 0))
     cheap_entry = ranks.get("cheapest",    (None, 0))
@@ -715,13 +934,12 @@ def _det_summary(keyword: str, products: list[dict]) -> str:
     if prem_p and prem_idx not in mentioned_idxs:
         pp        = _safe_int(prem_p.get("sale_price"))
         prem_rank = prem_idx + 1
-        prem_feats = _title_features(str(prem_p.get("title", "")))
-        feat_note = f"มาพร้อม{prem_feats[0]}" if prem_feats else "ฟีเจอร์ครบกว่า"
-        parts.append(
-            f"คนที่งบมากขึ้น สินค้า #{prem_rank} ฿{pp:,} {feat_note} "
-            f"— เหมาะสำหรับการใช้งานในระยะยาว"
-        )
-        mentioned_idxs.add(prem_idx)
+        desc = _premium_descriptor(prem_p, category)
+        if desc:
+            parts.append(
+                f"คนที่งบมากขึ้น สินค้า #{prem_rank} ฿{pp:,} {desc}"
+            )
+            mentioned_idxs.add(prem_idx)
 
     parts.append("ราคาบน Shopee เปลี่ยนตาม Flash Sale ควรตรวจราคาและคูปองล่าสุดก่อนสั่งซื้อ")
     return " ".join(parts)
@@ -736,13 +954,13 @@ def _deterministic_content(
     cat_ctx = _CATEGORY_CONTEXT.get(category, {})
     try:
         return {
-            "intro":               _det_intro(keyword, products, cat_ctx),
+            "intro":               _det_intro(keyword, products, cat_ctx, category),
             "buying_scenario":     _det_buying_scenario(keyword, products, cat_ctx),
-            "for_whom":            _det_for_whom(keyword, products, cat_ctx),
+            "for_whom":            _det_for_whom(keyword, products, cat_ctx, category),
             "not_for_whom":        _det_not_for_whom(keyword, products, cat_ctx),
             "buying_guide":        _det_buying_guide(keyword, products, cat_ctx),
             "product_highlights":  _det_highlights(products),
-            "summary":             _det_summary(keyword, products),
+            "summary":             _det_summary(keyword, products, category),
             "_success":            True,
             "_model":              "deterministic",
         }
