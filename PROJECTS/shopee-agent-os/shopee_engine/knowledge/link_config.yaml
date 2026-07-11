@@ -1,0 +1,39 @@
+version: "1.0"
+
+# ── Scoring Weights ────────────────────────────────────────────────────────────
+# Must sum to exactly 1.0 — validated at startup.
+# Future signals (seasonal_intent, content_performance, campaign_match) are
+# pre-allocated as 0.0; redistribute from existing weights when activating.
+
+scoring_weights:
+  complement:          0.35   # edge score from product_graph.yaml
+  persona_overlap:     0.20   # Jaccard similarity of buyer persona labels
+  use_case_proximity:  0.15   # Jaccard similarity of intent_tags
+  price_compat:        0.15   # price range compatibility ratio
+  category_match:      0.10   # same category baseline signal
+  keyword_diversity:   0.05   # reward topic dissimilarity (prevent redundant links)
+
+  # Phase 2+ slots — 0.0 until activated; when activating, reduce above weights
+  seasonal_intent:     0.00   # Calendar Engine (Phase 2)
+  content_performance: 0.00   # Search Console CTR (Phase 4)
+  campaign_match:      0.00   # Mission/Campaign Engine (Phase 2)
+
+# ── Score Multipliers ─────────────────────────────────────────────────────────
+multipliers:
+  budget_alt_bonus:          1.20   # bonus for same-subcategory, non-overlapping price
+  same_subcategory_penalty:  0.50   # diversity penalty when subcategory already used
+  min_score_threshold:       0.25   # candidates below this are discarded
+
+# ── Limits ────────────────────────────────────────────────────────────────────
+limits:
+  max_links_per_article:    4    # hard cap on total links per article
+  max_same_subcategory:     1    # max links to same subcategory (prevents circular overload)
+  min_links_to_show:        2    # hide section if fewer valid candidates than this
+  min_published_threshold:  5    # cold-start gate: minimum published articles before engine runs
+
+# ── Anchor Rotation Strategy ──────────────────────────────────────────────────
+# "hash"        — deterministic per (source_id, target_id) pair; different articles
+#                 get different anchors for the same target. Default and safe.
+# "round_robin" — reserved slot; not yet implemented
+# "performance" — reserved for Phase 4 CTR-based selection
+anchor_rotation: "hash"

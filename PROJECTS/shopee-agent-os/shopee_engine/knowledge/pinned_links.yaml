@@ -1,0 +1,29 @@
+version: "1.0"
+
+# ── Admin-Pinned Links ────────────────────────────────────────────────────────
+# Pinned links bypass algorithm scoring and are always shown first.
+# They are still subject to safety checks (target must be published; no self-links).
+#
+# Fields:
+#   source_article_id  — article that shows the link
+#   target_article_id  — article being linked to
+#   link_type          — "complement" | "budget_alt" | "type_alt" | "related"
+#   anchor_text        — exact Thai anchor text (not templated)
+#   placement          — "post_advisor" | "post_summary"
+#   priority           — integer; lower = shown first among pinned links
+#   note               — admin note (not rendered, for reference only)
+#   expires_at         — "YYYY-MM-DD" or null for permanent
+
+pinned: []
+
+# Example (uncomment to use):
+#
+# pinned:
+#   - source_article_id: "usb-mobile-fans-ไม่เกิน-500-บาท"
+#     target_article_id: "power-bank-for-travel"
+#     link_type: "complement"
+#     anchor_text: "Power Bank สำหรับพัดลม USB พกพา"
+#     placement: "post_advisor"
+#     priority: 1
+#     note: "Campaign หน้าร้อน 2026"
+#     expires_at: null

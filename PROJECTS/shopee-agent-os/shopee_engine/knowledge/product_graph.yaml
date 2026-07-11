@@ -1,0 +1,175 @@
+version: "1.0"
+
+# ── Product Nodes ─────────────────────────────────────────────────────────────
+# Each node represents a product subcategory.
+# intent_tags: use-case / scenario signals — used for use_case_proximity scoring
+# personas:    buyer persona labels — used for persona_overlap scoring
+# price_typical: [min, max] in THB — used for price_compat scoring
+
+nodes:
+  usb-mobile-fans:
+    label: "พัดลม USB & มือถือ"
+    category: mobile-gadgets
+    intent_tags: [cooling, portable, office, daily-use, summer, wfh]
+    personas: [งบน้อย, ใช้งานหนักทุกวัน, พกพาบ่อย, คะแนนดีที่สุด, ซื้อเป็นของขวัญ]
+    price_typical: [100, 1000]
+
+  power-bank:
+    label: "Power Bank"
+    category: mobile-gadgets
+    intent_tags: [portable, travel, charging, daily-use, outdoor]
+    personas: [งบน้อย, พกพาบ่อย, ใช้งานหนักทุกวัน, ซื้อเป็นของขวัญ]
+    price_typical: [200, 3000]
+
+  cooling-pad:
+    label: "Cooling Pad"
+    category: mobile-gadgets
+    intent_tags: [cooling, office, laptop, wfh, daily-use]
+    personas: [งบน้อย, ใช้งานหนักทุกวัน, คะแนนดีที่สุด]
+    price_typical: [200, 1500]
+
+  usb-c-cable:
+    label: "สายชาร์จ USB-C"
+    category: mobile-gadgets
+    intent_tags: [charging, portable, daily-use, wfh]
+    personas: [งบน้อย, ใช้งานหนักทุกวัน, ซื้อเป็นของขวัญ]
+    price_typical: [50, 500]
+
+  desk-accessories:
+    label: "อุปกรณ์โต๊ะทำงาน"
+    category: home-living
+    intent_tags: [office, wfh, daily-use, organization]
+    personas: [งบน้อย, ใช้งานบ่อยทุกวัน, คะแนนดีที่สุด]
+    price_typical: [50, 2000]
+
+  wireless-charger:
+    label: "ที่ชาร์จไร้สาย"
+    category: mobile-gadgets
+    intent_tags: [charging, wireless, office, wfh, daily-use]
+    personas: [งบน้อย, ซื้อเป็นของขวัญ, คะแนนดีที่สุด]
+    price_typical: [150, 2000]
+
+# ── Directed Edges ─────────────────────────────────────────────────────────────
+# source → target with link_type and base score.
+# budget_alt is NOT listed here — computed dynamically from same subcategory + non-overlapping price.
+# Allowed link_types: complement, type_alt, related
+
+edges:
+  - source: usb-mobile-fans
+    target: power-bank
+    type: complement
+    score: 0.85
+    rationale: "พัดลม USB พกพาต้องการแหล่งพลังงานสำรอง"
+
+  - source: usb-mobile-fans
+    target: usb-c-cable
+    type: complement
+    score: 0.70
+    rationale: "สายชาร์จใช้ร่วมกับอุปกรณ์ USB ทั่วไป"
+
+  - source: usb-mobile-fans
+    target: cooling-pad
+    type: type_alt
+    score: 0.65
+    rationale: "ทางเลือกระบายความร้อนสำหรับโต๊ะทำงาน"
+
+  - source: usb-mobile-fans
+    target: desk-accessories
+    type: related
+    score: 0.50
+    rationale: "กลุ่มอุปกรณ์โต๊ะทำงานและ WFH"
+
+  - source: power-bank
+    target: usb-mobile-fans
+    type: complement
+    score: 0.80
+    rationale: "Power Bank ใช้คู่กับอุปกรณ์ USB พกพา"
+
+  - source: power-bank
+    target: usb-c-cable
+    type: complement
+    score: 0.75
+    rationale: "สายชาร์จจำเป็นสำหรับ Power Bank ทุกรุ่น"
+
+  - source: power-bank
+    target: wireless-charger
+    type: type_alt
+    score: 0.60
+    rationale: "ทางเลือกชาร์จแบบไม่ต้องต่อสาย"
+
+  - source: cooling-pad
+    target: usb-mobile-fans
+    type: type_alt
+    score: 0.65
+    rationale: "พัดลม USB แบบพกพาใช้แทนกันได้"
+
+  - source: cooling-pad
+    target: desk-accessories
+    type: related
+    score: 0.55
+    rationale: "อุปกรณ์โต๊ะทำงานในกลุ่มเดียวกัน"
+
+  - source: usb-c-cable
+    target: power-bank
+    type: complement
+    score: 0.80
+    rationale: "Power Bank ต้องใช้สายชาร์จ"
+
+  - source: usb-c-cable
+    target: wireless-charger
+    type: type_alt
+    score: 0.55
+    rationale: "ทางเลือกชาร์จไม่ต้องใช้สาย"
+
+  - source: desk-accessories
+    target: usb-mobile-fans
+    type: related
+    score: 0.50
+    rationale: "อุปกรณ์สำนักงานในกลุ่มเดียวกัน"
+
+  - source: desk-accessories
+    target: cooling-pad
+    type: related
+    score: 0.55
+    rationale: "อุปกรณ์โต๊ะทำงานในกลุ่มเดียวกัน"
+
+# ── Anchor Template Pools ──────────────────────────────────────────────────────
+# Variables: {source_label}, {target_label}, {target_price_range}, {target_category_label}
+# Multiple templates per type → rotation controlled by link_config.yaml
+
+anchor_templates:
+  complement:
+    - "{target_label} ที่ใช้คู่กัน"
+    - "อุปกรณ์เสริมที่เข้ากับ {source_label}"
+    - "ใช้ร่วมกับ {target_label}"
+    - "จับคู่กับ {target_label}"
+
+  budget_alt:
+    - "ดูตัวเลือกงบ {target_price_range}"
+    - "ตัวเลือกงบสูงขึ้น"
+    - "รุ่นประหยัดกว่า"
+    - "{source_label} งบ {target_price_range}"
+
+  type_alt:
+    - "ทางเลือกแทน {target_label}"
+    - "{target_label} แบบอื่น"
+    - "สินค้าแนวเดียวกัน"
+    - "ดูตัวเลือก {target_label}"
+
+  related:
+    - "อ่านเพิ่มเติมเรื่อง {target_label}"
+    - "บทความใกล้เคียง"
+    - "ดูสินค้า {target_label} ทั้งหมด"
+    - "{target_label} อื่นๆ"
+
+  # Per-source-subcategory overrides — higher priority than generic pool above
+  subcategory_overrides:
+    usb-mobile-fans:
+      complement:
+        - "Power Bank สำหรับชาร์จพัดลม USB"
+        - "แบตสำรองที่เข้ากับพัดลม USB"
+        - "Power Bank ที่ใช้คู่กับพัดลม USB"
+    power-bank:
+      complement:
+        - "สายชาร์จ USB-C สำหรับ Power Bank"
+        - "ชาร์จ Power Bank ได้เร็วขึ้นด้วยสายที่เหมาะ"
