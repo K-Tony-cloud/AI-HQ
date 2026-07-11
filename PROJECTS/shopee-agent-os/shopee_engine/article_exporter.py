@@ -179,7 +179,7 @@ def _extract_prose(content_md: str) -> dict[str, str]:
     if current and current in _PROSE_SECTIONS:
         sections[current] = "\n".join(buf).strip()
 
-    return {k: _clean_disclosure(v) for k, v in sections.items()}
+    return {k: _clean_disclosure(_HIGHLIGHTS_RE.sub("", v)) for k, v in sections.items()}
 
 
 # ---------------------------------------------------------------------------
