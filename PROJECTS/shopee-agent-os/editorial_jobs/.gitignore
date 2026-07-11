@@ -1,0 +1,3 @@
+# Batch JSON files are ephemeral — operator-generated, not versioned
+*_input.json
+*_output.json
