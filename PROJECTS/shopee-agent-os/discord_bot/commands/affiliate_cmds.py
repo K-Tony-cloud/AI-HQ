@@ -554,16 +554,31 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
                 heading = "🔄 อัปเดต affiliate link" if already_had else "✅ บันทึก affiliate link สำเร็จ"
 
                 embed = discord.Embed(title=heading, color=color)
+                saved_itemid = result["itemid"]
+                saved_shopid = result["shopid"]
+                direct_url   = (
+                    f"https://shopee.co.th/product/{saved_shopid}/{saved_itemid}"
+                    if saved_shopid else ""
+                )
                 embed.add_field(name="สินค้า",      value=title or "—",               inline=False)
-                embed.add_field(name="itemid",       value=f"`{result['itemid']}`",     inline=True)
-                embed.add_field(name="shopid",       value=f"`{result['shopid']}`",     inline=True)
+                embed.add_field(name="itemid",       value=f"`{saved_itemid}`",         inline=True)
+                embed.add_field(name="shopid",       value=f"`{saved_shopid}`",         inline=True)
                 embed.add_field(name="Action",       value=action,                      inline=True)
                 embed.add_field(name="Affiliate Link", value=f"`{link[:80]}`",          inline=False)
                 if already_had and prev_link:
                     embed.add_field(name="Previous Link", value=f"`{prev_link[:80]}`", inline=False)
+                if direct_url:
+                    embed.add_field(
+                        name="🔗 หน้าสินค้า",
+                        value=f"[เปิดสินค้าบน Shopee]({direct_url})",
+                        inline=False,
+                    )
                 embed.add_field(
                     name="Next Step",
-                    value="รัน `/seo-refresh <article_id>` เพื่ออัปเดต confirmed count",
+                    value=(
+                        "รัน `/seo-refresh <article_id>` เพื่ออัปเดต confirmed count\n"
+                        "หรือ `/seo-link-status <article_id>` เพื่อดูสถานะรายสินค้า"
+                    ),
                     inline=False,
                 )
                 await send_and_confirm(interaction, [embed], CHANNEL_AFFILIATE_LINKS)
@@ -1423,5 +1438,142 @@ class AffiliateCog(commands.Cog, name="Affiliate Links"):
                 )
 
             await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /product-lookup  — resolve product by itemid, URL, or keyword
+    # ------------------------------------------------------------------
+    @app_commands.command(
+        name="product-lookup",
+        description="ตรวจสอบสินค้าตรงตัว — ใส่ itemid, Shopee URL หรือ keyword",
+    )
+    @app_commands.describe(
+        reference="itemid, Shopee product URL, หรือ keyword",
+        shopid="shopid (optional) — ใช้เมื่อ itemid อาจพบหลายร้าน",
+    )
+    async def cmd_product_lookup(
+        self,
+        interaction: discord.Interaction,
+        reference:  str,
+        shopid:     str | None = None,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            from shopee_engine.product_resolver import resolve_product, classify_reference
+
+            shopid_int: int | None = None
+            if shopid:
+                try:
+                    shopid_int = int(shopid.strip())
+                except ValueError:
+                    await interaction.followup.send(
+                        embed=error_embed("shopid ต้องเป็นตัวเลข")
+                    )
+                    return
+
+            ref_type = classify_reference(reference)
+            result   = await asyncio.to_thread(resolve_product, reference, shopid_int)
+            status   = result.get("resolution_status", "not_found")
+
+            status_colors = {
+                "resolved":   discord.Color.green(),
+                "ambiguous":  discord.Color.orange(),
+                "incomplete": discord.Color.yellow(),
+                "not_found":  discord.Color.red(),
+                "invalid":    discord.Color.red(),
+            }
+            status_emoji = {
+                "resolved":   "✅",
+                "ambiguous":  "🔀",
+                "incomplete": "⚠️",
+                "not_found":  "❌",
+                "invalid":    "❌",
+            }
+
+            color = status_colors.get(status, discord.Color.greyple())
+            icon  = status_emoji.get(status, "❓")
+
+            embed = discord.Embed(
+                title=f"{icon} Product Lookup — {status.upper()}",
+                description=f"Reference: `{reference[:80]}`  (type: {ref_type})",
+                color=color,
+            )
+
+            if status == "resolved":
+                embed.add_field(name="ชื่อสินค้า", value=(result.get("title") or "—")[:80], inline=False)
+                if result.get("shop_name"):
+                    embed.add_field(name="ร้าน", value=result["shop_name"][:60], inline=True)
+                if result.get("price"):
+                    embed.add_field(name="ราคา", value=f"฿{result['price']:,}", inline=True)
+                embed.add_field(name="itemid", value=f"`{result['itemid']}`", inline=True)
+                embed.add_field(name="shopid", value=f"`{result['shopid']}`", inline=True)
+
+                # Confidence score
+                conf_score  = result.get("confidence_score")
+                conf_level  = result.get("confidence_level", "")
+                conf_factors = result.get("confidence_factors") or []
+                _conf_icon   = {"high": "🟢", "medium": "🟡", "low": "🟠"}.get(conf_level, "⚪")
+                if conf_score is not None:
+                    embed.add_field(
+                        name=f"{_conf_icon} Resolution Confidence",
+                        value=(
+                            f"**{conf_level.upper()}** ({conf_score:.0%})\n"
+                            + "\n".join(f"· {f}" for f in conf_factors[:3])
+                        )[:200],
+                        inline=False,
+                    )
+
+                direct_url = result.get("direct_product_url", "")
+                if direct_url:
+                    embed.add_field(
+                        name="🛒 เปิดสินค้าตรงตัว",
+                        value=f"[คลิกเปิดหน้าสินค้า Shopee]({direct_url})",
+                        inline=False,
+                    )
+                embed.add_field(
+                    name="📋 เพิ่ม Affiliate Link",
+                    value=(
+                        f"`/affiliate-link-add-product link:<วาง> "
+                        f"itemid:{result['itemid']} shopid:{result['shopid']}`"
+                    ),
+                    inline=False,
+                )
+                if result.get("image_url"):
+                    embed.set_thumbnail(url=result["image_url"])
+
+            elif status == "ambiguous":
+                embed.add_field(name="สาเหตุ", value=result.get("reason", "")[:200], inline=False)
+                candidates = result.get("candidates", [])
+                if candidates:
+                    lines = "\n".join(
+                        f"`{i}.` shopid=`{c['shopid']}` — {c['title'][:45]}  ฿{c['price']:,}  "
+                        f"[confidence: {c.get('confidence_level','?')}]"
+                        for i, c in enumerate(candidates[:5], 1)
+                    )
+                    embed.add_field(name="Candidates", value=lines, inline=False)
+                    embed.add_field(
+                        name="Next Step",
+                        value=(
+                            f"ระบุ shopid ด้วย:\n"
+                            f"`/product-lookup reference:{reference} shopid:<shopid>`"
+                        ),
+                        inline=False,
+                    )
+
+            else:
+                embed.add_field(name="สาเหตุ", value=result.get("reason", "")[:300], inline=False)
+                if status == "not_found":
+                    embed.add_field(
+                        name="ต้องการเพิ่มสินค้า?",
+                        value=(
+                            "สินค้านี้ไม่มีในฐานข้อมูล datafeed — "
+                            "ใช้ `/seo-product-replace` เพื่อแทนที่สินค้าในบทความ"
+                        ),
+                        inline=False,
+                    )
+
+            await interaction.followup.send(embed=embed)
+
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))

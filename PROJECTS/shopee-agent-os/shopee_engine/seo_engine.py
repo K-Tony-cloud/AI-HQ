@@ -57,8 +57,22 @@ _CONNECTOR_RE   = re.compile(r"[&,\-/|]+")
 _STOPWORDS_TH   = frozenset([
     "ไม่เกิน", "บาท", "ที่สุด", "ที่ดีที่สุด", "ราคา", "แนะนำ",
     "ยอดนิยม", "สำหรับ", "ผู้เริ่มต้น", "ดีที่สุด", "คุ้มค่า",
+    # Grammatical connectors — not product attributes
+    "ที่มี", "ที่ไม่มี", "ซึ่งมี", "มี",
+    # Editorial-context phrases (question/year/context words)
+    "รุ่นไหนดี", "รุ่นไหน", "ดีไหม", "ดีมั้ย", "คุ้มไหม", "น่าซื้อ",
+    "อัปเดต", "update", "ล่าสุด", "สรุป", "เปรียบเทียบ", "เลือก",
+    # Year prefix (digit year stripped by _YEAR_RE; Thai word guard)
+    "ปี",
 ])
 _STOPWORDS_EN   = frozenset(["and", "or", "the", "for", "best", "top"])
+
+# Strip year tokens (e.g. "ปี 2026", "2026", "2569") from keyword before search
+_YEAR_RE = re.compile(r"ปี\s*\d{4}|\b(25\d{2}|20\d{2})\b")
+
+# Thai contextual prefixes — compound words starting with these are destination/purpose
+# phrases, not product attributes (e.g. "สำหรับเดินทางไปจีน", "เพื่อการท่องเที่ยว")
+_CONTEXT_PREFIX_TH = ("สำหรับ", "เพื่อ", "ใช้กับ", "ใช้สำหรับ")
 
 # Synonym groups: lower-case trigger → list of extra search terms
 _SYNONYM_MAP: dict[str, list[str]] = {
@@ -98,9 +112,14 @@ def _keyword_to_term_groups(keyword: str) -> list[list[str]]:
     - Phrase synonym found  → 1 group (synonym terms only, no broad raw tokens)
     - Multi-token, no match → N groups (one per token + its synonyms)
     """
-    kw_clean = _CONNECTOR_RE.sub(" ", keyword).strip()
+    kw_clean = _YEAR_RE.sub(" ", _CONNECTOR_RE.sub(" ", keyword)).strip()
     tokens = [t.strip().lower() for t in kw_clean.split() if t.strip()]
-    tokens = [t for t in tokens if t not in _STOPWORDS_TH and t not in _STOPWORDS_EN]
+    tokens = [
+        t for t in tokens
+        if t not in _STOPWORDS_TH
+        and t not in _STOPWORDS_EN
+        and not any(t.startswith(p) for p in _CONTEXT_PREFIX_TH)
+    ]
     if not tokens:
         return []
 
@@ -125,12 +144,14 @@ def _keyword_to_term_groups(keyword: str) -> list[list[str]]:
 
 
 def _extract_price_max(keyword: str) -> tuple[str, int | None]:
-    """Strip price constraint from keyword; return (cleaned_kw, price_max|None)."""
+    """Strip price constraint and year tokens from keyword; return (cleaned_kw, price_max|None)."""
     m = _PRICE_RE.search(keyword)
-    if not m:
-        return keyword, None
-    price_max = int(m.group(1).replace(",", ""))
-    cleaned = _PRICE_RE.sub("", keyword).strip()
+    price_max = None
+    cleaned   = keyword
+    if m:
+        price_max = int(m.group(1).replace(",", ""))
+        cleaned   = _PRICE_RE.sub("", cleaned)
+    cleaned = _YEAR_RE.sub("", cleaned).strip()
     return cleaned, price_max
 
 
@@ -1435,6 +1456,153 @@ def get_article_link_status(article_id: str) -> dict:
         "all_confirmed":   confirmed_count == total_count,
         "missing_products": missing_products,
     }
+
+
+_CCC_BRACKET_RE = re.compile(r"\[(?:[^]]*\+)?(?:3C|CCC)(?:\+[^]]*)?]", re.IGNORECASE)
+_CCC_PLAIN_RE   = re.compile(r"\bCCC\b|\b3C\b", re.IGNORECASE)
+
+
+def _detect_attribute_evidence(title: str, description: str, attribute_re_bracket: "re.Pattern", attribute_re_plain: "re.Pattern") -> dict:
+    """Return evidence metadata for a product attribute without claiming verification.
+
+    Returns:
+      {
+        evidence_source:  'title_bracket' | 'title_mention' | 'description_match' | 'no_evidence',
+        evidence_text:    str,              # snippet showing where the term was found
+        confidence_note:  str,             # plain-language note for operator
+      }
+    """
+    title_str = title or ""
+    desc_str  = description or ""
+
+    # Highest signal: seller explicitly labeled in bracket (e.g. [CCC], [Qi2+CCC])
+    m = attribute_re_bracket.search(title_str)
+    if m:
+        return {
+            "evidence_source": "title_bracket",
+            "evidence_text":   m.group(0),
+            "confidence_note": "พบหลักฐานใน title (seller ระบุไว้ในชื่อสินค้า) — ควรตรวจสอบบนตัวสินค้าก่อนซื้อ",
+        }
+
+    # Medium signal: attribute mentioned in title but without bracket
+    m = attribute_re_plain.search(title_str)
+    if m:
+        start = max(0, m.start() - 10)
+        snippet = title_str[start : m.end() + 10].strip()
+        return {
+            "evidence_source": "title_mention",
+            "evidence_text":   snippet,
+            "confidence_note": "พบหลักฐานใน title — ควรตรวจสอบบนตัวสินค้าก่อนซื้อ",
+        }
+
+    # Lower signal: found in description (could be certification, not feature)
+    m = attribute_re_plain.search(desc_str)
+    if m:
+        start = max(0, m.start() - 15)
+        snippet = desc_str[start : m.end() + 30].strip()
+        return {
+            "evidence_source": "description_match",
+            "evidence_text":   snippet[:80],
+            "confidence_note": "พบในรายละเอียดสินค้า — อาจเป็นใบรับรองหรือคุณสมบัติ ควรตรวจสอบก่อนซื้อ",
+        }
+
+    return {
+        "evidence_source": "no_evidence",
+        "evidence_text":   "",
+        "confidence_note": "ไม่พบหลักฐานในข้อมูล datafeed — ควรเปิดหน้าสินค้าตรวจก่อนซื้อ",
+    }
+
+
+def get_products_for_preview(article_id: str) -> list[dict]:
+    """Return per-product data for /seo-preview with direct URLs and command templates.
+
+    Each item contains:
+      rank, itemid, shopid, title, shop_name, price, image_url,
+      affiliate_type, affiliate_status, direct_url, url_status, cmd_template
+    """
+    con = _connect(read_only=True)
+    try:
+        # Check which shop-name columns exist in the products table
+        _prod_cols = {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+            ).fetchall()
+        }
+        _has_shop = "shop_name" in _prod_cols or "seller_name" in _prod_cols
+        _has_desc = "description" in _prod_cols
+        if _has_shop:
+            _name_expr = "COALESCE(" + ", ".join(
+                f"p.{c}" for c in ("shop_name", "seller_name") if c in _prod_cols
+            ) + ", '') AS shop_name"
+        else:
+            _name_expr = "'' AS shop_name"
+        _desc_expr = "COALESCE(p.description, '') AS description" if _has_desc else "'' AS description"
+        _join = "LEFT JOIN products p ON ap.itemid = p.itemid AND ap.shopid = p.shopid" if (_has_shop or _has_desc) else ""
+        rows_df = con.execute(f"""
+            SELECT ap.rank_in_article, ap.itemid, ap.shopid, ap.product_title,
+                   ap.sale_price, ap.image_link, ap.affiliate_link, ap.affiliate_link_type,
+                   {_name_expr}, {_desc_expr}
+            FROM {SEO_ARTICLE_PRODUCTS_TABLE} ap
+            {_join}
+            WHERE ap.article_id = ?
+            ORDER BY ap.rank_in_article
+        """, [article_id]).fetchdf()
+    finally:
+        con.close()
+
+    if rows_df.empty:
+        return []
+
+    _AFF_STATUS = {"confirmed": "confirmed", "datafeed": "datafeed", "none": "missing"}
+    _AFF_ICON   = {"confirmed": "✅", "datafeed": "📋", "missing": "❌"}
+
+    products: list[dict] = []
+    total = len(rows_df)
+    for _, r in rows_df.iterrows():
+        itemid    = int(r["itemid"])
+        shopid    = int(r["shopid"])
+        link_type = str(r["affiliate_link_type"] or "none")
+        aff_status = _AFF_STATUS.get(link_type, "missing")
+
+        if shopid > 0:
+            direct_url = f"https://shopee.co.th/product/{shopid}/{itemid}"
+            url_status = "resolved"
+            cmd_template = (
+                f"`/affiliate-link-add-product link:<วาง> itemid:{itemid} shopid:{shopid}`"
+            )
+        else:
+            direct_url   = ""
+            url_status   = "incomplete"
+            cmd_template = f"`/affiliate-link-add-product link:<วาง> itemid:{itemid}`"
+
+        title_str = str(r["product_title"] or "")
+        desc_str  = str(r.get("description") or "")
+        ccc_ev = _detect_attribute_evidence(
+            title_str, desc_str, _CCC_BRACKET_RE, _CCC_PLAIN_RE
+        )
+
+        products.append({
+            "rank":           int(r["rank_in_article"]),
+            "total":          total,
+            "itemid":         itemid,
+            "shopid":         shopid,
+            "title":          title_str,
+            "shop_name":      str(r.get("shop_name") or ""),
+            "price":          int(r["sale_price"] or 0),
+            "image_url":      str(r["image_link"] or ""),
+            "affiliate_link": str(r["affiliate_link"] or ""),
+            "affiliate_type": link_type,
+            "affiliate_status": aff_status,
+            "aff_icon":       _AFF_ICON.get(aff_status, "❓"),
+            "direct_url":     direct_url,
+            "url_status":     url_status,
+            "cmd_template":   cmd_template,
+            # Attribute evidence — NOT verification of product capability
+            "ccc_evidence_source": ccc_ev["evidence_source"],
+            "ccc_evidence_text":   ccc_ev["evidence_text"],
+            "ccc_confidence_note": ccc_ev["confidence_note"],
+        })
+    return products
 
 
 def list_articles(status: str | None = None, limit: int = 20) -> list[dict]:

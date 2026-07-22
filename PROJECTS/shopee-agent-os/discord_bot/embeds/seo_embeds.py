@@ -117,10 +117,59 @@ def build_draft_duplicate_embed(keyword: str, existing: dict) -> discord.Embed:
     return e
 
 
+_CCC_EVIDENCE_ICON = {
+    "title_bracket":    "🟢",   # explicit bracket label — highest signal
+    "title_mention":    "🟡",   # mentioned in title
+    "description_match":"🟠",   # found in description (may be certification)
+    "no_evidence":      "🔴",   # nothing found
+}
+
+
+def _build_product_card_value(p: dict, article_id: str) -> str:
+    """Build the field value for one product card in preview (max 1024 chars)."""
+    price_fmt  = f"฿{p['price']:,}" if p.get("price") else "—"
+    shop       = (p.get("shop_name") or "")[:30]
+    aff_icon   = p.get("aff_icon", "❓")
+    aff_st     = p.get("affiliate_status", "missing")
+    direct_url = p.get("direct_url", "")
+
+    # CCC evidence (optional — only shown if field present)
+    ccc_src    = p.get("ccc_evidence_source", "")
+    ccc_text   = p.get("ccc_evidence_text", "")
+    ccc_note   = p.get("ccc_confidence_note", "")
+    ccc_icon   = _CCC_EVIDENCE_ICON.get(ccc_src, "") if ccc_src else ""
+
+    parts: list[str] = []
+    if shop:
+        parts.append(f"💰 {price_fmt}  |  🏪 {shop}")
+    else:
+        parts.append(f"💰 {price_fmt}")
+    parts.append(f"🆔 `{p['itemid']}`  |  Shop `{p['shopid']}`")
+    parts.append(f"🔗 Affiliate: {aff_icon} {aff_st}")
+
+    # CCC evidence line — never says "verified"
+    if ccc_src:
+        ev_line = f"{ccc_icon} CCC: {ccc_note}"
+        if ccc_text and ccc_src != "no_evidence":
+            ev_line += f" (`{ccc_text[:40]}`)"
+        parts.append(ev_line)
+
+    if direct_url:
+        parts.append(f"[🛒 เปิดสินค้าตรงตัว]({direct_url})")
+    else:
+        parts.append("⚠️ ไม่สามารถสร้าง URL ตรงตัวได้ (shopid ขาด)")
+
+    if aff_st != "confirmed":
+        parts.append(p.get("cmd_template", ""))
+
+    return "\n".join(parts)[:1024]
+
+
 def build_preview_embed(result: dict) -> discord.Embed:
     article       = result["article"]
     validation    = result["validation"]
     product_count = result["product_count"]
+    products      = result.get("products", [])
 
     title_text = str(article.get("title", ""))
     status     = str(article.get("status", "draft"))
@@ -138,10 +187,10 @@ def build_preview_embed(result: dict) -> discord.Embed:
         description=f"**{status_emoji} {status.upper()}** — `{article_id}`",
     )
 
-    e.add_field(name="Keyword",  value=keyword,           inline=True)
-    e.add_field(name="Category", value=category,          inline=True)
+    e.add_field(name="Keyword",  value=keyword,            inline=True)
+    e.add_field(name="Category", value=category,           inline=True)
     e.add_field(name="Products", value=str(product_count), inline=True)
-    e.add_field(name="Updated",  value=updated_at,        inline=True)
+    e.add_field(name="Updated",  value=updated_at,         inline=True)
 
     errors   = validation.get("errors", [])
     warnings = validation.get("warnings", [])
@@ -161,15 +210,48 @@ def build_preview_embed(result: dict) -> discord.Embed:
     if not errors and not warnings:
         e.add_field(name="✅ Validation", value="ผ่านการตรวจสอบทั้งหมด", inline=False)
 
-    # Use live-regenerated body (same pipeline as republish) — never stale stored content_md
-    content_md = str(result.get("preview_body") or article.get("content_md", ""))
-    body_start = content_md.find("## ")
-    body_preview = content_md[body_start:body_start + 800] if body_start != -1 else content_md[:800]
+    # Per-product cards — show only missing/datafeed products (need affiliate link action)
+    if products:
+        total = len(products)
+        confirmed_count = sum(1 for p in products if p.get("affiliate_status") == "confirmed")
 
-    if body_preview:
+        # Summary line
+        aff_summary = (
+            f"✅ {confirmed_count}/{total} confirmed"
+            if confirmed_count == total
+            else f"✅ {confirmed_count}/{total} confirmed — ต้องการอีก {total - confirmed_count} รายการ"
+        )
+        e.add_field(name="🔗 Affiliate Links", value=aff_summary, inline=False)
+
+        # Product cards (up to 5 — Discord field limit safe)
+        for p in products[:5]:
+            rank       = p["rank"]
+            short_title = str(p.get("title", ""))[:45]
+            aff_icon   = p.get("aff_icon", "❓")
+            field_name = f"{aff_icon} สินค้า {rank}/{total}: {short_title}"[:256]
+            field_val  = _build_product_card_value(p, article_id)
+            e.add_field(name=field_name, value=field_val, inline=False)
+
+        if confirmed_count < total:
+            e.add_field(
+                name="📋 Next Step",
+                value=(
+                    f"1. เปิดลิงก์สีฟ้า → affiliate.shopee.co.th → สร้างลิงก์\n"
+                    f"2. วาง link ใน command ที่แสดงใต้สินค้าแต่ละรายการ\n"
+                    f"3. รัน `/seo-refresh {article_id}` เพื่ออัปเดต confirmed count"
+                ),
+                inline=False,
+            )
+
+    # Content preview (truncated to save space)
+    content_md  = str(result.get("preview_body") or article.get("content_md", ""))
+    body_start  = content_md.find("## ")
+    body_preview = content_md[body_start:body_start + 400] if body_start != -1 else content_md[:400]
+
+    if body_preview and not products:
         e.add_field(
             name="📄 Content Preview",
-            value=f"```\n{body_preview[:900]}\n```",
+            value=f"```\n{body_preview[:450]}\n```",
             inline=False,
         )
 
@@ -351,35 +433,40 @@ def build_link_status_embed(result: dict) -> discord.Embed:
         _TYPE_ICON = {"confirmed": "✅", "datafeed": "📋", "none": "❌"}
         rows: list[str] = []
         for p in products:
-            icon  = _TYPE_ICON.get(p["link_type"], "❓")
-            title = p["product_title"][:32]
-            price = f"฿{p['sale_price']:,}"
-            rows.append(f"{icon} **{p['rank']}.** {title} ({price})")
-        e.add_field(name="สินค้าทั้งหมด", value="\n".join(rows)[:1024], inline=False)
+            icon   = _TYPE_ICON.get(p["link_type"], "❓")
+            title  = p["product_title"][:30]
+            price  = f"฿{p['sale_price']:,}"
+            purl   = p.get("product_url", "")
+            if purl:
+                rows.append(f"{icon} **{p['rank']}.** [{title}]({purl}) ({price})")
+            else:
+                rows.append(f"{icon} **{p['rank']}.** {title} ({price})")
+        e.add_field(name="สินค้าทั้งหมด (คลิกชื่อเปิดสินค้าได้เลย)", value="\n".join(rows)[:1024], inline=False)
 
     missing_products = result.get("missing_products", [])
     if missing_products:
         cmd_lines: list[str] = []
         for p in missing_products[:5]:
+            iid    = p["itemid"]
+            sid    = p["shopid"]
             cmd_lines.append(
-                f"`/affiliate-link-add` itemid:`{p['itemid']}` "
-                f"— {p['product_title'][:30]}"
+                f"**{p['rank']}.** {p['product_title'][:28]}\n"
+                f"  → `/affiliate-link-add-product link:<วาง> itemid:{iid} shopid:{sid}`"
             )
         if len(missing_products) > 5:
             cmd_lines.append(f"(+{len(missing_products) - 5} รายการ — ดูไฟล์ CSV ที่แนบ)")
         e.add_field(
-            name="คำสั่งที่ต้องใช้",
+            name="📋 คำสั่งสำหรับสินค้าที่ขาด",
             value="\n".join(cmd_lines)[:1024],
             inline=False,
         )
         e.add_field(
-            name="วิธีสร้าง Affiliate Link",
+            name="ขั้นตอน",
             value=(
-                "1. เปิด shopee.co.th/product/<shopid>/<itemid> (ดูจาก CSV)\n"
-                "2. ไปที่ affiliate.shopee.co.th → สร้างลิงก์\n"
-                "3. วาง URL สินค้า → รับ s.shopee.co.th/... \n"
-                "4. `/affiliate-link-add link:<s.shopee.co.th/...>`\n"
-                "5. `/seo-refresh " + article_id + "` → ตรวจ confirmed count"
+                "1. คลิกชื่อสินค้าด้านบน → เปิดหน้า Shopee ตรงตัว\n"
+                "2. ไปที่ affiliate.shopee.co.th → สร้างลิงก์ → วาง URL สินค้า\n"
+                "3. รับ s.shopee.co.th/... แล้วใช้คำสั่งใต้สินค้าแต่ละรายการ\n"
+                f"4. รัน `/seo-refresh {article_id}` เพื่ออัปเดต confirmed count"
             ),
             inline=False,
         )
