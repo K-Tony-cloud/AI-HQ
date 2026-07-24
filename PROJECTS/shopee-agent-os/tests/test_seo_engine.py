@@ -641,6 +641,48 @@ class TestProductRelevanceGate:
         ok, reason = self.check("Power Bank ชาร์จเร็ว 20W สำหรับ iPhone", cable_title)
         assert not ok, f"Cable should be blocked but passed with reason: {reason}"
 
+    # --- Built-in cable context: สายชาร์จในตัว must NOT block a Power Bank ---
+
+    def test_power_bank_with_builtin_cable_thai_passes(self):
+        """iMI / Eloop pattern: Power Bank + สายชาร์จในตัว must pass."""
+        ok, reason = self.check(
+            "power bank 10000 mah ไม่เกิน 1000 บาท",
+            "iMI Powerbank พาวเวอร์แบงค์ 10000/20000/30000mAh CCC+TISI ชาร์จเร็ว22.5W สายชาร์จในตัว พกพาง่าย แบตสำรอง",
+        )
+        assert ok, f"Power Bank with built-in cable blocked: {reason}"
+
+    def test_eloop_builtin_cable_passes(self):
+        """Eloop E33 Line: แบตสำรอง + มีสายชาร์จในตัว must pass."""
+        ok, reason = self.check(
+            "power bank 10000 mah",
+            "[ส่งด่วน] Eloop E33 Line แบตสำรอง 10000mAh มีสายชาร์จในตัว Powerbank 12W พาวเวอร์แบงค์",
+        )
+        assert ok, f"Eloop built-in cable Power Bank blocked: {reason}"
+
+    def test_yook_saynai_tua_passes(self):
+        """สายในตัว (without 'ชาร์จ') must also be treated as built-in cable feature."""
+        ok, reason = self.check(
+            "power bank 10000 mah",
+            "[แถมถุงผ้า มีCCC] พาวเวอร์แบงค์ YOOK Powerbank 10000mAh สายในตัว ลิขสิทธิ์ Disney",
+        )
+        assert ok, f"Power Bank with สายในตัว blocked: {reason}"
+
+    def test_standalone_saicharg_without_pb_evidence_blocked(self):
+        """'สายชาร์จ' alone with no Power Bank evidence must be blocked."""
+        ok, _ = self.check(
+            "power bank 10000 mah",
+            "สายชาร์จ USB-C to Lightning 20W สำหรับ iPhone 14 Pro Max",
+        )
+        assert not ok
+
+    def test_positive_pb_evidence_outweighs_builtin_cable_term(self):
+        """When Power Bank evidence is strong, built-in cable phrase must not block."""
+        ok, reason = self.check(
+            "powerbank ไม่เกิน 1000 บาท",
+            "HOCO แบตสำรองพกพา 10000mAh Fast charging PD20W พร้อมสาย Type-C/iOS จอ LED",
+        )
+        assert ok, f"HOCO Power Bank with cable feature blocked: {reason}"
+
 
 class TestSpecEvidenceDetection:
     """detect_product_spec_evidence() + check_product_spec() + _extract_spec_requirements()."""

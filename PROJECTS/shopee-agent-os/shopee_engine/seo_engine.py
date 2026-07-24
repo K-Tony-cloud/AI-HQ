@@ -122,8 +122,12 @@ _COMPOUND_TERMS: list[str] = sorted(
 # ---------------------------------------------------------------------------
 
 # Each rule applies when keyword contains a trigger term, then enforces:
-#   require_title — at least one must appear in product title (positive gate)
-#   block_title   — none may appear in product title (negative gate)
+#   require_title            — positive gate: at least one must appear in title
+#   block_title              — hard negative gate: none may appear in title
+#   context_sensitive_block  — soft negative gate: list of (term, exemptions) pairs.
+#                              Term only fires when NONE of its exemption compounds appear
+#                              in the title (e.g. "สายชาร์จ" is exempt when "สายชาร์จในตัว"
+#                              is present — built-in cable is a Power Bank feature, not a cable).
 _PRODUCT_TYPE_RULES: list[dict] = [
     {
         "triggers": frozenset([
@@ -132,9 +136,19 @@ _PRODUCT_TYPE_RULES: list[dict] = [
         "require_title": [
             "power bank", "powerbank", "พาวเวอร์แบงค์", "แบตสำรอง", "แบตเตอรี่สำรอง",
         ],
+        # Hard blocks — unambiguous cable/adapter-only signals, no exemption possible
         "block_title": [
-            "cable", "สายชาร์จ", "lightning cable", "adapter", "อะแดปเตอร์",
+            "cable", "lightning cable", "adapter", "อะแดปเตอร์",
             "หัวชาร์จ", "wall charger",
+        ],
+        # Soft blocks — contextually ambiguous; exempted when built-in cable features present
+        "context_sensitive_block": [
+            (
+                "สายชาร์จ",
+                # Exempt compounds: Power Bank WITH built-in cable (feature, not cable product)
+                ["สายชาร์จในตัว", "มีสายชาร์จในตัว", "สายในตัว", "มีสายในตัว",
+                 "พร้อมสายชาร์จ", "built-in cable"],
+            ),
         ],
         "type_label": "Power Bank",
     },
@@ -142,6 +156,7 @@ _PRODUCT_TYPE_RULES: list[dict] = [
         "triggers": frozenset(["พัดลม", "fan", "mobile fan", "usb fan", "พัดลมพกพา"]),
         "require_title": ["พัดลม", "fan"],
         "block_title": [],
+        "context_sensitive_block": [],
         "type_label": "พัดลม / Fan",
     },
 ]
@@ -152,6 +167,14 @@ def check_product_relevance(keyword: str, title: str) -> tuple[bool, str]:
 
     Returns (True, 'ok') when no rule triggers or all gates pass.
     Returns (False, reason) when a product-type rule rejects this product.
+
+    Gate logic:
+    1. Positive gate: title must contain at least one product-type term.
+    2. Hard negative gate: title must not contain any unambiguous exclusion terms.
+    3. Soft negative gate: context-sensitive terms (e.g. "สายชาร์จ") are only
+       blocked when NONE of their exemption compounds appear in the title.
+       "Power Bank 10000mAh สายชาร์จในตัว" passes because "สายชาร์จในตัว" is an
+       exemption for "สายชาร์จ" — built-in cable is a feature, not a product type.
     """
     kw_lo    = keyword.lower()
     title_lo = title.lower()
@@ -160,15 +183,25 @@ def check_product_relevance(keyword: str, title: str) -> tuple[bool, str]:
         if not any(trigger in kw_lo for trigger in rule["triggers"]):
             continue
 
+        # Positive gate
         required = rule.get("require_title", [])
         if required and not any(req in title_lo for req in required):
             sample = " หรือ ".join(f"'{r}'" for r in required[:3])
             return False, f"ไม่ใช่ {rule['type_label']} — title ต้องมี: {sample}"
 
+        # Hard negative gate
         for bad in rule.get("block_title", []):
             if bad in title_lo:
+                return False, f"title มี '{bad}' — สินค้านี้ไม่ใช่ {rule['type_label']}"
+
+        # Soft negative gate (context-sensitive)
+        for bad, exemptions in rule.get("context_sensitive_block", []):
+            if bad in title_lo:
+                if any(ex in title_lo for ex in exemptions):
+                    continue  # exempt — compound context shows it's a feature, not a cable
                 return False, (
-                    f"title มี '{bad}' — สินค้านี้ไม่ใช่ {rule['type_label']}"
+                    f"title มี '{bad}' โดยไม่มี positive Power Bank evidence — "
+                    f"สินค้านี้ดูเหมือนสายชาร์จ ไม่ใช่ {rule['type_label']}"
                 )
 
     return True, "ok"
