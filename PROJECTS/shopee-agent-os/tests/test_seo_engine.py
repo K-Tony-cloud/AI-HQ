@@ -552,6 +552,96 @@ class TestGitPublishFail:
             db.unlink(missing_ok=True)
 
 
+class TestProductRelevanceGate:
+    """check_product_relevance() — product-type gate before selection and review."""
+
+    def setup_method(self):
+        from shopee_engine.seo_engine import check_product_relevance
+        self.check = check_product_relevance
+
+    # --- Power Bank keyword: positive gate ---
+
+    def test_power_bank_accepts_powerbank_in_title(self):
+        ok, _ = self.check("Power Bank ชาร์จเร็ว 20W สำหรับ iPhone", "UGREEN Power Bank 10000mAh PD 20W")
+        assert ok
+
+    def test_power_bank_accepts_thai_name(self):
+        ok, _ = self.check("Power Bank ชาร์จเร็ว 20W", "Anker พาวเวอร์แบงค์ 20000mAh ชาร์จเร็ว")
+        assert ok
+
+    def test_power_bank_accepts_thai_backup_battery(self):
+        ok, _ = self.check("Power Bank ชาร์จเร็ว", "HOCO แบตสำรองพกพา 10000mAh PD20W")
+        assert ok
+
+    def test_power_bank_accepts_powerbank_oneword(self):
+        ok, _ = self.check("powerbank 20w iphone", "AUKEY Powerbank 20000mAh PD 20W")
+        assert ok
+
+    # --- Power Bank keyword: negative gate (cable/adapter/charger blocked) ---
+
+    def test_power_bank_blocks_usb_cable(self):
+        """UGREEN USB-C to Lightning cable must be blocked for power bank keywords.
+        Blocked by positive gate (no power bank term in title) before negative gate."""
+        ok, reason = self.check(
+            "Power Bank ชาร์จเร็ว 20W สำหรับ iPhone",
+            "UGREEN รุ่น US304 USB C to Lightning MFI Fast Charging 3A PD 20W Cable Charge & Sync สายชาร์จ สำหรับ iPhone",
+        )
+        assert not ok
+        assert reason  # blocked with a non-empty reason
+
+    def test_power_bank_blocks_thai_cable(self):
+        ok, _ = self.check("power bank 20w", "สายชาร์จ USB-C to Lightning 20W สำหรับ iPhone")
+        assert not ok
+
+    def test_power_bank_blocks_adapter(self):
+        ok, reason = self.check("power bank ชาร์จเร็ว", "Baseus adapter หัวชาร์จ GaN 65W USB-C")
+        assert not ok
+
+    def test_power_bank_blocks_wall_charger(self):
+        ok, reason = self.check("พาวเวอร์แบงค์ ชาร์จเร็ว", "Anker wall charger 65W USB-C PD")
+        assert not ok
+
+    def test_power_bank_blocks_title_missing_product_type(self):
+        """A title with '20W' and 'iPhone' but no power bank keyword must fail positive gate."""
+        ok, reason = self.check(
+            "power bank 20w iphone",
+            "Apple 20W USB-C หัวชาร์จ สำหรับ iPhone 14",
+        )
+        assert not ok
+
+    # --- Non-power-bank keywords: gate must be transparent ---
+
+    def test_unrelated_keyword_does_not_trigger(self):
+        """For keywords that don't match any rule, all products pass regardless of title."""
+        ok, _ = self.check("เมาส์เกมมิ่ง", "สายชาร์จ USB-C Baseus")
+        assert ok
+
+    def test_headphones_keyword_no_false_block(self):
+        ok, _ = self.check("หูฟัง gaming ราคาถูก", "JBL Quantum 100 Gaming Headset")
+        assert ok
+
+    # --- Compound term: 'power bank' tokenised as one unit ---
+
+    def test_term_groups_power_bank_is_single_group(self):
+        """'power bank' in multi-token keyword must become one AND-group, not two."""
+        from shopee_engine.seo_engine import _keyword_to_term_groups
+        groups = _keyword_to_term_groups("Power Bank ชาร์จเร็ว 20W สำหรับ iPhone")
+        # power-bank group, ชาร์จเร็ว group, 20w group, iphone group — NOT split "power" + "bank"
+        assert len(groups) == 4
+        pb_group = groups[0]
+        assert "power bank" in pb_group
+        assert "powerbank" in pb_group or "พาวเวอร์แบงค์" in pb_group
+
+    def test_cable_description_no_longer_matches_power_bank_sql(self):
+        """The cable that slipped through (itemid 4886903220) must not pass relevance gate."""
+        cable_title = (
+            "UGREEN รุ่น US304 USB C to Lightning MFI Fast Charging 3A PD 20W "
+            "Cable Charge & Sync สายชาร์จ สำหรับ iPhone 12 13 14"
+        )
+        ok, reason = self.check("Power Bank ชาร์จเร็ว 20W สำหรับ iPhone", cable_title)
+        assert not ok, f"Cable should be blocked but passed with reason: {reason}"
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

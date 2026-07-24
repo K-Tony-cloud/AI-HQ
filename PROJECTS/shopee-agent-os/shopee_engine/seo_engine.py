@@ -102,6 +102,71 @@ for _k, _v in _SYNONYM_MAP.items():
         _SYNONYM_MAP_NORM[_kn[:-1]] = _v
 del _k, _v, _kn
 
+# Multi-word compound terms that must be preserved as a single token during
+# keyword tokenization. Without this, "power bank" splits into ["power", "bank"]
+# — two separate AND-groups — and products with "bank" in their description
+# (cables, adapters) pass the filter falsely. Sorted longest-first for greedy match.
+_COMPOUND_TERMS: list[str] = sorted(
+    [k for k in _SYNONYM_MAP if " " in k],
+    key=len, reverse=True,
+)
+
+# ---------------------------------------------------------------------------
+# Product relevance gate
+# ---------------------------------------------------------------------------
+
+# Each rule applies when keyword contains a trigger term, then enforces:
+#   require_title — at least one must appear in product title (positive gate)
+#   block_title   — none may appear in product title (negative gate)
+_PRODUCT_TYPE_RULES: list[dict] = [
+    {
+        "triggers": frozenset([
+            "power bank", "powerbank", "พาวเวอร์แบงค์", "แบตสำรอง", "แบตเตอรี่สำรอง",
+        ]),
+        "require_title": [
+            "power bank", "powerbank", "พาวเวอร์แบงค์", "แบตสำรอง", "แบตเตอรี่สำรอง",
+        ],
+        "block_title": [
+            "cable", "สายชาร์จ", "lightning cable", "adapter", "อะแดปเตอร์",
+            "หัวชาร์จ", "wall charger",
+        ],
+        "type_label": "Power Bank",
+    },
+    {
+        "triggers": frozenset(["พัดลม", "fan", "mobile fan", "usb fan", "พัดลมพกพา"]),
+        "require_title": ["พัดลม", "fan"],
+        "block_title": [],
+        "type_label": "พัดลม / Fan",
+    },
+]
+
+
+def check_product_relevance(keyword: str, title: str) -> tuple[bool, str]:
+    """Return (is_relevant, reason).
+
+    Returns (True, 'ok') when no rule triggers or all gates pass.
+    Returns (False, reason) when a product-type rule rejects this product.
+    """
+    kw_lo    = keyword.lower()
+    title_lo = title.lower()
+
+    for rule in _PRODUCT_TYPE_RULES:
+        if not any(trigger in kw_lo for trigger in rule["triggers"]):
+            continue
+
+        required = rule.get("require_title", [])
+        if required and not any(req in title_lo for req in required):
+            sample = " หรือ ".join(f"'{r}'" for r in required[:3])
+            return False, f"ไม่ใช่ {rule['type_label']} — title ต้องมี: {sample}"
+
+        for bad in rule.get("block_title", []):
+            if bad in title_lo:
+                return False, (
+                    f"title มี '{bad}' — สินค้านี้ไม่ใช่ {rule['type_label']}"
+                )
+
+    return True, "ok"
+
 
 def _keyword_to_term_groups(keyword: str) -> list[list[str]]:
     """Return term groups for AND/OR SQL construction.
@@ -111,15 +176,42 @@ def _keyword_to_term_groups(keyword: str) -> list[list[str]]:
 
     - Phrase synonym found  → 1 group (synonym terms only, no broad raw tokens)
     - Multi-token, no match → N groups (one per token + its synonyms)
+
+    Compound terms (e.g. "power bank") are preserved as a single token before
+    whitespace splitting to prevent false AND-group fragmentation.
     """
     kw_clean = _YEAR_RE.sub(" ", _CONNECTOR_RE.sub(" ", keyword)).strip()
-    tokens = [t.strip().lower() for t in kw_clean.split() if t.strip()]
-    tokens = [
-        t for t in tokens
-        if t not in _STOPWORDS_TH
-        and t not in _STOPWORDS_EN
-        and not any(t.startswith(p) for p in _CONTEXT_PREFIX_TH)
-    ]
+
+    # Protect known multi-word compounds before whitespace split.
+    # "power bank" → "power\x00bank" so it stays one token; restored afterward.
+    # Word-boundary guard: only replace when the char right after the match is not
+    # alphabetic — prevents "mobile fan" from corrupting "mobile fans" (plural).
+    kw_lo = kw_clean.lower()
+    _ph_map: dict[str, str] = {}
+    kw_protected = kw_lo
+    for compound in _COMPOUND_TERMS:
+        idx = kw_protected.find(compound)
+        if idx < 0:
+            continue
+        end_idx = idx + len(compound)
+        after = kw_protected[end_idx] if end_idx < len(kw_protected) else " "
+        if after.isalpha():
+            continue  # partial match (e.g. "mobile fans" ≠ "mobile fan")
+        ph = compound.replace(" ", "\x00")
+        _ph_map[ph] = compound
+        kw_protected = kw_protected[:idx] + ph + kw_protected[end_idx:]
+
+    raw_tokens = [t.strip() for t in kw_protected.split() if t.strip()]
+    # Restore compound placeholders and apply stopword filter
+    tokens = []
+    for t in raw_tokens:
+        restored = _ph_map.get(t, t)
+        if (
+            restored not in _STOPWORDS_TH
+            and restored not in _STOPWORDS_EN
+            and not any(restored.startswith(p) for p in _CONTEXT_PREFIX_TH)
+        ):
+            tokens.append(restored)
     if not tokens:
         return []
 
@@ -791,12 +883,18 @@ def fetch_products_for_keyword(
     all_search_terms = [t for g in term_groups for t in g]
     results = []
     for _, row in rows.iterrows():
+        title = str(row.get("title") or "")
+
+        # Product relevance gate — block wrong product types before adding to results
+        relevant, _relevance_reason = check_product_relevance(keyword or cleaned_kw, title)
+        if not relevant:
+            continue
+
         aff_link, link_type = _resolve_affiliate_link(
             str(row.get("product_link") or ""),
             str(row.get("datafeed_link") or ""),
             aff_lookup,
         )
-        title = str(row.get("title") or "")
         title_lo = title.lower()
         matched = [t for t in all_search_terms if t.lower() in title_lo]
         match_reason = f"title:{','.join(matched)}" if matched else "desc-only"
@@ -1871,6 +1969,15 @@ def validate_article_for_review(article_id: str) -> dict:
                 if url_err:
                     errors.append(
                         f"itemid {int(prow['itemid'])}: {url_err}"
+                    )
+            # Product relevance gate — block wrong product types
+            for _, prow in products.iterrows():
+                ptitle = str(prow.get("product_title") or "")
+                relevant, reason = check_product_relevance(keyword, ptitle)
+                if not relevant:
+                    errors.append(
+                        f"itemid {int(prow['itemid'])} ไม่ตรง product type: {reason}. "
+                        f"ใช้ /seo-product-remove และ /seo-product-add เพื่อแทนที่สินค้า"
                     )
 
         con.close()
