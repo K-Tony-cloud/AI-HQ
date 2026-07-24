@@ -642,6 +642,131 @@ class TestProductRelevanceGate:
         assert not ok, f"Cable should be blocked but passed with reason: {reason}"
 
 
+class TestSpecEvidenceDetection:
+    """detect_product_spec_evidence() + check_product_spec() + _extract_spec_requirements()."""
+
+    def setup_method(self):
+        from shopee_engine.seo_engine import (
+            detect_product_spec_evidence,
+            check_product_spec,
+            _extract_spec_requirements,
+        )
+        self.detect  = detect_product_spec_evidence
+        self.check   = check_product_spec
+        self.extract = _extract_spec_requirements
+
+    # --- _extract_spec_requirements ---
+
+    def test_extracts_20w_from_keyword(self):
+        r = self.extract("Power Bank ชาร์จเร็ว 20W สำหรับ iPhone")
+        assert r["min_watt"] == 20.0
+        assert r["iphone_required"] is True
+
+    def test_extracts_no_watt_when_absent(self):
+        r = self.extract("Power Bank แบตสำรอง")
+        assert r["min_watt"] is None
+        assert r["iphone_required"] is False
+
+    def test_extracts_iphone_from_keyword(self):
+        r = self.extract("แบตสำรอง iPhone Lightning สายในตัว")
+        assert r["iphone_required"] is True
+
+    # --- detect_product_spec_evidence: wattage source attribution ---
+
+    def test_watt_from_title(self):
+        ev = self.detect("AUKEY PB-Y59 20W PD Power Bank 5000mAh USB-C")
+        assert ev["watt_max"] == 20.0
+        assert ev["watt_source"] == "title"
+
+    def test_watt_from_description_when_missing_in_title(self):
+        ev = self.detect(
+            title="UGREEN Power Bank แบตสำรอง 10000mAh PD Fast Charging",
+            description="รองรับ PD 22.5W ชาร์จ iPhone ได้ภายใน 30 นาที",
+        )
+        assert ev["watt_max"] == 22.5
+        assert ev["watt_source"] == "description"
+
+    def test_no_watt_evidence(self):
+        ev = self.detect("Power Bank ราคาถูก แบตสำรอง")
+        assert ev["watt_max"] == 0.0
+        assert ev["watt_source"] == "none"
+
+    def test_iphone_from_title(self):
+        ev = self.detect("HOCO แบตสำรอง PD20W พร้อมสาย Type-C/iOS")
+        assert ev["iphone_compat"] is True
+        assert ev["iphone_source"] == "title"
+
+    def test_iphone_from_description(self):
+        ev = self.detect(
+            title="UGREEN Power Bank แบตสำรอง 10000mAh",
+            description="สามารถชาร์จ iPhone 15 ได้ 2.2 ครั้ง",
+        )
+        assert ev["iphone_compat"] is True
+        assert ev["iphone_source"] == "description"
+
+    def test_no_iphone_evidence(self):
+        ev = self.detect("Power Bank Samsung 20000mAh 45W Fast Charge")
+        assert ev["iphone_compat"] is False
+        assert ev["iphone_source"] == "none"
+
+    # --- check_product_spec: keyword=20W + iPhone ---
+
+    def test_power_bank_20w_iphone_passes_when_both_present(self):
+        ok, _, ev = self.check(
+            "Power Bank ชาร์จเร็ว 20W สำหรับ iPhone",
+            "[CCC] AUKEY PB-Y59 20W PD พาวเวอร์แบงค์ สำหรับ iPhone",
+        )
+        assert ok
+
+    def test_power_bank_passes_via_description_watt(self):
+        """Power Bank with no watt in title but ≥20W in description must pass."""
+        ok, _, ev = self.check(
+            "Power Bank ชาร์จเร็ว 20W สำหรับ iPhone",
+            "UGREEN Power Bank แบตสำรอง 10000mAh Magnetic Wireless",
+            description="ชาร์จด้วย PD 20W ใช้กับ iPhone 15 ได้",
+        )
+        assert ok
+        assert ev["watt_source"] == "description"
+
+    def test_power_bank_fails_without_20w_evidence(self):
+        """Real power bank but no ≥20W evidence anywhere must be blocked."""
+        ok, reason, _ = self.check(
+            "Power Bank ชาร์จเร็ว 20W สำหรับ iPhone",
+            "Power Bank แบตสำรอง 10000mAh Quick Charge 3.0 (สูงสุด 18W)",
+        )
+        assert not ok
+        assert "20W" in reason or "20" in reason
+
+    def test_power_bank_fails_without_iphone_compatibility(self):
+        """Power bank with 20W+ but no iPhone mention must be blocked when iPhone required."""
+        ok, reason, _ = self.check(
+            "Power Bank ชาร์จเร็ว 20W สำหรับ iPhone",
+            "Samsung 25W Super Fast Power Bank 20000mAh USB-C",
+            description="ชาร์จ Samsung Galaxy ได้เร็วสุด 25W",
+        )
+        assert not ok
+        assert "iphone" in reason.lower() or "iPhone" in reason
+
+    def test_no_spec_requirement_always_passes(self):
+        """Keyword with no watt/iPhone requirement: any power bank passes spec gate."""
+        ok, reason, _ = self.check(
+            "Power Bank แบตสำรอง ราคาถูก",
+            "Power Bank Generic 10000mAh",
+        )
+        assert ok
+        assert reason == "ok"
+
+    def test_aukey_pb_y44_100w_passes_spec(self):
+        """The 100W laptop bank passes spec (100W ≥ 20W) — excluded by price logic, not spec."""
+        ok, _, ev = self.check(
+            "Power Bank ชาร์จเร็ว 20W สำหรับ iPhone",
+            "AUKEY PB-Y44 พาวเวอร์แบงค์ชาร์จเร็ว Sprint X 20K 100W 20000mAh Laptop Power Bank with PD3.0",
+            description="รองรับ PD 45W 30W สำหรับ iPhone และ Laptop",
+        )
+        assert ok
+        assert ev["watt_max"] == 100.0
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

@@ -54,6 +54,12 @@ def _make_idea_id(cat: str, bucket: int) -> str:
 
 _PRICE_RE       = re.compile(r"ไม่เกิน\s*([\d,]+)\s*บาท", re.IGNORECASE)
 _CONNECTOR_RE   = re.compile(r"[&,\-/|]+")
+# Spec evidence patterns
+_WATT_RE        = re.compile(r"(\d+(?:\.\d+)?)\s*w\b", re.IGNORECASE)
+_WATT_KW_RE     = re.compile(r"\b(\d+(?:\.\d+)?)\s*w\b", re.IGNORECASE)
+_IPHONE_SPEC_RE = re.compile(
+    r"iphone|lightning|mfi|\bios\b|apple|magsafe|ไอโฟน|แอปเปิ้ล", re.IGNORECASE
+)
 _STOPWORDS_TH   = frozenset([
     "ไม่เกิน", "บาท", "ที่สุด", "ที่ดีที่สุด", "ราคา", "แนะนำ",
     "ยอดนิยม", "สำหรับ", "ผู้เริ่มต้น", "ดีที่สุด", "คุ้มค่า",
@@ -166,6 +172,92 @@ def check_product_relevance(keyword: str, title: str) -> tuple[bool, str]:
                 )
 
     return True, "ok"
+
+
+# ---------------------------------------------------------------------------
+# Spec requirement extraction + evidence detection
+# ---------------------------------------------------------------------------
+
+def _extract_spec_requirements(keyword: str) -> dict:
+    """Derive required specs from keyword text.
+
+    Returns:
+        min_watt        — minimum wattage required (None if keyword has none)
+        iphone_required — True when keyword mentions iPhone/iOS/Lightning
+    """
+    watts = [float(m) for m in _WATT_KW_RE.findall(keyword)]
+    return {
+        "min_watt":       max(watts) if watts else None,
+        "iphone_required": bool(_IPHONE_SPEC_RE.search(keyword)),
+    }
+
+
+def detect_product_spec_evidence(
+    title: str,
+    description: str = "",
+    attrs: str = "",
+) -> dict:
+    """Scan title / description / attrs for wattage and iPhone-compatibility evidence.
+
+    Returns:
+        watt_max    — highest watt value found (0.0 if none)
+        watt_source — "title" | "description" | "attrs" | "none"
+        watt_values — all unique watt values found across all fields (sorted desc)
+        iphone_compat  — True when any field mentions iPhone compatibility
+        iphone_source  — "title" | "description" | "none"
+    """
+    w_title = [float(m) for m in _WATT_RE.findall(title)]
+    w_desc  = [float(m) for m in _WATT_RE.findall(description)]
+    w_attrs = [float(m) for m in _WATT_RE.findall(attrs)]
+    all_watts = sorted(set(w_title + w_desc + w_attrs), reverse=True)
+
+    if w_title:
+        watt_max, watt_source = max(w_title), "title"
+    elif w_attrs:
+        watt_max, watt_source = max(w_attrs), "attrs"
+    elif w_desc:
+        watt_max, watt_source = max(w_desc), "description"
+    else:
+        watt_max, watt_source = 0.0, "none"
+
+    iphone_in_title = bool(_IPHONE_SPEC_RE.search(title))
+    iphone_in_desc  = bool(_IPHONE_SPEC_RE.search(description + " " + attrs))
+    iphone_compat   = iphone_in_title or iphone_in_desc
+    iphone_source   = "title" if iphone_in_title else ("description" if iphone_in_desc else "none")
+
+    return {
+        "watt_max":      watt_max,
+        "watt_source":   watt_source,
+        "watt_values":   all_watts[:8],
+        "iphone_compat": iphone_compat,
+        "iphone_source": iphone_source,
+    }
+
+
+def check_product_spec(
+    keyword: str,
+    title: str,
+    description: str = "",
+    attrs: str = "",
+) -> tuple[bool, str, dict]:
+    """Validate product against spec requirements derived from keyword.
+
+    Returns (is_valid, reason, evidence_dict).
+    is_valid=True when all requirements are met or keyword has no spec requirements.
+    """
+    reqs     = _extract_spec_requirements(keyword)
+    evidence = detect_product_spec_evidence(title, description, attrs)
+
+    if reqs["min_watt"] is not None and evidence["watt_max"] < reqs["min_watt"]:
+        return False, (
+            f"ไม่มีหลักฐาน ≥{reqs['min_watt']:.0f}W — "
+            f"พบสูงสุด {evidence['watt_max']:.0f}W จาก {evidence['watt_source']}"
+        ), evidence
+
+    if reqs["iphone_required"] and not evidence["iphone_compat"]:
+        return False, "ไม่มีหลักฐานว่าใช้กับ iPhone ได้ (ไม่พบ: iphone/lightning/mfi/ios ใน title หรือ description)", evidence
+
+    return True, "ok", evidence
 
 
 def _keyword_to_term_groups(keyword: str) -> list[list[str]]:
@@ -884,10 +976,16 @@ def fetch_products_for_keyword(
     results = []
     for _, row in rows.iterrows():
         title = str(row.get("title") or "")
+        desc  = str(row.get("description") or "")
 
         # Product relevance gate — block wrong product types before adding to results
         relevant, _relevance_reason = check_product_relevance(keyword or cleaned_kw, title)
         if not relevant:
+            continue
+
+        # Spec gate — block products that lack spec evidence required by keyword
+        spec_ok, _spec_reason, _spec_ev = check_product_spec(keyword or cleaned_kw, title, desc)
+        if not spec_ok:
             continue
 
         aff_link, link_type = _resolve_affiliate_link(
@@ -1935,9 +2033,33 @@ def validate_article_for_review(article_id: str) -> dict:
         if len(content) < 500:
             errors.append(f"Content สั้นเกินไป ({len(content)} ตัวอักษร ต้องการอย่างน้อย 500)")
 
-        products = con.execute(
-            f"SELECT * FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?", [article_id]
-        ).fetchdf()
+        # JOIN products table for description + attrs (spec checks).
+        # Detect available columns dynamically — test DBs may have minimal schemas.
+        _prod_cols = {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+            ).fetchall()
+        }
+        _has_desc  = "description" in _prod_cols
+        _has_attrs = "global_item_attributes" in _prod_cols
+        if _prod_cols:
+            _desc_expr  = "COALESCE(p.description, '')"            if _has_desc  else "''"
+            _attrs_expr = "COALESCE(p.global_item_attributes, '')" if _has_attrs else "''"
+            products = con.execute(f"""
+                SELECT
+                    ap.*,
+                    {_desc_expr}  AS _desc,
+                    {_attrs_expr} AS _attrs
+                FROM {SEO_ARTICLE_PRODUCTS_TABLE} ap
+                LEFT JOIN products p ON ap.itemid = p.itemid
+                WHERE ap.article_id = ?
+            """, [article_id]).fetchdf()
+        else:
+            products = con.execute(
+                f"SELECT * FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ?", [article_id]
+            ).fetchdf()
+            products["_desc"]  = ""
+            products["_attrs"] = ""
 
         if products.empty:
             errors.append("ไม่มีสินค้าในบทความ")
@@ -1971,12 +2093,25 @@ def validate_article_for_review(article_id: str) -> dict:
                         f"itemid {int(prow['itemid'])}: {url_err}"
                     )
             # Product relevance gate — block wrong product types
+            # Spec gate — block products missing required wattage/iPhone evidence
             for _, prow in products.iterrows():
                 ptitle = str(prow.get("product_title") or "")
-                relevant, reason = check_product_relevance(keyword, ptitle)
+                pdesc  = str(prow.get("_desc") or "")
+                pattrs = str(prow.get("_attrs") or "")
+                item_id_str = str(int(prow["itemid"]))
+
+                relevant, rel_reason = check_product_relevance(keyword, ptitle)
                 if not relevant:
                     errors.append(
-                        f"itemid {int(prow['itemid'])} ไม่ตรง product type: {reason}. "
+                        f"itemid {item_id_str} ไม่ตรง product type: {rel_reason}. "
+                        f"ใช้ /seo-product-remove และ /seo-product-add เพื่อแทนที่สินค้า"
+                    )
+                    continue  # no point spec-checking a wrong product type
+
+                spec_ok, spec_reason, _ = check_product_spec(keyword, ptitle, pdesc, pattrs)
+                if not spec_ok:
+                    errors.append(
+                        f"itemid {item_id_str} ไม่ผ่าน spec gate: {spec_reason}. "
                         f"ใช้ /seo-product-remove และ /seo-product-add เพื่อแทนที่สินค้า"
                     )
 
