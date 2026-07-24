@@ -767,6 +767,376 @@ class TestSpecEvidenceDetection:
         assert ev["watt_max"] == 100.0
 
 
+# ---------------------------------------------------------------------------
+# TestContentConsistency (Task 1)
+# ---------------------------------------------------------------------------
+
+def _make_test_db_with_article(
+    product_rows: list[tuple],
+    content_md: str,
+    article_id: str = "test-article",
+    keyword: str = "Power Bank ชาร์จเร็ว 20W",
+    status: str = "draft",
+) -> Path:
+    """Create a temp DB with an article + products for consistency tests."""
+    import duckdb
+    tmp = Path(tempfile.mktemp(suffix=".duckdb"))
+    con = duckdb.connect(str(tmp))
+
+    # Minimal products table
+    con.execute("""
+        CREATE TABLE products (
+            itemid BIGINT, shopid BIGINT, title VARCHAR,
+            sale_price BIGINT, price BIGINT, item_sold BIGINT, "like" BIGINT,
+            shop_rating DOUBLE, item_rating DOUBLE, discount_percentage BIGINT,
+            global_category1 VARCHAR, global_category2 VARCHAR, global_category3 VARCHAR,
+            global_brand VARCHAR, image_link VARCHAR, product_link VARCHAR,
+            "product_short link" VARCHAR, description VARCHAR, stock BIGINT DEFAULT 1
+        )
+    """)
+    con.execute("""
+        CREATE TABLE affiliate_products (
+            id INTEGER, itemid BIGINT, shopid BIGINT, title VARCHAR,
+            category VARCHAR, identification_url VARCHAR, affiliate_short_url VARCHAR,
+            campaign VARCHAR DEFAULT '', platform VARCHAR DEFAULT '',
+            created_at VARCHAR DEFAULT '', updated_at VARCHAR DEFAULT '',
+            latest_link BOOLEAN DEFAULT true
+        )
+    """)
+
+    # SEO tables
+    con.execute("""
+        CREATE TABLE seo_articles (
+            id INTEGER PRIMARY KEY, article_id VARCHAR UNIQUE NOT NULL,
+            keyword VARCHAR NOT NULL, category VARCHAR DEFAULT '',
+            title VARCHAR DEFAULT '', meta_description VARCHAR DEFAULT '',
+            content_md TEXT DEFAULT '', status VARCHAR DEFAULT 'draft',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_product_sync TIMESTAMP, affiliate_disclosure BOOLEAN DEFAULT true,
+            published_path VARCHAR DEFAULT '', git_commit_hash VARCHAR DEFAULT '',
+            reviewed_at TIMESTAMP, review_note VARCHAR DEFAULT '',
+            published_at TIMESTAMP, category_label VARCHAR DEFAULT '',
+            subcategory VARCHAR DEFAULT '', subcategory_label VARCHAR DEFAULT ''
+        )
+    """)
+    con.execute("""
+        CREATE TABLE seo_article_products (
+            id INTEGER PRIMARY KEY, article_id VARCHAR NOT NULL,
+            itemid BIGINT, shopid BIGINT, product_title VARCHAR DEFAULT '',
+            sale_price BIGINT DEFAULT 0, image_link VARCHAR DEFAULT '',
+            affiliate_link VARCHAR DEFAULT '', affiliate_link_type VARCHAR DEFAULT 'none',
+            opportunity_score DOUBLE DEFAULT 0, rank_in_article INTEGER DEFAULT 0,
+            product_status VARCHAR DEFAULT 'active',
+            synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS seo_article_revisions (
+            id INTEGER PRIMARY KEY, article_id VARCHAR NOT NULL,
+            revision_number INTEGER NOT NULL, title VARCHAR DEFAULT '',
+            meta_description VARCHAR DEFAULT '', content_md TEXT DEFAULT '',
+            category VARCHAR DEFAULT '', category_label VARCHAR DEFAULT '',
+            status VARCHAR DEFAULT '', saved_by VARCHAR DEFAULT 'system',
+            change_summary VARCHAR DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Insert products into products table
+    for row in product_rows:
+        # row: (itemid, shopid, title, sale_price)
+        con.execute("""
+            INSERT INTO products (itemid, shopid, title, sale_price, price, item_sold, "like",
+                shop_rating, item_rating, discount_percentage, global_category1, global_category2,
+                global_category3, global_brand, image_link, product_link, "product_short link",
+                description, stock)
+            VALUES (?,?,?,?,?,100,0,4.8,4.7,10,'Mobile & Gadgets','Power Banks','Power Banks','Test',
+                'https://img/1','https://shopee.co.th/1','https://s.shopee.co.th/1','desc',10)
+        """, [row[0], row[1], row[2], row[3], row[3]])
+
+    # Insert article
+    con.execute("""
+        INSERT INTO seo_articles (id, article_id, keyword, status, content_md,
+            category, title, meta_description)
+        VALUES (1, ?, ?, ?, ?, 'mobile-gadgets', 'Test Article', 'Test description')
+    """, [article_id, keyword, status, content_md])
+
+    # Insert article products
+    for i, row in enumerate(product_rows, 1):
+        con.execute("""
+            INSERT INTO seo_article_products
+                (id, article_id, itemid, shopid, product_title, sale_price,
+                 affiliate_link, affiliate_link_type, rank_in_article)
+            VALUES (?, ?, ?, ?, ?, ?, 'https://s.shopee.co.th/test', 'confirmed', ?)
+        """, [i, article_id, row[0], row[1], row[2], row[3], i])
+
+    con.close()
+    return tmp
+
+
+class TestContentConsistency:
+    """validate_content_consistency() and rebuild_article_content()."""
+
+    def test_stale_price_detected(self):
+        from shopee_engine.seo_engine import validate_content_consistency
+        # Article has product at ฿990 but content's table references ฿399
+        products = [(1001, 5001, "UGREEN Power Bank 10000mAh PB561", 990)]
+        content = (
+            "---\narticle_id: test\n---\n\n"
+            "| # | สินค้า | ราคา |\n|---|---|---|\n| 1 | UGREEN Cable US304 | ฿399 |\n"
+        )
+        db = _make_test_db_with_article(products, content)
+        try:
+            with patch("shopee_engine.seo_engine.config.db_path", db):
+                result = validate_content_consistency("test-article")
+            assert not result["consistent"]
+            assert any("399" in s for s in result["stale_items"])
+        finally:
+            db.unlink(missing_ok=True)
+
+    def test_stale_product_name_detected(self):
+        from shopee_engine.seo_engine import validate_content_consistency
+        # Content mentions US304 but no product has that code
+        products = [(1001, 5001, "UGREEN Power Bank PB561 10000mAh", 990)]
+        content = "---\narticle_id: test\n---\n\nรุ่น US304 เป็นสายชาร์จยอดนิยม"
+        db = _make_test_db_with_article(products, content)
+        try:
+            with patch("shopee_engine.seo_engine.config.db_path", db):
+                result = validate_content_consistency("test-article")
+            assert not result["consistent"]
+            assert any("US304" in s.upper() for s in result["stale_items"])
+        finally:
+            db.unlink(missing_ok=True)
+
+    def test_consistent_content_passes(self):
+        from shopee_engine.seo_engine import validate_content_consistency
+        products = [(1001, 5001, "UGREEN Power Bank PB561 10000mAh", 990)]
+        # Table format uses the current product price ฿990 — should pass
+        content = (
+            "---\narticle_id: test\n---\n\n"
+            "| # | สินค้า | ราคา |\n|---|---|---|\n| 1 | UGREEN Power Bank PB561 | ฿990 |\n"
+        )
+        db = _make_test_db_with_article(products, content)
+        try:
+            with patch("shopee_engine.seo_engine.config.db_path", db):
+                result = validate_content_consistency("test-article")
+            assert result["consistent"]
+            assert result["stale_items"] == []
+        finally:
+            db.unlink(missing_ok=True)
+
+    def test_rebuild_removes_stale_references(self):
+        from shopee_engine.seo_engine import rebuild_article_content, validate_content_consistency
+        products = [(1001, 5001, "UGREEN Power Bank PB561 10000mAh", 990)]
+        # Content has stale price ฿399 in table and old model US304 in text
+        content = (
+            "---\narticle_id: test\n---\n\n"
+            "รุ่น US304 ขายดีมาก\n\n"
+            "| # | สินค้า | ราคา |\n|---|---|---|\n| 1 | UGREEN US304 Cable | ฿399 |\n"
+        )
+        db = _make_test_db_with_article(products, content)
+        try:
+            with patch("shopee_engine.seo_engine.config.db_path", db), \
+                 patch("shopee_engine.seo_engine._ai_intro", return_value="intro rebuilt"), \
+                 patch("shopee_engine.seo_engine._ai_buying_guide", return_value="guide rebuilt"), \
+                 patch("shopee_engine.seo_engine._ai_summary", return_value="summary rebuilt"), \
+                 patch("shopee_engine.editorial_team.generate_article_content",
+                       return_value={"_success": False}):
+                r = rebuild_article_content("test-article")
+            assert r["success"] is True
+            assert r["products_used"] == 1
+            # After rebuild, content consistency should pass (no stale ฿399 in table)
+            with patch("shopee_engine.seo_engine.config.db_path", db):
+                cc = validate_content_consistency("test-article")
+            assert "399" not in str(cc.get("stale_items", []))
+        finally:
+            db.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# TestCapacityGate (Task 2)
+# ---------------------------------------------------------------------------
+
+class TestCapacityGate:
+    """detect_capacity_evidence() + _extract_capacity_requirement() + check_capacity_relevance()."""
+
+    def setup_method(self):
+        from shopee_engine.seo_engine import (
+            detect_capacity_evidence,
+            _extract_capacity_requirement,
+            check_capacity_relevance,
+        )
+        self.detect   = detect_capacity_evidence
+        self.extract  = _extract_capacity_requirement
+        self.check    = check_capacity_relevance
+
+    def test_10000mah_passes(self):
+        ok, reason, ev = self.check(
+            "power-bank-10000-mah-ไม่เกิน-1000-บาท",
+            "LBR P03 แบตสำรอง 10000mAh Mini Powerbank",
+        )
+        assert ok
+        assert ev["capacity_max"] == 10000
+
+    def test_20000mah_blocked(self):
+        ok, reason, ev = self.check(
+            "power-bank-10000-mah-ไม่เกิน-1000-บาท",
+            "Samsung Power Bank 20000mAh 45W Fast Charge",
+        )
+        assert not ok
+        assert "20000" in reason or "20,000" in reason
+
+    def test_12000mah_blocked(self):
+        ok, reason, ev = self.check(
+            "power-bank-10000-mah-ไม่เกิน-1000-บาท",
+            "UNEED Powerbank 12000mAh Magnetic",
+        )
+        assert not ok
+        assert "12000" in reason or "12,000" in reason
+
+    def test_variant_title_gives_warning(self):
+        ok, reason, ev = self.check(
+            "power-bank-10000-mah-ไม่เกิน-1000-บาท",
+            "ANKER Zolo Powerbank 10000/20000mAh 22.5W",
+        )
+        # Should pass with warning (ambiguous_variant = True)
+        assert ok
+        assert ev.get("ambiguous_variant") is True
+        assert "warning" in reason.lower() or "variant" in reason.lower()
+
+    def test_no_capacity_in_keyword_passes(self):
+        ok, reason, ev = self.check(
+            "power-bank-ชาร์จเร็ว-20w",
+            "Power Bank 20000mAh Fast Charge 20W",
+        )
+        assert ok
+        assert "no capacity requirement" in reason.lower() or reason == "ok"
+
+    def test_detect_single_mah(self):
+        ev = self.detect("LBR P03 10000mAh Powerbank")
+        assert ev["capacity_max"] == 10000
+        assert ev["capacity_source"] == "title"
+        assert 10000 in ev["capacities_mah"]
+
+    def test_detect_multi_variant(self):
+        ev = self.detect("iMI Powerbank 10000/20000/30000mAh")
+        assert len(ev["capacities_mah"]) >= 2
+        assert 10000 in ev["capacities_mah"]
+
+    def test_detect_no_mah(self):
+        ev = self.detect("Power Bank Generic Fast Charge 20W")
+        assert ev["capacity_max"] == 0
+        assert ev["capacity_source"] == "none"
+        assert ev["capacities_mah"] == []
+
+    def test_extract_10000_from_keyword(self):
+        r = self.extract("power-bank-10000-mah-ไม่เกิน-1000-บาท")
+        assert r["required_mah"] == 10000
+
+    def test_extract_none_no_capacity(self):
+        r = self.extract("power-bank-ชาร์จเร็ว-20w-สำหรับ-iphone")
+        assert r["required_mah"] is None
+
+
+# ---------------------------------------------------------------------------
+# TestDuplicateModelGate (Task 3)
+# ---------------------------------------------------------------------------
+
+class TestDuplicateModelGate:
+    """normalize_model_key() + check_duplicate_models()."""
+
+    def setup_method(self):
+        from shopee_engine.seo_engine import normalize_model_key, check_duplicate_models
+        self.normalize  = normalize_model_key
+        self.check_dups = check_duplicate_models
+
+    def test_same_model_different_itemid_blocked(self):
+        products = [
+            {"itemid": 53155330120, "product_title": "[CCC] AUKEY PB-Y59 20W PD Power Bank 5000mAh"},
+            {"itemid": 54052973043, "product_title": "AUKEY PB-Y59 20W PD Power Bank 5000mAh พับได้"},
+        ]
+        dups = self.check_dups(products)
+        assert len(dups) >= 1
+        # Both PB-Y59 itemids should be in the same group
+        all_ids = []
+        for g in dups:
+            all_ids.extend(g["itemids"])
+        assert 53155330120 in all_ids
+        assert 54052973043 in all_ids
+
+    def test_different_models_passes(self):
+        products = [
+            {"itemid": 1001, "product_title": "[CCC] AUKEY PB-Y59 20W PD Power Bank 5000mAh"},
+            {"itemid": 1002, "product_title": "AUKEY PB-Y44 100W Power Bank 20000mAh"},
+        ]
+        dups = self.check_dups(products)
+        assert dups == []
+
+    def test_no_model_code_not_flagged(self):
+        products = [
+            {"itemid": 1001, "product_title": "พาวเวอร์แบงค์ไร้สาย 20000mAh"},
+            {"itemid": 1002, "product_title": "พาวเวอร์แบงค์ไร้สาย 20000mAh"},
+        ]
+        dups = self.check_dups(products)
+        # These have no parseable model code → not flagged
+        assert dups == []
+
+    def test_normalize_aukey_pb_y59(self):
+        brand, model, cap = self.normalize("[CCC] AUKEY PB-Y59 20W PD Power Bank 5000mAh USB-C")
+        assert brand == "aukey"
+        assert model is not None and "pb" in model.lower() and "y59" in model.lower()
+        assert cap == 5000
+
+    def test_normalize_ukiki_kp15ac(self):
+        brand, model, cap = self.normalize(
+            "[CCC] UKIKI Powerbank 15000mAh PD22.5W รุ่น KP15AC-01"
+        )
+        assert brand == "ukiki"
+        assert model is not None and "kp15ac" in model.lower()
+        assert cap == 15000
+
+
+# ---------------------------------------------------------------------------
+# TestFeatureCopyGuard (Task 4)
+# ---------------------------------------------------------------------------
+
+class TestFeatureCopyGuard:
+    """check_content_feature_copy()."""
+
+    def setup_method(self):
+        from shopee_engine.seo_engine import check_content_feature_copy
+        self.check = check_content_feature_copy
+
+    def test_remote_shutter_in_powerbank_content_flagged(self):
+        content = "---\narticle_id: test\n---\n\nใช้เป็น remote shutter ได้ด้วย"
+        offenders = self.check("Power Bank ชาร์จเร็ว 20W", content)
+        assert "remote shutter" in offenders
+
+    def test_shutter_release_in_powerbank_flagged(self):
+        content = "---\narticle_id: test\n---\n\nมีฟีเจอร์ shutter release สะดวกมาก"
+        offenders = self.check("powerbank 10000mah", content)
+        assert "shutter release" in offenders
+
+    def test_clean_content_passes(self):
+        content = "---\narticle_id: test\n---\n\nชาร์จเร็ว PD 20W สะดวกมาก"
+        offenders = self.check("Power Bank ชาร์จเร็ว 20W", content)
+        assert offenders == []
+
+    def test_non_powerbank_keyword_not_triggered(self):
+        # Fan keyword doesn't have blocked_features for power bank
+        content = "---\narticle_id: test\n---\n\nใช้เป็น remote shutter ได้"
+        offenders = self.check("พัดลมพกพา USB", content)
+        # Power bank rule doesn't trigger for fan keyword
+        assert "remote shutter" not in offenders
+
+    def test_frontmatter_not_scanned(self):
+        # Even if phrase in frontmatter only, body scan should not flag it
+        content = "---\ndescription: remote shutter\n---\n\nชาร์จเร็วดีมาก"
+        offenders = self.check("Power Bank ชาร์จเร็ว 20W", content)
+        assert offenders == []
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

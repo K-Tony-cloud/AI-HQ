@@ -988,6 +988,11 @@ def fetch_products_for_keyword(
         if not spec_ok:
             continue
 
+        # Capacity gate — block products with wrong mAh for capacity keywords (Task 2e)
+        _cap_ok, _cap_reason, _cap_ev = check_capacity_relevance(keyword or cleaned_kw, title, desc)
+        if not _cap_ok:
+            continue
+
         aff_link, link_type = _resolve_affiliate_link(
             str(row.get("product_link") or ""),
             str(row.get("datafeed_link") or ""),
@@ -2120,6 +2125,78 @@ def validate_article_for_review(article_id: str) -> dict:
         con.close()
         return {"valid": False, "errors": [str(exc)], "warnings": []}
 
+    # --- Task 1b: content consistency check (only for draft→reviewed transition) ---
+    current_status_r = ""
+    try:
+        _con_st = _connect(read_only=True)
+        _st_row = _con_st.execute(
+            f"SELECT status FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchone()
+        _con_st.close()
+        if _st_row:
+            current_status_r = str(_st_row[0] or "")
+    except Exception:
+        pass
+
+    if current_status_r == "draft":
+        try:
+            _cc = validate_content_consistency(article_id)
+            if not _cc["consistent"]:
+                stale_str = ", ".join(_cc["stale_items"][:5])
+                errors.append(
+                    f"Content มีข้อมูลเก่าที่ไม่ตรงกับ product set ปัจจุบัน — "
+                    f"stale items: {stale_str}. "
+                    f"ใช้ rebuild_article_content() เพื่อสร้างเนื้อหาใหม่"
+                )
+        except Exception:
+            pass
+
+    # --- Task 2e: capacity relevance gate in review ---
+    if not products.empty:
+        for _, prow in products.iterrows():
+            ptitle = str(prow.get("product_title") or "")
+            pdesc  = str(prow.get("_desc") or "")
+            pattrs = str(prow.get("_attrs") or "")
+            item_id_str = str(int(prow["itemid"]))
+            cap_ok, cap_reason, _ = check_capacity_relevance(keyword, ptitle, pdesc, pattrs)
+            if not cap_ok:
+                errors.append(
+                    f"itemid {item_id_str} ไม่ผ่าน capacity gate: {cap_reason}. "
+                    f"ใช้ /seo-product-remove และ /seo-product-add เพื่อแทนที่สินค้า"
+                )
+            elif cap_reason.startswith("warning:"):
+                warnings.append(f"itemid {item_id_str}: {cap_reason}")
+
+    # --- Task 3c: duplicate model gate in review ---
+    if not products.empty:
+        prod_list = [
+            {"itemid": int(r["itemid"]), "product_title": str(r.get("product_title") or "")}
+            for _, r in products.iterrows()
+        ]
+        dup_groups = check_duplicate_models(prod_list)
+        for grp in dup_groups:
+            key   = grp["key"]
+            iids  = grp["itemids"]
+            errors.append(
+                f"Duplicate model detected — key={key}, "
+                f"itemids: {iids}. "
+                f"ลบ 1 รายการด้วย /seo-product-remove แล้วแทนที่ด้วยสินค้าอื่น"
+            )
+
+    # --- Task 4: feature copy guard (warning only) ---
+    try:
+        _con_art = _connect(read_only=True)
+        _content_row = _con_art.execute(
+            f"SELECT content_md FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchone()
+        _con_art.close()
+        if _content_row:
+            offenders = check_content_feature_copy(keyword, str(_content_row[0] or ""))
+            for phrase in offenders:
+                warnings.append(f"content มี phrase ที่ไม่เกี่ยวกับ product type: '{phrase}'")
+    except Exception:
+        pass
+
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
@@ -2835,6 +2912,7 @@ def remove_product_from_article(article_id: str, itemid: int) -> dict:
         con_w.close()
         raise
 
+    _mark_content_stale(article_id)
     return {
         "success":        True,
         "article_id":     article_id,
@@ -2937,6 +3015,7 @@ def replace_product_in_article(
         con_w.close()
         raise
 
+    _mark_content_stale(article_id)
     return {
         "success":           True,
         "article_id":        article_id,
@@ -2950,3 +3029,679 @@ def replace_product_in_article(
         "demoted_to_draft":  demoted,
         "revision_saved":    rev_num,
     }
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Content consistency validation
+# ---------------------------------------------------------------------------
+
+_CONTENT_PRICE_RE  = re.compile(r"฿([\d,]+)", re.IGNORECASE)
+_CONTENT_BAAT_RE   = re.compile(r"([\d,]+)\s*บาท", re.IGNORECASE)
+
+def validate_content_consistency(article_id: str) -> dict:
+    """Check whether content_md references prices/model names not in current product set.
+
+    Returns {"consistent": bool, "stale_items": list[str]}
+    """
+    con = _connect(read_only=True)
+    try:
+        article = con.execute(
+            f"SELECT content_md FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+            [article_id],
+        ).fetchone()
+        if not article:
+            con.close()
+            return {"consistent": True, "stale_items": []}
+
+        content_md = str(article[0] or "")
+
+        # Also join with products to get original price (shown as strikethrough in blocks)
+        _prod_cols = {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+            ).fetchall()
+        }
+        _has_origprc = "price" in _prod_cols
+        _orig_expr = "COALESCE(p.price, ap.sale_price)" if _has_origprc else "ap.sale_price"
+        products_df = con.execute(f"""
+            SELECT ap.product_title, ap.sale_price, {_orig_expr} AS original_price
+            FROM {SEO_ARTICLE_PRODUCTS_TABLE} ap
+            LEFT JOIN products p ON ap.itemid = p.itemid
+            WHERE ap.article_id = ?
+        """, [article_id]).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if products_df.empty:
+        return {"consistent": True, "stale_items": []}
+
+    # Strip frontmatter — only check the body
+    body = content_md
+    if content_md.startswith("---"):
+        end_fm = content_md.find("\n---", 3)
+        if end_fm != -1:
+            body = content_md[end_fm + 4:]
+
+    # Build sets of current product prices and model codes (include original prices for strikethrough)
+    current_prices: set[int] = set()
+    for _, row in products_df.iterrows():
+        for price_col in ("sale_price", "original_price"):
+            price = row.get(price_col)
+            if price is not None:
+                try:
+                    current_prices.add(int(price))
+                except (TypeError, ValueError):
+                    pass
+
+    # Extract model codes from product titles (alphanumeric codes: PB-Y59, US304, KP15AC-01)
+    _MODEL_CODE_RE = re.compile(r"\b([A-Z]{1,6}[-_]?[A-Z0-9]{2,12})\b")
+    current_models: set[str] = set()
+    for _, row in products_df.iterrows():
+        title = str(row.get("product_title") or "")
+        for m in _MODEL_CODE_RE.findall(title):
+            current_models.add(m.upper())
+
+    stale_items: list[str] = []
+
+    # Only flag prices in clear product-data contexts:
+    #   1. "ราคา ฿NNN" — product price label
+    #   2. "| ฿NNN |"  — comparison table cell
+    #   3. "~~฿NNN~~"  — strikethrough original price
+    # This avoids flagging AI-generated prose (range references, midpoints, article titles).
+    _PROD_PRICE_PATTERNS = [
+        re.compile(r"ราคา\s*(?::\s*)?฿([\d,]+)", re.IGNORECASE),           # "ราคา: ฿990"
+        re.compile(r"\|\s*฿([\d,]+)\s*\|", re.IGNORECASE),                  # "| ฿990 |"
+        re.compile(r"~~฿([\d,]+)~~", re.IGNORECASE),                         # "~~฿2,580~~"
+    ]
+
+    checked_vals: set[int] = set()
+    for pat in _PROD_PRICE_PATTERNS:
+        for m in pat.finditer(body):
+            raw = m.group(1).replace(",", "")
+            try:
+                val = int(raw)
+            except ValueError:
+                continue
+            if val not in current_prices and val not in checked_vals:
+                checked_vals.add(val)
+                stale_items.append(f"฿{m.group(1)}")
+
+    # Check model names in prose
+    for m in _MODEL_CODE_RE.finditer(body):
+        code = m.group(1).upper()
+        # Only flag codes that look like product model codes (>=4 chars or contain dash)
+        if (len(code) >= 4 or "-" in code) and code not in current_models:
+            if code not in stale_items:
+                stale_items.append(code)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_stale: list[str] = []
+    for s in stale_items:
+        if s not in seen:
+            seen.add(s)
+            unique_stale.append(s)
+
+    return {"consistent": len(unique_stale) == 0, "stale_items": unique_stale}
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Capacity relevance gate
+# ---------------------------------------------------------------------------
+
+_MAH_RE      = re.compile(r"(\d[\d,]*(?:[/|]\d[\d,]*)*)\s*mah", re.IGNORECASE)
+# Keyword pattern: handle slug form "10000-mah" and natural "10000 mah" / Thai variants
+_MAH_KW_RE   = re.compile(r"(\d[\d,]*)\s*[-\s]*(?:mah|มาห์|มิลลิแอมป์)", re.IGNORECASE)
+
+
+def detect_capacity_evidence(title: str, description: str = "", attrs: str = "") -> dict:
+    """Scan title/description/attrs for mAh capacity values.
+
+    Returns:
+        capacities_mah  — list of unique int capacity values found
+        capacity_max    — largest capacity found (0 if none)
+        capacity_source — "title" | "description" | "none"
+    """
+    def _extract_mah(text: str) -> list[int]:
+        values = []
+        for m in _MAH_RE.finditer(text):
+            # group(1) may be "10000/20000/30000" — split on / and |
+            for part in re.split(r"[/|]", m.group(1)):
+                raw = part.strip().replace(",", "")
+                try:
+                    values.append(int(raw))
+                except ValueError:
+                    pass
+        return values
+
+    t_caps = _extract_mah(title)
+    d_caps = _extract_mah(description)
+    a_caps = _extract_mah(attrs)
+
+    if t_caps:
+        all_caps = sorted(set(t_caps), reverse=True)
+        return {
+            "capacities_mah": all_caps,
+            "capacity_max":   max(all_caps),
+            "capacity_source": "title",
+        }
+    if d_caps or a_caps:
+        all_caps = sorted(set(d_caps + a_caps), reverse=True)
+        return {
+            "capacities_mah": all_caps,
+            "capacity_max":   max(all_caps) if all_caps else 0,
+            "capacity_source": "description",
+        }
+    return {"capacities_mah": [], "capacity_max": 0, "capacity_source": "none"}
+
+
+def _extract_capacity_requirement(keyword: str) -> dict:
+    """Extract mAh capacity requirement from keyword.
+
+    Returns {"required_mah": int | None}
+    """
+    for m in _MAH_KW_RE.finditer(keyword):
+        raw = m.group(1).replace(",", "")
+        try:
+            return {"required_mah": int(raw)}
+        except ValueError:
+            pass
+    return {"required_mah": None}
+
+
+def check_capacity_relevance(
+    keyword: str,
+    title: str,
+    description: str = "",
+    attrs: str = "",
+) -> tuple[bool, str, dict]:
+    """Validate product capacity against capacity requirement in keyword.
+
+    Returns (is_valid, reason, evidence_dict).
+    """
+    req = _extract_capacity_requirement(keyword)
+    ev  = detect_capacity_evidence(title, description, attrs)
+    required_mah = req["required_mah"]
+
+    if required_mah is None:
+        return True, "ok (no capacity requirement in keyword)", ev
+
+    caps = ev["capacities_mah"]
+
+    if not caps:
+        # No capacity found anywhere — warn but do not block
+        return True, f"warning: ไม่พบ mAh ใน title/description (keyword ต้องการ {required_mah:,} mAh)", ev
+
+    # Check for multi-variant title (e.g. "10000/20000mAh")
+    if len(caps) > 1:
+        tolerance = required_mah * 0.10
+        if any(abs(c - required_mah) <= tolerance for c in caps):
+            ev["ambiguous_variant"] = True
+            return (
+                True,
+                f"warning: สินค้ามีหลาย variant ({'/'.join(str(c) for c in sorted(caps))} mAh) "
+                f"ต้องตรวจว่า SKU ที่ link ไปคือ {required_mah:,} mAh",
+                ev,
+            )
+        else:
+            ev["ambiguous_variant"] = True
+            return (
+                False,
+                f"หลาย variant ({'/'.join(str(c) for c in sorted(caps))} mAh) "
+                f"ไม่มี variant ที่ตรงกับ {required_mah:,} mAh (±10%)",
+                ev,
+            )
+
+    # Single capacity — check within ±10%
+    found_mah = caps[0]
+    tolerance = required_mah * 0.10
+    if abs(found_mah - required_mah) <= tolerance:
+        return True, "ok", ev
+
+    return (
+        False,
+        f"ความจุ {found_mah:,} mAh ไม่ตรงกับ keyword ที่ต้องการ {required_mah:,} mAh (±10%)",
+        ev,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Duplicate model gate
+# ---------------------------------------------------------------------------
+
+def normalize_model_key(title: str) -> tuple:
+    """Extract (brand, model_code, capacity_mah) from product title.
+
+    Returns tuple with None for missing parts.
+    Example: "[CCC] AUKEY PB-Y59 20W PD Power Bank 5000mAh" -> ("aukey", "pb-y59", 5000)
+    """
+    # Clean bracket tags
+    cleaned = re.sub(r"\[[^\]]*\]", " ", title).strip()
+
+    tokens = cleaned.split()
+    brand: str | None = None
+    model_code: str | None = None
+    capacity_mah: int | None = None
+
+    # Brand = first non-numeric alphabetic token
+    for tok in tokens:
+        tok_clean = re.sub(r"[^a-zA-Z0-9]", "", tok)
+        if tok_clean and tok_clean[0].isalpha() and len(tok_clean) >= 2:
+            brand = tok_clean.lower()
+            break
+
+    # Model code — matches: PB-Y59, KP15AC-01, US304, PB561
+    # Strategy: prefer dash-containing codes (higher specificity), then nodash
+    # Exclude single-letter + number patterns like "D22" (common in wattage tokens like "PD22")
+    _mc_dash_re = re.compile(
+        r"\b([A-Z]{1,6}[0-9]*[A-Z]*-[A-Z0-9]{1,12}(?:-[A-Z0-9]+)*)\b",
+        re.IGNORECASE,
+    )
+    _mc_nodash_re = re.compile(
+        r"\b([A-Z]{2,6}[0-9]{2,8}[A-Z]{0,4})\b",
+        re.IGNORECASE,
+    )
+    # First pass: find dash-containing model codes
+    for m in _mc_dash_re.finditer(cleaned):
+        candidate = m.group(1)
+        if any(c.isdigit() for c in candidate):
+            model_code = candidate.lower()
+            break
+    # Second pass: nodash (only if no dash code found)
+    if model_code is None:
+        for m in _mc_nodash_re.finditer(cleaned):
+            candidate = m.group(1)
+            if any(c.isdigit() for c in candidate):
+                model_code = candidate.lower()
+                break
+
+    # Capacity — take the first value from multi-variant if present
+    cap_m = _MAH_RE.search(title)
+    if cap_m:
+        first_part = re.split(r"[/|]", cap_m.group(1))[0].strip()
+        try:
+            capacity_mah = int(first_part.replace(",", ""))
+        except ValueError:
+            pass
+
+    return (brand, model_code, capacity_mah)
+
+
+def check_duplicate_models(products: list[dict]) -> list[dict]:
+    """Check products list for duplicate model keys.
+
+    Input: list of dicts with 'itemid' and 'product_title' (or 'title').
+    Returns list of duplicate groups: [{"key": (brand, model, cap), "itemids": [id1, id2]}]
+    Only flags when model_code is not None.
+    """
+    key_to_itemids: dict[tuple, list[int]] = {}
+
+    for p in products:
+        itemid = int(p.get("itemid") or 0)
+        title  = str(p.get("product_title") or p.get("title") or "")
+        brand, model_code, capacity_mah = normalize_model_key(title)
+
+        if model_code is None:
+            continue
+
+        key = (brand, model_code, capacity_mah)
+        key_to_itemids.setdefault(key, []).append(itemid)
+
+    duplicates = []
+    for key, itemids in key_to_itemids.items():
+        if len(itemids) >= 2:
+            duplicates.append({"key": key, "itemids": itemids})
+
+    return duplicates
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Product-type-specific feature copy guard
+# ---------------------------------------------------------------------------
+
+_POWER_BANK_BLOCKED_FEATURES = ["remote shutter", "รีโมทชัตเตอร์", "shutter release"]
+
+for _rule in _PRODUCT_TYPE_RULES:
+    if "power bank" in _rule.get("triggers", frozenset()):
+        _rule.setdefault("blocked_features", _POWER_BANK_BLOCKED_FEATURES)
+    else:
+        _rule.setdefault("blocked_features", [])
+del _rule
+
+
+def check_content_feature_copy(keyword: str, content_md: str) -> list[str]:
+    """Return list of blocked feature phrases found in content_md for the given keyword.
+
+    Returns empty list when no rule triggers or no blocked phrases found.
+    """
+    kw_lo = keyword.lower()
+    offenders: list[str] = []
+
+    body = content_md
+    if content_md.startswith("---"):
+        end_fm = content_md.find("\n---", 3)
+        if end_fm != -1:
+            body = content_md[end_fm + 4:]
+
+    body_lo = body.lower()
+
+    for rule in _PRODUCT_TYPE_RULES:
+        if not any(trigger in kw_lo for trigger in rule["triggers"]):
+            continue
+        for phrase in rule.get("blocked_features", []):
+            if phrase.lower() in body_lo:
+                offenders.append(phrase)
+
+    return offenders
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Related articles
+# ---------------------------------------------------------------------------
+
+def get_related_articles(article_id: str, limit: int = 3) -> list[dict]:
+    """Return up to limit related articles in the same category (reviewed or published).
+
+    Returns list of {"article_id", "title", "keyword"}.
+    """
+    con = _connect(read_only=True)
+    try:
+        row = con.execute(
+            f"SELECT category, keyword FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+            [article_id],
+        ).fetchone()
+        if not row:
+            con.close()
+            return []
+
+        category, keyword = row
+
+        related_df = con.execute(f"""
+            SELECT article_id, title, keyword
+            FROM {SEO_ARTICLES_TABLE}
+            WHERE category = ?
+              AND article_id != ?
+              AND status IN ('reviewed', 'published')
+            ORDER BY updated_at DESC
+            LIMIT ?
+        """, [category, article_id, limit]).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if related_df.empty:
+        return []
+
+    return [
+        {
+            "article_id": str(row.get("article_id") or ""),
+            "title":      str(row.get("title") or ""),
+            "keyword":    str(row.get("keyword") or ""),
+        }
+        for _, row in related_df.iterrows()
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Task 1d + 5: Rebuild article content
+# ---------------------------------------------------------------------------
+
+def rebuild_article_content(article_id: str) -> dict:
+    """Rebuild content_md for an existing article using current seo_article_products rows.
+
+    - Reads current products from seo_article_products JOIN products
+    - Regenerates all content sections
+    - Preserves YAML frontmatter, replaces body
+    - Clears [CONTENT_STALE] from review_note
+    - Appends Related Articles section if >= 1 related article exists
+    - Returns {"success": bool, "article_id": str, "products_used": int}
+    """
+    con = _connect(read_only=True)
+    try:
+        article = con.execute(
+            f"SELECT * FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
+        ).fetchdf()
+        if article.empty:
+            con.close()
+            return {"success": False, "article_id": article_id, "error": f"Article '{article_id}' not found"}
+
+        art_row = article.iloc[0]
+        keyword     = str(art_row.get("keyword") or "")
+        old_content = str(art_row.get("content_md") or "")
+        review_note = str(art_row.get("review_note") or "")
+
+        _prod_cols = {
+            r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+            ).fetchall()
+        }
+        _has_desc    = "description" in _prod_cols
+        _has_sold    = "item_sold" in _prod_cols
+        _has_rating  = "item_rating" in _prod_cols
+        _has_shoprat = "shop_rating" in _prod_cols
+        _has_disc    = "discount_percentage" in _prod_cols
+        _has_origprc = "price" in _prod_cols
+        _has_imglink = "image_link" in _prod_cols
+        _has_plink   = "product_link" in _prod_cols
+        _has_dflink  = "product_short link" in _prod_cols
+
+        desc_expr    = "COALESCE(p.description, '')"        if _has_desc    else "''"
+        sold_expr    = "COALESCE(p.item_sold, 0)"           if _has_sold    else "0"
+        rating_expr  = "COALESCE(p.item_rating, 0.0)"       if _has_rating  else "0.0"
+        shoprat_expr = "COALESCE(p.shop_rating, 0.0)"       if _has_shoprat else "0.0"
+        disc_expr    = "COALESCE(p.discount_percentage, 0)" if _has_disc    else "0"
+        origprc_expr = "COALESCE(p.price, ap.sale_price)"   if _has_origprc else "ap.sale_price"
+        imglink_expr = "COALESCE(p.image_link, ap.image_link)" if _has_imglink else "ap.image_link"
+        plink_expr   = "COALESCE(p.product_link, '')"       if _has_plink   else "''"
+        dflink_expr  = 'COALESCE(p."product_short link", \'\')' if _has_dflink  else "''"
+
+        rows_df = con.execute(f"""
+            SELECT
+                ap.rank_in_article,
+                ap.itemid,
+                ap.shopid,
+                ap.product_title  AS title,
+                ap.sale_price,
+                ap.affiliate_link,
+                ap.affiliate_link_type,
+                {origprc_expr}  AS original_price,
+                {sold_expr}     AS item_sold,
+                {rating_expr}   AS item_rating,
+                {shoprat_expr}  AS shop_rating,
+                {disc_expr}     AS discount_pct,
+                {imglink_expr}  AS image_link,
+                {plink_expr}    AS product_link,
+                {dflink_expr}   AS datafeed_link,
+                {desc_expr}     AS description_raw
+            FROM {SEO_ARTICLE_PRODUCTS_TABLE} ap
+            LEFT JOIN products p ON ap.itemid = p.itemid
+            WHERE ap.article_id = ?
+            ORDER BY ap.rank_in_article
+        """, [article_id]).fetchdf()
+        con.close()
+    except Exception:
+        con.close()
+        raise
+
+    if rows_df.empty:
+        return {"success": False, "article_id": article_id, "error": "No products found for article"}
+
+    aff_lookup = _get_affiliate_lookup()
+    products: list[dict] = []
+    for _, row in rows_df.iterrows():
+        sp      = int(row.get("sale_price") or 0)
+        op      = int(row.get("original_price") or sp)
+        sold    = int(row.get("item_sold") or 0)
+        rating  = float(row.get("item_rating") or 0.0)
+        shoprat = float(row.get("shop_rating") or 0.0)
+        disc    = int(row.get("discount_pct") or 0)
+        aff_link  = str(row.get("affiliate_link") or "")
+        link_type = str(row.get("affiliate_link_type") or "none")
+        img    = str(row.get("image_link") or "")
+        plink  = str(row.get("product_link") or "")
+        dflink = str(row.get("datafeed_link") or "")
+
+        if link_type != "confirmed":
+            aff_link, link_type = _resolve_affiliate_link(plink, dflink, aff_lookup)
+
+        products.append({
+            "title":              str(row.get("title") or ""),
+            "itemid":             int(row.get("itemid") or 0),
+            "shopid":             int(row.get("shopid") or 0),
+            "sale_price":         sp,
+            "sale_price_fmt":     format_price(sp),
+            "original_price":     op,
+            "original_price_fmt": format_price(op),
+            "item_sold":          sold,
+            "shop_rating":        shoprat,
+            "item_rating":        rating,
+            "discount_pct":       disc,
+            "category":           "",
+            "brand":              "",
+            "image_link":         img,
+            "product_link":       plink,
+            "affiliate_link":     aff_link,
+            "affiliate_link_type": link_type,
+            "opportunity_score":  0.0,
+            "description_raw":    str(row.get("description_raw") or "")[:500],
+            "match_reason":       "rebuild",
+        })
+
+    from shopee_engine.editorial_team import generate_article_content
+    editorial = generate_article_content(keyword, "", products)
+
+    if editorial["_success"]:
+        intro              = editorial["intro"]
+        buying_scenario    = editorial["buying_scenario"]
+        for_whom           = editorial["for_whom"]
+        not_for_whom       = editorial["not_for_whom"]
+        buying_guide       = editorial["buying_guide"]
+        product_highlights = editorial["product_highlights"]
+        summary            = editorial["summary"]
+    else:
+        intro              = _ai_intro(keyword, products)
+        buying_scenario    = ""
+        for_whom           = ""
+        not_for_whom       = ""
+        buying_guide       = _ai_buying_guide(keyword, products)
+        product_highlights = {}
+        summary            = _ai_summary(keyword, products)
+
+    comp_table     = _build_comparison_table(products)
+    product_blocks = _build_product_blocks(products, product_highlights=product_highlights)
+    faq            = _build_faq(keyword, products)
+
+    buying_context_parts: list[str] = []
+    if buying_scenario:
+        buying_context_parts.append(f"## บริบทการซื้อ\n\n{buying_scenario}")
+    if for_whom:
+        buying_context_parts.append(f"**เหมาะกับ:**\n\n{for_whom}")
+    if not_for_whom:
+        buying_context_parts.append(f"**อาจไม่ใช่ตัวเลือกที่ดีถ้า:**\n\n{not_for_whom}")
+    buying_context_block = ("\n\n".join(buying_context_parts) + "\n\n") if buying_context_parts else ""
+
+    import json as _json
+    highlights_comment = (
+        f"\n<!-- editorial:product_highlights\n"
+        f"{_json.dumps(product_highlights, ensure_ascii=False, indent=2)}\n"
+        f"-->\n"
+        if product_highlights else ""
+    )
+
+    # Related articles section (Task 5)
+    related = get_related_articles(article_id, limit=3)
+    related_section = ""
+    if related:
+        lines = ["## บทความที่เกี่ยวข้อง"]
+        for ra in related:
+            ra_id    = ra["article_id"]
+            ra_title = ra["title"] or ra["keyword"]
+            lines.append(f"- [{ra_title}](/{ra_id}/)")
+        related_section = "\n".join(lines) + "\n\n"
+
+    body = f"""\
+## บทนำ
+
+{intro}
+
+{buying_context_block}## ตารางเปรียบเทียบ
+
+{comp_table}
+
+## แนะนำสินค้า
+
+{product_blocks}
+
+## คำแนะนำการเลือกซื้อ
+
+{buying_guide}
+
+{faq}
+
+## บทสรุป
+
+{summary}
+{related_section}{highlights_comment}"""
+
+    # Preserve frontmatter from old content
+    if old_content.startswith("---"):
+        end_fm = old_content.find("\n---", 3)
+        if end_fm != -1:
+            frontmatter_block = old_content[: end_fm + 4]
+            new_content = frontmatter_block + "\n\n" + body
+        else:
+            new_content = old_content + "\n\n" + body
+    else:
+        new_content = body
+
+    # Clear [CONTENT_STALE] from review_note
+    new_note = review_note.replace("[CONTENT_STALE]", "").strip()
+
+    con_w = _connect(read_only=False)
+    try:
+        _init_seo_tables(con_w)
+        con_w.execute(f"""
+            UPDATE {SEO_ARTICLES_TABLE}
+            SET content_md = ?,
+                review_note = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE article_id = ?
+        """, [new_content, new_note, article_id])
+        con_w.close()
+    except Exception:
+        con_w.close()
+        raise
+
+    return {
+        "success":       True,
+        "article_id":    article_id,
+        "products_used": len(products),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hook: mark article stale after product changes (Task 1c)
+# ---------------------------------------------------------------------------
+
+def _mark_content_stale(article_id: str) -> None:
+    """Append [CONTENT_STALE] to review_note. No-op on any error."""
+    try:
+        con = _connect(read_only=False)
+        row = con.execute(
+            f"SELECT review_note FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+            [article_id],
+        ).fetchone()
+        if row:
+            old_note = str(row[0] or "")
+            if "[CONTENT_STALE]" not in old_note:
+                new_note = (old_note + " [CONTENT_STALE]").strip()
+                con.execute(
+                    f"UPDATE {SEO_ARTICLES_TABLE} SET review_note = ? WHERE article_id = ?",
+                    [new_note, article_id],
+                )
+        con.close()
+    except Exception:
+        pass
