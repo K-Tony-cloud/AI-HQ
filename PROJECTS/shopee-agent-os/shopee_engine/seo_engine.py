@@ -1214,12 +1214,16 @@ def generate_article_draft(
     raw_cat = category or products[0].get("category", "")
     product_ids = [p["itemid"] for p in products]
 
-    from shopee_engine.taxonomy import map_to_canonical, resolve_subcategory
+    from shopee_engine.taxonomy import map_to_canonical, resolve_subcategory, is_canonical, CANONICAL_CATEGORIES
     _canonical = map_to_canonical(raw_cat)
     if _canonical:
         cat_slug, cat_label = _canonical
+    elif is_canonical(raw_cat):
+        # caller already passed a canonical slug (e.g. "mobile-gadgets") — use directly
+        cat_slug, cat_label = raw_cat, CANONICAL_CATEGORIES[raw_cat]
     else:
-        cat_slug, cat_label = raw_cat, raw_cat  # unmapped; will be blocked at review
+        # raw Shopee category with no mapping yet — store as-is, review gate will block
+        cat_slug, cat_label = raw_cat, raw_cat
 
     sub_slug, sub_label = resolve_subcategory(raw_cat)
 
