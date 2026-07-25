@@ -353,6 +353,24 @@ def run_preflight(article_id: str) -> dict:
         )
         rel_ok_p, rel_reason_p = check_product_relevance(keyword, p["product_title"])
 
+        # Variant plausibility evidence for this specific product
+        plaus_ok_p, plaus_reason_p, plaus_ev_p = check_variant_price_plausibility(
+            p["product_title"], float(p["sale_price"]), p["_model_names"], keyword
+        )
+        is_mv = plaus_ev_p.get("is_multivariant", False)
+        variant_evidence = {
+            "is_multivariant":         is_mv,
+            "selected_capacity":       plaus_ev_p.get("capacity_detected", 0),
+            "displayed_price_variant": p["sale_price"],
+            "variant_verified":        False,  # cannot verify without user action
+            "variants":                plaus_ev_p.get("variants", []),
+            "evidence_source":         "model_names" if is_mv else "single_variant",
+            "evidence_note": (
+                "Multi-variant listing — ตรวจว่า affiliate link ชี้ไปยัง variant ที่ถูกต้อง"
+                if is_mv else "Single-variant — ไม่จำเป็นต้องตรวจ variant"
+            ),
+        }
+
         prod_gate_results = {
             "product_type_relevance": {"passed": rel_ok_p, "reason": rel_reason_p},
             "spec_relevance": {
@@ -369,6 +387,11 @@ def run_preflight(article_id: str) -> dict:
                 "passed": p["affiliate_link_type"] == "confirmed",
                 "type": p["affiliate_link_type"],
             },
+            "variant_plausibility": {
+                "passed":   plaus_ok_p,
+                "reason":   plaus_reason_p,
+                "floor_used": plaus_ev_p.get("floor_used", 0),
+            },
         }
 
         products_out.append({
@@ -384,6 +407,7 @@ def run_preflight(article_id: str) -> dict:
             "spec_evidence":    str(spec_ev_p.get("watt_max") or ""),
             "flags":            title_clean["flags"],
             "gate_results":     prod_gate_results,
+            "variant_evidence": variant_evidence,
         })
 
     # ── Overall pass/fail ────────────────────────────────────────────────────
@@ -593,12 +617,20 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
 
     product_count_db = len(products_db)
 
-    # ── Check 1: H1 tag exists and matches article title ─────────────────────
-    h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", html_content, re.IGNORECASE | re.DOTALL)
-    if not h1_match:
+    # ── Check 1: Exactly one H1 that matches article title ─────────────────
+    h1_all = re.findall(r"<h1[^>]*>(.*?)</h1>", html_content, re.IGNORECASE | re.DOTALL)
+    h1_count = len(h1_all)
+    if h1_count == 0:
         checks["h1_exists"] = {"passed": False, "detail": "No <h1> tag found in HTML"}
+    elif h1_count > 1:
+        # Strip tags from each h1 for reporting
+        h1_texts = [re.sub(r"<[^>]+>", "", h).strip()[:50] for h in h1_all]
+        checks["h1_exists"] = {
+            "passed": False,
+            "detail": f"Multiple H1 tags found ({h1_count}): {h1_texts}",
+        }
     else:
-        h1_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip()
+        h1_text = re.sub(r"<[^>]+>", "", h1_all[0]).strip()
         if art_title_db and art_title_db.lower()[:60] not in h1_text.lower():
             checks["h1_exists"] = {
                 "passed": False,
@@ -606,6 +638,25 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
             }
         else:
             checks["h1_exists"] = {"passed": True, "detail": f"H1 found: {h1_text[:60]}"}
+
+    # ── Check 1b: Heading hierarchy — no skipped levels ──────────────────────
+    heading_tags = re.findall(r"<h([1-6])[^>]*>", html_content, re.IGNORECASE)
+    heading_levels = [int(t) for t in heading_tags]
+    hierarchy_errors: list[str] = []
+    for i in range(1, len(heading_levels)):
+        diff = heading_levels[i] - heading_levels[i - 1]
+        if diff > 1:
+            hierarchy_errors.append(
+                f"H{heading_levels[i-1]}→H{heading_levels[i]} (skips level)"
+            )
+    checks["heading_hierarchy"] = {
+        "passed": len(hierarchy_errors) == 0,
+        "detail": (
+            f"Heading jumps: {', '.join(hierarchy_errors[:5])}"
+            if hierarchy_errors
+            else f"Heading hierarchy ok: {heading_levels}"
+        ),
+    }
 
     # ── Check 2: Product count in HTML matches DB count ──────────────────────
     aff_btn_count = len(re.findall(r'class="affiliate-btn"', html_content, re.IGNORECASE))
@@ -692,6 +743,9 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
     # Raw Markdown image syntax  ![alt](url)  → should be <img src="...">
     if re.search(r'!\[[^\]]*\]\([^)]+\)', html_content):
         artifacts.append("raw Markdown image syntax: ![...](url)")
+    # Raw Markdown strikethrough ~~text~~ not converted to <del>
+    if re.search(r'~~[^~\n]{1,60}~~', html_content):
+        artifacts.append("raw Markdown strikethrough: ~~...~~")
     # Raw Markdown bold **text** not converted to <strong>
     if re.search(r'\*\*[^*\n]{1,80}\*\*', html_content):
         artifacts.append("raw Markdown bold: **...**")
@@ -750,7 +804,7 @@ def generate_preflight_json(
     meta = preflight_result.get("article_meta", {})
     products_in = preflight_result.get("products", [])
 
-    # Build per-product rows with clean display title
+    # Build per-product rows with clean display title and variant evidence
     products_out: list[dict] = []
     for p in products_in:
         clean = clean_display_title(p.get("raw_title", ""))
@@ -766,6 +820,7 @@ def generate_preflight_json(
             "affiliate_link_status": p.get("affiliate_link_type", "none"),
             "affiliate_link":     p.get("affiliate_link", ""),
             "gate_results":       p.get("gate_results", {}),
+            "variant_evidence":   p.get("variant_evidence", {}),
             "flags":              clean["flags"] + p.get("flags", []),
         })
 

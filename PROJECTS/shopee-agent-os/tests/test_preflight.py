@@ -917,3 +917,323 @@ class TestRendererConsistency:
             for p in patches:
                 p.stop()
             db.unlink(missing_ok=True)
+
+
+# ===========================================================================
+# TestFaqHeadingGeneration
+# ===========================================================================
+
+class TestFaqHeadingGeneration:
+    """FAQ builder must not produce #N rank references that render as H1."""
+
+    def _build_faq(self, products=None) -> str:
+        from shopee_engine.decision_engine import build_decision_faq
+        if products is None:
+            products = [
+                {"sale_price": 184, "item_sold": 5000, "item_rating": 4.7,
+                 "shop_rating": 4.8, "discount_pct": 50,
+                 "title": "JMAX PowerBank M19 10000mAh"},
+                {"sale_price": 399, "item_sold": 3000, "item_rating": 4.6,
+                 "shop_rating": 4.7, "discount_pct": 0,
+                 "title": "Eloop E33 10000mAh"},
+                {"sale_price": 699, "item_sold": 2000, "item_rating": 4.5,
+                 "shop_rating": 4.6, "discount_pct": 0,
+                 "title": "Remax RPP-680 20000mAh"},
+            ]
+            for i, p in enumerate(products):
+                p["sale_price_fmt"] = f"฿{p['sale_price']:,}"
+                p["original_price"] = p["sale_price"]
+                p["original_price_fmt"] = f"฿{p['sale_price']:,}"
+                p["item_sold"] = p.get("item_sold", 0)
+                p["image_link"] = ""
+                p["affiliate_link"] = "https://s.shopee.co.th/test"
+                p["product_link"] = ""
+        return build_decision_faq("Power Bank มีสายในตัว รุ่นไหนดี", "mobile-gadgets", products)
+
+    def test_faq_does_not_start_paragraph_with_hash_number(self):
+        """FAQ answer bodies must not start with #N (would render as H1)."""
+        faq = self._build_faq()
+        # Split into non-empty lines and check none starts with #<digit>
+        import re
+        problem_lines = [
+            line for line in faq.split("\n")
+            if re.match(r"^#\d", line.strip())
+        ]
+        assert problem_lines == [], (
+            f"FAQ has lines starting with #<digit> (renders as H1): {problem_lines}"
+        )
+
+    def test_faq_uses_andan_rank_format(self):
+        """FAQ should use 'อันดับ N' format, not '#N'."""
+        faq = self._build_faq()
+        assert "อันดับ" in faq, "FAQ should use อันดับ format for rank references"
+
+    def test_faq_content_has_no_h1_heading_markers(self):
+        """No line in FAQ output should render as an H1 heading.
+
+        ## headers (H2) are intentional section titles and are allowed.
+        Single # (H1) or #N digit patterns are forbidden.
+        """
+        import re
+        faq = self._build_faq()
+        for line in faq.split("\n"):
+            stripped = line.strip()
+            # Reject: single # followed by space (H1) — "# Heading"
+            assert not re.match(r"^#\s", stripped), (
+                f"H1 heading marker found in FAQ: {stripped!r}"
+            )
+            # Reject: # followed immediately by digit — "#1", "#4" (renders as H1)
+            assert not re.match(r"^#\d", stripped), (
+                f"#N pattern (renders as H1) found: {stripped!r}"
+            )
+
+
+# ===========================================================================
+# TestH1CountValidation
+# ===========================================================================
+
+class TestH1CountValidation:
+    """HTML must contain exactly one H1 tag."""
+
+    def _run_crawl(self, html: str) -> dict:
+        from shopee_engine.preflight import crawl_staging_html
+        db = _make_test_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            return crawl_staging_html("test-article", html)
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_single_h1_passes(self):
+        """Exactly one H1 that matches the title must pass h1_exists."""
+        html = (
+            "<html><body>"
+            "<h1>5 Power Bank ดีที่สุด</h1>"
+            "<p>ราคา: ฿399</p><p>ราคา: ฿549</p>"
+            "<p>Eloop E33 Power Bank 10000mAh</p>"
+            "<p>Anker 521 Power Bank 10000mAh</p>"
+            '<a href="https://s.shopee.co.th/t" class="affiliate-btn">ดู</a>'
+            '<a href="https://s.shopee.co.th/t2" class="affiliate-btn">ดู</a>'
+            "</body></html>"
+        )
+        result = self._run_crawl(html)
+        assert result["checks"]["h1_exists"]["passed"] is True, (
+            f"Detail: {result['checks']['h1_exists']['detail']}"
+        )
+
+    def test_multiple_h1_fails(self):
+        """More than one H1 must cause h1_exists to fail."""
+        html = (
+            "<html><body>"
+            "<h1>5 Power Bank ดีที่สุด</h1>"
+            "<h1>1 ขายแล้ว 5,000 ชิ้น</h1>"  # FAQ answer rendered as H1
+            '<a href="https://s.shopee.co.th/t" class="affiliate-btn">ดู</a>'
+            '<a href="https://s.shopee.co.th/t2" class="affiliate-btn">ดู</a>'
+            "</body></html>"
+        )
+        result = self._run_crawl(html)
+        assert result["checks"]["h1_exists"]["passed"] is False, (
+            "Multiple H1 should fail h1_exists check"
+        )
+        assert "2" in result["checks"]["h1_exists"]["detail"] or "Multiple" in result["checks"]["h1_exists"]["detail"]
+
+    def test_zero_h1_fails(self):
+        """No H1 tag must cause h1_exists to fail."""
+        html = (
+            "<html><body>"
+            "<h2>5 Power Bank ดีที่สุด</h2>"
+            '<a href="https://s.shopee.co.th/t" class="affiliate-btn">ดู</a>'
+            '<a href="https://s.shopee.co.th/t2" class="affiliate-btn">ดู</a>'
+            "</body></html>"
+        )
+        result = self._run_crawl(html)
+        assert result["checks"]["h1_exists"]["passed"] is False
+
+
+# ===========================================================================
+# TestStrikethroughArtifacts
+# ===========================================================================
+
+class TestStrikethroughArtifacts:
+    """~~text~~ raw Markdown must fail no_artifacts; <del> must not."""
+
+    def _run_crawl(self, html: str) -> dict:
+        from shopee_engine.preflight import crawl_staging_html
+        db = _make_test_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            return crawl_staging_html("test-article", html)
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def _base(self, extra: str = "") -> str:
+        return (
+            "<html><body>"
+            "<h1>5 Power Bank ดีที่สุด</h1>"
+            "<p>ราคา: ฿399</p><p>ราคา: ฿549</p>"
+            "<p>Eloop E33 Power Bank 10000mAh</p>"
+            "<p>Anker 521 Power Bank 10000mAh</p>"
+            '<a href="https://s.shopee.co.th/t" class="affiliate-btn">ดู</a>'
+            '<a href="https://s.shopee.co.th/t2" class="affiliate-btn">ดู</a>'
+            + extra
+            + "</body></html>"
+        )
+
+    def test_raw_strikethrough_fails_no_artifacts(self):
+        """~~฿1,990~~ in HTML body must trigger no_artifacts failure."""
+        html = self._base("<p>ราคาเดิม ~~฿1,990~~</p>")
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert "no_artifacts" in checks
+        assert checks["no_artifacts"]["passed"] is False, (
+            f"~~฿1,990~~ should fail no_artifacts. Detail: {checks['no_artifacts']['detail']}"
+        )
+        assert "strikethrough" in checks["no_artifacts"]["detail"].lower()
+
+    def test_del_tag_passes_no_artifacts(self):
+        """<del>฿1,990</del> rendered HTML must pass no_artifacts."""
+        html = self._base("<p>ราคาเดิม <del>฿1,990</del></p>")
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert checks.get("no_artifacts", {}).get("passed") is True, (
+            f"<del> tag should pass. Detail: {checks.get('no_artifacts', {}).get('detail')}"
+        )
+
+    def test_product_block_uses_del_not_tilde(self):
+        """_build_product_blocks must use <del> not ~~ for original price."""
+        from shopee_engine.seo_engine import _build_product_blocks
+        products = [{
+            "title": "Eloop E33 10000mAh",
+            "sale_price": 399,
+            "sale_price_fmt": "฿399",
+            "original_price": 599,
+            "original_price_fmt": "฿599",
+            "item_sold": 1000,
+            "item_rating": 4.7,
+            "shop_rating": 4.8,
+            "discount_pct": 33,
+            "image_link": "",
+            "affiliate_link": "https://s.shopee.co.th/test",
+            "product_link": "",
+            "ccc_evidence_source": "no_evidence",
+            "ccc_evidence_text": "",
+            "ccc_confidence_note": "",
+        }]
+        result = _build_product_blocks(products)
+        assert "<del>฿599</del>" in result, (
+            f"Expected <del>฿599</del> but got: {result[:300]!r}"
+        )
+        assert "~~฿599~~" not in result, "Must not use ~~ for strikethrough"
+
+
+# ===========================================================================
+# TestRelatedArticlesPriority
+# ===========================================================================
+
+class TestRelatedArticlesPriority:
+    """Power Bank articles must appear before category-fallback articles."""
+
+    def _make_multi_article_db(self) -> "Path":
+        """DB with 2 power bank articles + 2 fan articles (same category)."""
+        import duckdb
+        db = _make_test_db(article_id="pb-main", keyword="Power Bank มีสายในตัว รุ่นไหนดี")
+        con = duckdb.connect(str(db))
+
+        # Insert power bank articles
+        for i, (aid, kw) in enumerate([
+            ("pb-10000-mah", "Power Bank 10000mAh ราคาถูก"),
+            ("pb-ccc",       "Power Bank ที่มี CCC รุ่นไหนดี"),
+        ], start=2):
+            con.execute("""
+                INSERT INTO seo_articles
+                    (id, article_id, keyword, category, title, content_md, status)
+                VALUES (?, ?, ?, 'mobile-gadgets', ?, '', 'published')
+            """, [i, aid, kw, f"Title {aid}"])
+
+        # Insert fan articles (same category, different cluster)
+        for i, (aid, kw) in enumerate([
+            ("fan-usb-mobile", "USB & Mobile Fans รุ่นไหนดี"),
+            ("fan-desk",       "พัดลมตั้งโต๊ะ USB ดีไหม"),
+        ], start=4):
+            con.execute("""
+                INSERT INTO seo_articles
+                    (id, article_id, keyword, category, title, content_md, status)
+                VALUES (?, ?, ?, 'mobile-gadgets', ?, '', 'published')
+            """, [i, aid, kw, f"Title {aid}"])
+
+        con.close()
+        return db
+
+    def test_power_bank_articles_appear_before_fan_articles(self):
+        """get_related_articles for power bank must list PB articles before fans."""
+        from shopee_engine.seo_engine import get_related_articles
+        db = self._make_multi_article_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            related = get_related_articles("pb-main", limit=4)
+            article_ids = [r["article_id"] for r in related]
+            # Both power bank articles must appear
+            assert "pb-10000-mah" in article_ids, f"Missing pb-10000-mah: {article_ids}"
+            assert "pb-ccc" in article_ids, f"Missing pb-ccc: {article_ids}"
+            # Power bank articles must appear BEFORE any fan articles
+            pb_indices = [i for i, aid in enumerate(article_ids) if aid.startswith("pb-")]
+            fan_indices = [i for i, aid in enumerate(article_ids) if aid.startswith("fan-")]
+            if pb_indices and fan_indices:
+                assert max(pb_indices) < min(fan_indices), (
+                    f"Fan article appeared before PB article: {article_ids}"
+                )
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_power_bank_only_when_sufficient_cluster_articles(self):
+        """If >= limit power bank articles exist, fans must not appear."""
+        import duckdb
+        db = _make_test_db(article_id="pb-main2", keyword="Power Bank ชาร์จเร็ว 20W")
+        con = duckdb.connect(str(db))
+        # Insert 4 power bank articles (= limit)
+        for i, (aid, kw) in enumerate([
+            ("pb-a1", "Power Bank 10000mAh ราคาถูก"),
+            ("pb-a2", "Power Bank ที่มี CCC"),
+            ("pb-a3", "Power Bank ชาร์จเร็ว สำหรับ iPhone"),
+            ("pb-a4", "Power Bank มีสายในตัว"),
+        ], start=2):
+            con.execute("""
+                INSERT INTO seo_articles
+                    (id, article_id, keyword, category, title, content_md, status)
+                VALUES (?, ?, ?, 'mobile-gadgets', ?, '', 'published')
+            """, [i, aid, kw, f"Title {aid}"])
+        # Insert fan article (same category)
+        con.execute("""
+            INSERT INTO seo_articles
+                (id, article_id, keyword, category, title, content_md, status)
+            VALUES (6, 'fan-usb', 'USB & Mobile Fans รุ่นไหนดี', 'mobile-gadgets', 'Fan Title', '', 'published')
+        """)
+        con.close()
+
+        from shopee_engine.seo_engine import get_related_articles
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            related = get_related_articles("pb-main2", limit=4)
+            article_ids = [r["article_id"] for r in related]
+            assert "fan-usb" not in article_ids, (
+                f"Fan article must not appear when 4 PB articles exist: {article_ids}"
+            )
+            assert len(article_ids) == 4
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)

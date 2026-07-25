@@ -1338,7 +1338,7 @@ def _build_product_blocks(
             block += f"![{name}]({img})\n\n"
         block += f"**ราคา:** {price}"
         if orig:
-            block += f" ~~{orig}~~"
+            block += f" <del>{orig}</del>"
         block += f"{disc}\n\n"
         block += f"**คะแนน:** {rating:.1f} ⭐ | **ยอดขาย:** {sold} ชิ้น\n\n"
 
@@ -3269,7 +3269,8 @@ def validate_content_consistency(article_id: str) -> dict:
     _PROD_PRICE_PATTERNS = [
         re.compile(r"ราคา\s*(?::\s*)?฿([\d,]+)", re.IGNORECASE),           # "ราคา: ฿990"
         re.compile(r"\|\s*฿([\d,]+)\s*\|", re.IGNORECASE),                  # "| ฿990 |"
-        re.compile(r"~~฿([\d,]+)~~", re.IGNORECASE),                         # "~~฿2,580~~"
+        re.compile(r"~~฿([\d,]+)~~", re.IGNORECASE),                         # "~~฿2,580~~" (legacy)
+        re.compile(r"<del>฿([\d,]+)</del>", re.IGNORECASE),                  # "<del>฿2,580</del>"
     ]
 
     checked_vals: set[int] = set()
@@ -3719,12 +3720,13 @@ def _find_keyword_cluster(keyword: str) -> frozenset[str] | None:
 
 
 def get_related_articles(article_id: str, limit: int = 4) -> list[dict]:
-    """Return up to limit related articles, prioritizing same keyword cluster over category.
+    """Return up to limit related articles.
 
-    Scoring:
-      +2 if candidate keyword matches same cluster as current article
-      +1 if same category only
+    Priority order (never mixes tiers unless cluster is exhausted):
+      Tier 1: Same keyword cluster (e.g. all power bank articles, any category)
+      Tier 2: Same category, different cluster (fallback only when tier-1 < limit)
 
+    Power bank articles always appear before fan/gadget articles from the same category.
     Returns list of {"article_id", "title", "keyword"}.
     """
     con = _connect(read_only=True)
@@ -3739,44 +3741,54 @@ def get_related_articles(article_id: str, limit: int = 4) -> list[dict]:
 
         category, keyword = str(row[0] or ""), str(row[1] or "")
 
-        # Fetch all candidates in same category
-        related_df = con.execute(f"""
-            SELECT article_id, title, keyword, updated_at
+        # Fetch ALL published/reviewed candidates (any category)
+        all_df = con.execute(f"""
+            SELECT article_id, title, keyword, category, updated_at
             FROM {SEO_ARTICLES_TABLE}
-            WHERE category = ?
-              AND article_id != ?
+            WHERE article_id != ?
               AND status IN ('reviewed', 'published')
             ORDER BY updated_at DESC
-        """, [category, article_id]).fetchdf()
+        """, [article_id]).fetchdf()
         con.close()
     except Exception:
         con.close()
         raise
 
-    if related_df.empty:
+    if all_df.empty:
         return []
 
     current_cluster = _find_keyword_cluster(keyword)
 
-    # Score each candidate
-    scored: list[tuple[int, str, dict]] = []
-    for _, r in related_df.iterrows():
-        cand_kw = str(r.get("keyword") or "")
-        score = 1  # base: same category
-        if current_cluster is not None:
-            cand_cluster = _find_keyword_cluster(cand_kw)
-            if cand_cluster is current_cluster or cand_cluster == current_cluster:
-                score = 2
-        scored.append((score, str(r.get("updated_at") or ""), {
+    tier1: list[dict] = []  # same cluster (any category)
+    tier2: list[dict] = []  # same category, different cluster
+
+    for _, r in all_df.iterrows():
+        cand_kw  = str(r.get("keyword") or "")
+        cand_cat = str(r.get("category") or "")
+        entry = {
             "article_id": str(r.get("article_id") or ""),
             "title":      str(r.get("title") or ""),
             "keyword":    cand_kw,
-        }))
+        }
 
-    # Sort by score DESC, then updated_at DESC
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        if current_cluster is not None:
+            cand_cluster = _find_keyword_cluster(cand_kw)
+            if cand_cluster is not None and (
+                cand_cluster is current_cluster or cand_cluster == current_cluster
+            ):
+                tier1.append(entry)
+                continue
 
-    return [item[2] for item in scored[:limit]]
+        # Category fallback — only for articles not in the same cluster
+        if cand_cat == category:
+            tier2.append(entry)
+
+    # Tier-1 first; fill remaining slots from tier-2
+    result = tier1[:limit]
+    if len(result) < limit:
+        result.extend(tier2[: limit - len(result)])
+
+    return result
 
 
 # ---------------------------------------------------------------------------

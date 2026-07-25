@@ -287,7 +287,7 @@ def _build_decision_table(products: list[dict], category: str) -> str:
         seen_ranks.add(rank)
 
         price = product.get("sale_price", 0) or 0
-        rec   = f"#{rank} {_fmt_price(price)}" if price else f"#{rank}"
+        rec   = f"อันดับ {rank} {_fmt_price(price)}" if price else f"อันดับ {rank}"
         rows.append((p_cfg["label"], rec, reason))
 
     if len(rows) < 2:
@@ -327,7 +327,7 @@ def _build_best_pick(products: list[dict]) -> str:
         sold  = p.get("item_sold", 0) or 0
         caveat = _flash_sale_caveat([p])
         return (
-            f"**ถ้าต้องเลือกแค่ตัวเดียว:** #{rank} {_fmt_price(price)}"
+            f"**ถ้าต้องเลือกแค่ตัวเดียว:** อันดับ {rank} {_fmt_price(price)}"
             f" — ราคาต่ำสุดในกลุ่มและขายดีที่สุด {sold:,} ชิ้น"
             f" ความเสี่ยงต่ำสำหรับคนที่ยังไม่แน่ใจ{caveat}"
         )
@@ -338,7 +338,7 @@ def _build_best_pick(products: list[dict]) -> str:
         price = p.get("sale_price", 0) or 0
         caveat = _flash_sale_caveat([p])
         return (
-            f"**ถ้าต้องเลือกแค่ตัวเดียว:** #{rank} {_fmt_price(price)}"
+            f"**ถ้าต้องเลือกแค่ตัวเดียว:** อันดับ {rank} {_fmt_price(price)}"
             f" — {reason}{caveat}"
         )
 
@@ -349,7 +349,7 @@ def _build_best_pick(products: list[dict]) -> str:
         price = p.get("sale_price", 0) or 0
         caveat = _flash_sale_caveat([p])
         return (
-            f"**ถ้าต้องเลือกแค่ตัวเดียว:** #{rank} {_fmt_price(price)}"
+            f"**ถ้าต้องเลือกแค่ตัวเดียว:** อันดับ {rank} {_fmt_price(price)}"
             f" — {reason}{caveat}"
         )
 
@@ -427,7 +427,7 @@ def build_decision_faq(
         r     = p.get("item_rating", 0.0) or 0.0
         questions.append(
             f"**{keyword} ตัวไหนขายดีที่สุด?**\n\n"
-            f"#{rank} ขายแล้ว {sold:,} ชิ้น ราคา {_fmt_price(price)}"
+            f"อันดับ {rank} ขายแล้ว {sold:,} ชิ้น ราคา {_fmt_price(price)}"
             f"{f' คะแนน {r:.1f} ⭐' if r > 0 else ''}"
             f" — ยอดขายสูงสุดในบทความนี้ ณ วันที่อัปเดตข้อมูล"
         )
@@ -446,7 +446,7 @@ def build_decision_faq(
         rank  = _rank_of(p, products)
         questions.append(
             f"**งบ {_fmt_price(min_p)} บาท ซื้อ {keyword} ได้ไหม?**\n\n"
-            f"ได้ — #{rank} ราคา {_fmt_price(min_p)} เป็นตัวเลือกที่ราคาต่ำสุดในบทความนี้"
+            f"ได้ — อันดับ {rank} ราคา {_fmt_price(min_p)} เป็นตัวเลือกที่ราคาต่ำสุดในบทความนี้"
             f" ราคาอาจเปลี่ยนตามช่วงโปร ตรวจราคาปัจจุบันก่อนสั่ง"
         )
 
@@ -470,8 +470,8 @@ def build_decision_faq(
             prem_r     = prem_p.get("item_rating", 0.0) or 0.0
             questions.append(
                 f"**{_fmt_price(min_p)} หรือ {_fmt_price(max_p)} ดีกว่ากัน?**\n\n"
-                f"#{cheap_rank} {_fmt_price(min_p)} เหมาะกับคนที่อยากทดลองใช้ก่อนโดยไม่เสี่ยงงบมาก "
-                f"#{prem_rank} {_fmt_price(prem_price)} มีคะแนนรีวิว {prem_r:.1f} ⭐"
+                f"อันดับ {cheap_rank} {_fmt_price(min_p)} เหมาะกับคนที่อยากทดลองใช้ก่อนโดยไม่เสี่ยงงบมาก "
+                f"อันดับ {prem_rank} {_fmt_price(prem_price)} มีคะแนนรีวิว {prem_r:.1f} ⭐"
                 f" เหมาะกับคนที่ต้องการความมั่นใจด้านคุณภาพมากกว่า"
                 f" — ขึ้นกับว่าคุณเน้นราคาหรือคุณภาพเป็นหลัก"
             )
@@ -485,7 +485,7 @@ def build_decision_faq(
         fp_disc  = fp.get("discount_pct", 0) or 0
         questions.append(
             f"**Flash Sale คุ้มไหม?**\n\n"
-            f"#{fp_rank} ลดอยู่ที่ {fp_disc}% เหลือ {_fmt_price(fp_price)}"
+            f"อันดับ {fp_rank} ลดอยู่ที่ {fp_disc}% เหลือ {_fmt_price(fp_price)}"
             f" ราคา Flash Sale อาจเปลี่ยนได้ทุกวันหรือทุกชั่วโมง"
             f" ควรตรวจราคาปัจจุบันก่อนตัดสินใจ — ไม่ควรรอนานเพราะสต็อกอาจหมด"
         )

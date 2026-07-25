@@ -237,7 +237,7 @@ class TestBuildDecisionTable:
         table = _build_decision_table(FANS_500, "mobile-gadgets")
         assert "| ถ้าคุณ..." in table
         assert "| เหตุผล |" in table
-        assert "#" in table
+        assert "อันดับ" in table
 
     def test_table_has_at_least_2_rows(self):
         table = _build_decision_table(FANS_500, "mobile-gadgets")
@@ -250,8 +250,9 @@ class TestBuildDecisionTable:
         recs = [part.strip() for line in table.split("\n")
                 if line.startswith("|") and "ถ้าคุณ" not in line and "---" not in line
                 for part in line.split("|")[2:3]]
-        # Each rank should appear at most once
-        ranks = [r.split()[0] for r in recs if r.startswith("#")]
+        # Each rank number should appear at most once (format: "อันดับ N ...")
+        import re
+        ranks = [re.match(r"อันดับ\s+(\d+)", r).group(1) for r in recs if re.match(r"อันดับ\s+\d+", r)]
         assert len(ranks) == len(set(ranks)), f"Duplicate ranks: {ranks}"
 
     def test_beauty_category_uses_beauty_personas(self):
