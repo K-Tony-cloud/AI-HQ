@@ -18,9 +18,12 @@ from pathlib import Path
 from shopee_engine.seo_engine import (
     SEO_ARTICLE_PRODUCTS_TABLE,
     SEO_ARTICLES_TABLE,
+    _CCC_BRACKET_RE,
+    _CCC_PLAIN_RE,
     _build_comparison_table,
     _build_product_blocks,
     _connect,
+    _detect_attribute_evidence,
     format_price,
     get_related_articles,
 )
@@ -193,6 +196,16 @@ def _extract_prose(content_md: str) -> dict[str, str]:
 
 def _load_enriched_products(article_id: str, con) -> list[dict]:
     """Load seo_article_products, enriched with fresh data from products table."""
+    # Detect which optional columns exist in products table
+    try:
+        _p_cols = {r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+        ).fetchall()}
+    except Exception:
+        _p_cols = set()
+    _desc_expr  = "COALESCE(p.description, '')" if "description" in _p_cols else "''"
+    _attrs_expr = "COALESCE(p.global_item_attributes, '')" if "global_item_attributes" in _p_cols else "''"
+
     df = con.execute(f"""
         SELECT
             ap.rank_in_article,
@@ -209,7 +222,9 @@ def _load_enriched_products(article_id: str, con) -> list[dict]:
             COALESCE(p.item_rating, 0.0)        AS item_rating,
             COALESCE(p.shop_rating, 0.0)        AS shop_rating,
             COALESCE(p.discount_percentage, 0)  AS discount_pct,
-            COALESCE(p.product_link, '')        AS product_link
+            COALESCE(p.product_link, '')        AS product_link,
+            {_desc_expr}                        AS _description,
+            {_attrs_expr}                       AS _attributes
         FROM {SEO_ARTICLE_PRODUCTS_TABLE} ap
         LEFT JOIN products p ON (ap.itemid = p.itemid AND ap.shopid = p.shopid)
         WHERE ap.article_id = ?
@@ -221,8 +236,13 @@ def _load_enriched_products(article_id: str, con) -> list[dict]:
     for _, row in df.iterrows():
         sale_price = int(row.get("sale_price") or 0)
         orig_price = int(row.get("original_price") or 0)
+        title_str  = str(row.get("title") or "")
+        desc_str   = str(row.get("_description") or "")
+        attrs_str  = str(row.get("_attributes") or "")
+        ccc_ev     = _detect_attribute_evidence(title_str, desc_str + " " + attrs_str,
+                                                _CCC_BRACKET_RE, _CCC_PLAIN_RE)
         results.append({
-            "title":               str(row.get("title") or ""),
+            "title":               title_str,
             "itemid":              int(row.get("itemid") or 0),
             "shopid":              int(row.get("shopid") or 0),
             "sale_price":          sale_price,
@@ -240,6 +260,10 @@ def _load_enriched_products(article_id: str, con) -> list[dict]:
             "opportunity_score":   float(row.get("opportunity_score") or 0),
             "category": "",
             "brand":    "",
+            # CCC evidence fields (populated for all products; rendered only for CCC articles)
+            "ccc_evidence_source": ccc_ev["evidence_source"],
+            "ccc_evidence_text":   ccc_ev["evidence_text"],
+            "ccc_confidence_note": ccc_ev["confidence_note"],
         })
     return results
 
@@ -381,7 +405,10 @@ def _build_export_body(
     product_highlights = _extract_product_highlights(str(article.get("content_md", "")))
     category     = str(article.get("category", ""))
     comp_table   = _build_comparison_table(products)
-    prod_blocks  = _build_product_blocks(products, product_highlights=product_highlights)
+    # Show CCC evidence badges when the article keyword explicitly features CCC certification
+    _show_ccc = bool(re.search(r"\bCCC\b|\b3C\b", keyword, re.IGNORECASE))
+    prod_blocks  = _build_product_blocks(products, product_highlights=product_highlights,
+                                         show_ccc_evidence=_show_ccc)
 
     # Decision Engine sections
     section_title   = get_section_title(category)

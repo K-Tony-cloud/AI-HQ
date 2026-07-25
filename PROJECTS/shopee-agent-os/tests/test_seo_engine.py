@@ -675,6 +675,22 @@ class TestProductRelevanceGate:
         )
         assert not ok
 
+    def test_lcable_connector_descriptor_in_powerbank_title_passes(self):
+        """'L-Cable' at end of Power Bank title is a connector type, not a cable product."""
+        ok, reason = self.check(
+            "Power Bank มีสายในตัว รุ่นไหนดี",
+            "Eloop E33 Line แบตสำรอง 10000mAh Powerbank มีสายชาร์จในตัว พาวเวอร์แบงค์สายชาร์จในตัว Type C และ L-Cable 2.4A",
+        )
+        assert ok, f"Expected PASS but blocked: {reason}"
+
+    def test_standalone_cable_without_pb_evidence_blocked(self):
+        """A standalone cable listing without any Power Bank evidence must be blocked."""
+        ok, reason = self.check(
+            "power bank",
+            "สายชาร์จ Lightning Cable 1m Fast Charge 20W สำหรับ iPhone",
+        )
+        assert not ok
+
     def test_positive_pb_evidence_outweighs_builtin_cable_term(self):
         """When Power Bank evidence is strong, built-in cable phrase must not block."""
         ok, reason = self.check(
@@ -1257,6 +1273,17 @@ class TestVariantPricePlausibilityGate:
         assert "209" in reason or "30" in reason
         assert ev["is_multivariant"] is True
 
+    def test_elrro_dx13_30000mah_120w_at_209_flagged(self):
+        """ELRRO DX13 30000mAh 120W single variant at ฿209 — implausible."""
+        ok, reason, ev = self.check(
+            "ELRRO Powerbank DX13 30000mAh Fast Charge 120W มีสายในตัว",
+            209.0,
+            "DX13 black",
+        )
+        assert not ok, f"Expected blocked but passed: {reason}"
+        assert ev["capacity_detected"] == 30000
+        assert ev["watt_detected"] >= 100
+
     def test_eloop_10000mah_at_299_passes(self):
         ok, reason, _ = self.check("Eloop E33 10000mAh 12W", 299.0, "E33 ขาว|E33 ดำ")
         assert ok
@@ -1285,22 +1312,45 @@ class TestVariantPricePlausibilityGate:
         assert not ok
         assert ev["is_multivariant"] is True
 
-    def test_single_variant_color_only_not_flagged_as_multivariant(self):
+    def test_multi_model_multi_capacity_listing(self):
+        """Eloop E33/E33 Line/E34 with 10000/20000mAh at ฿199 — 10000mAh passes floor but multi-model."""
+        # The actual problem: ฿199 is suspect for ANY variant; 10000mAh floor is 120
+        ok, reason, ev = self.check(
+            "[ส่งด่วน] Eloop E33 / E33 Line / E34 แบตสำรอง 10000mAh 20000mAh Powerbank",
+            199.0,
+            "E33 ขาว มีสายในตัว|E33 ดำ มีสายในตัว|E34 สีดำ|E34 สีขาว|E33 สีขาว|E33 สีดำ",
+        )
+        # 10000mAh floor=120, ฿199 >= 120 → plausibility passes on price
+        # But is_multivariant is True (6 variants including cross-model)
+        assert ev["is_multivariant"] is True
+        assert ev["capacity_detected"] == 10000  # first capacity from title
+
+    def test_single_variant_color_only_evidence(self):
         _, _, ev = self.check(
             "GOOJODOQ 10000mAh PowerBank", 196.0,
             "สีดํา|สีขาว"
         )
-        # 2 color variants — is_multivariant True (it's fine, just flag for multi)
-        assert ev["is_multivariant"] is True
+        assert ev["is_multivariant"] is True  # 2 color variants → still multivariant
 
     def test_high_wattage_surcharge_applied(self):
-        # 10000mAh + 65W should have higher floor than 10000mAh alone
         _, _, ev_base = self.check("แบตสำรอง 10000mAh 10W", 150.0, None)
-        ok_high, _, _ = self.check("แบตสำรอง 10000mAh 65W", 150.0, None)
-        # At 65W the floor is raised, so 150 may fail
-        # Just verify evidence keys exist
-        assert "floor_used" in ev_base
-        assert "watt_detected" in ev_base
+        ok_high, _, ev_high = self.check("แบตสำรอง 10000mAh 65W", 150.0, None)
+        assert ev_high["floor_used"] > ev_base["floor_used"], (
+            f"65W floor {ev_high['floor_used']} should exceed 10W floor {ev_base['floor_used']}"
+        )
+
+    def test_30000mah_100w_high_floor(self):
+        """30000mAh + 100W+ should require floor > ฿600."""
+        ok, reason, ev = self.check("PowerBank 30000mAh 120W", 500.0, None)
+        assert not ok
+        assert ev["floor_used"] >= 600.0
+
+    def test_remax_20000mah_at_699_passes(self):
+        """Remax RPP-680 20000mAh at ฿699 — plausible."""
+        ok, reason, _ = self.check(
+            "Remax Power Bank RPP-680 20000mAh มีสายในตัว", 699.0, "Black|Blue|White"
+        )
+        assert ok
 
 
 # ---------------------------------------------------------------------------
