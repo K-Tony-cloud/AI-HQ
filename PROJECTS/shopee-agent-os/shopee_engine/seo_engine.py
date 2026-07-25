@@ -595,6 +595,8 @@ def _init_seo_tables(con: duckdb.DuckDBPyConnection) -> None:
         ("category_label",      "VARCHAR DEFAULT ''"),
         ("subcategory",         "VARCHAR DEFAULT ''"),
         ("subcategory_label",   "VARCHAR DEFAULT ''"),
+        ("preflight_status",    "VARCHAR DEFAULT 'pending'"),
+        ("preflight_passed_at", "TIMESTAMP"),
     ]:
         try:
             con.execute(
@@ -1292,11 +1294,11 @@ def _build_product_blocks(
     """
     highlights = product_highlights or {}
     _EVIDENCE_LABELS = {
-        "title_bracket":    ("🏷️ CCC: พบใน title [bracket]", "ยืนยันโดย seller"),
-        "title_mention":    ("📋 CCC: พบใน title",           "seller ระบุไว้ ควรตรวจสอบ"),
-        "description_match":("📝 CCC: พบใน description",     "ควรตรวจสอบก่อนซื้อ"),
-        "no_evidence":      ("⚠️ CCC: ไม่พบหลักฐาน",        "ควรเปิดหน้าสินค้าตรวจก่อน"),
-        "attrs_match":      ("📋 CCC: พบใน attributes",      "ควรตรวจสอบ"),
+        "title_bracket":    ("🏷️ ร้านค้าระบุว่ามี CCC (จาก title)", "ควรตรวจสอบบนตัวสินค้า"),
+        "title_mention":    ("📋 ร้านค้าระบุว่ามี CCC (กล่าวถึงใน title)", "ควรตรวจสอบก่อนซื้อ"),
+        "description_match":("📝 ร้านค้ากล่าวถึง CCC ใน description", "ควรตรวจสอบก่อนซื้อ"),
+        "no_evidence":      ("⚠️ ไม่พบหลักฐาน CCC ใน datafeed", "เปิดหน้าสินค้าตรวจก่อน"),
+        "attrs_match":      ("📋 พบ CCC ใน product attributes", "ควรตรวจสอบ"),
     }
 
     blocks = []
@@ -1965,6 +1967,28 @@ def update_published_info(article_id: str, published_path: str, git_hash: str) -
         """, [published_path, git_hash, article_id])
         con.close()
     except Exception:
+        con.close()
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Preflight status tracking
+# ---------------------------------------------------------------------------
+
+def update_preflight_status(article_id: str, passed: bool) -> None:
+    """Record preflight result in seo_articles table."""
+    con = _connect(read_only=False)
+    try:
+        _init_seo_tables(con)
+        status = "passed" if passed else "failed"
+        con.execute(
+            f"UPDATE {SEO_ARTICLES_TABLE} "
+            f"SET preflight_status=?, preflight_passed_at=CURRENT_TIMESTAMP "
+            f"WHERE article_id=?",
+            [status, article_id],
+        )
+        con.close()
+    except Exception as exc:
         con.close()
         raise
 
@@ -3650,8 +3674,31 @@ def check_variant_price_plausibility(
 # Task 5: Related articles
 # ---------------------------------------------------------------------------
 
-def get_related_articles(article_id: str, limit: int = 3) -> list[dict]:
-    """Return up to limit related articles in the same category (reviewed or published).
+# Keyword clusters for related-article scoring (same cluster = +2, same category only = +1)
+_KEYWORD_CLUSTERS: list[frozenset[str]] = [
+    frozenset(["power bank", "powerbank", "พาวเวอร์แบงค์", "แบตสำรอง", "แบตเตอรี่สำรอง"]),
+    frozenset(["พัดลม", "fan", "mobile fan", "usb fan"]),
+    frozenset(["หูฟัง", "headphone", "earphone", "earbuds"]),
+    frozenset(["สมาร์ทวอทช์", "smart watch", "smartwatch"]),
+    frozenset(["สกินแคร์", "skincare", "serum", "เซรั่ม"]),
+]
+
+
+def _find_keyword_cluster(keyword: str) -> frozenset[str] | None:
+    """Return the cluster frozenset that current keyword belongs to, or None."""
+    kw_lo = keyword.lower()
+    for cluster in _KEYWORD_CLUSTERS:
+        if any(term in kw_lo for term in cluster):
+            return cluster
+    return None
+
+
+def get_related_articles(article_id: str, limit: int = 4) -> list[dict]:
+    """Return up to limit related articles, prioritizing same keyword cluster over category.
+
+    Scoring:
+      +2 if candidate keyword matches same cluster as current article
+      +1 if same category only
 
     Returns list of {"article_id", "title", "keyword"}.
     """
@@ -3665,17 +3712,17 @@ def get_related_articles(article_id: str, limit: int = 3) -> list[dict]:
             con.close()
             return []
 
-        category, keyword = row
+        category, keyword = str(row[0] or ""), str(row[1] or "")
 
+        # Fetch all candidates in same category
         related_df = con.execute(f"""
-            SELECT article_id, title, keyword
+            SELECT article_id, title, keyword, updated_at
             FROM {SEO_ARTICLES_TABLE}
             WHERE category = ?
               AND article_id != ?
               AND status IN ('reviewed', 'published')
             ORDER BY updated_at DESC
-            LIMIT ?
-        """, [category, article_id, limit]).fetchdf()
+        """, [category, article_id]).fetchdf()
         con.close()
     except Exception:
         con.close()
@@ -3684,14 +3731,27 @@ def get_related_articles(article_id: str, limit: int = 3) -> list[dict]:
     if related_df.empty:
         return []
 
-    return [
-        {
-            "article_id": str(row.get("article_id") or ""),
-            "title":      str(row.get("title") or ""),
-            "keyword":    str(row.get("keyword") or ""),
-        }
-        for _, row in related_df.iterrows()
-    ]
+    current_cluster = _find_keyword_cluster(keyword)
+
+    # Score each candidate
+    scored: list[tuple[int, str, dict]] = []
+    for _, r in related_df.iterrows():
+        cand_kw = str(r.get("keyword") or "")
+        score = 1  # base: same category
+        if current_cluster is not None:
+            cand_cluster = _find_keyword_cluster(cand_kw)
+            if cand_cluster is current_cluster or cand_cluster == current_cluster:
+                score = 2
+        scored.append((score, str(r.get("updated_at") or ""), {
+            "article_id": str(r.get("article_id") or ""),
+            "title":      str(r.get("title") or ""),
+            "keyword":    cand_kw,
+        }))
+
+    # Sort by score DESC, then updated_at DESC
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+    return [item[2] for item in scored[:limit]]
 
 
 # ---------------------------------------------------------------------------

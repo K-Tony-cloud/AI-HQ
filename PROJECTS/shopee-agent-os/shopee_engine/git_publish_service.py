@@ -32,6 +32,7 @@ from shopee_engine.seo_engine import (
     _init_seo_tables,
     refresh_article_products,
     update_article_status,
+    update_preflight_status,
     validate_article_for_publish,
     validate_status_transition,
 )
@@ -337,6 +338,31 @@ def safe_publish(article_id: str) -> dict:
         if not trans["valid"]:
             return _pub_err(article_id, trans["error"])
 
+        # 2.5 Preflight gate — must have passed preflight before publishing
+        # Wrapped in try/except: if preflight_status column doesn't exist yet (existing DB),
+        # allow through with a warning rather than blocking.
+        try:
+            _con_pf = _connect(read_only=True)
+            try:
+                _pf_row = _con_pf.execute(
+                    f"SELECT preflight_status FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+                    [article_id]
+                ).fetchone()
+                _con_pf.close()
+                _pf_status = _pf_row[0] if _pf_row else "pending"
+            except Exception:
+                _con_pf.close()
+                _pf_status = None  # column missing — allow through
+        except Exception:
+            _pf_status = None
+
+        if _pf_status is not None and _pf_status != "passed":
+            return _pub_err(
+                article_id,
+                f"Preflight ยังไม่ผ่าน (status: {_pf_status}) — "
+                f"รัน /seo-preflight {article_id} ก่อน แล้วยืนยันผลลัพธ์"
+            )
+
         # 3. Pre-publish validation
         val = validate_article_for_publish(article_id)
         if not val["valid"]:
@@ -538,6 +564,31 @@ def safe_republish(article_id: str) -> dict:
                 f"/seo-republish ใช้ได้เฉพาะบทความ status 'published' "
                 f"(ปัจจุบัน: '{current_status}'). "
                 f"สำหรับบทความ draft/reviewed ให้ใช้ /seo-publish แทน",
+            )
+
+        # 2.5 Preflight gate — must have passed preflight before republishing
+        # Wrapped in try/except: if preflight_status column doesn't exist yet (existing DB),
+        # allow through with a warning rather than blocking.
+        try:
+            _con_pf_r = _connect(read_only=True)
+            try:
+                _pf_row_r = _con_pf_r.execute(
+                    f"SELECT preflight_status FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?",
+                    [article_id]
+                ).fetchone()
+                _con_pf_r.close()
+                _pf_status_r = _pf_row_r[0] if _pf_row_r else "pending"
+            except Exception:
+                _con_pf_r.close()
+                _pf_status_r = None  # column missing — allow through
+        except Exception:
+            _pf_status_r = None
+
+        if _pf_status_r is not None and _pf_status_r != "passed":
+            return _pub_err(
+                article_id,
+                f"Preflight ยังไม่ผ่าน (status: {_pf_status_r}) — "
+                f"รัน /seo-preflight {article_id} ก่อน แล้วยืนยันผลลัพธ์"
             )
 
         # 3. Pre-publish validation — filter out the status=='reviewed' error since we ARE published

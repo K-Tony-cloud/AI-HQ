@@ -749,3 +749,60 @@ def build_list_embed(
         )
 
     return e
+
+
+def build_preflight_embed(preflight: dict, crawl: dict, all_passed: bool) -> discord.Embed:
+    """Build Discord embed with PASS/FAIL checklist for all preflight gates."""
+    color = discord.Color.green() if all_passed else discord.Color.red()
+    title = "Preflight PASSED" if all_passed else "Preflight FAILED"
+    embed = discord.Embed(title=title, color=color)
+
+    meta = preflight.get("article_meta", {})
+    embed.description = (
+        f"**{meta.get('title', '')}**\n"
+        f"`{preflight.get('article_id', '')}` | status: `{meta.get('status','')}`"
+    )
+
+    # Gate results
+    gate_lines = []
+    for gate_name, gate_result in preflight.get("gates", {}).items():
+        icon = "PASS" if gate_result.get("passed") else "FAIL"
+        errors = gate_result.get("errors", [])
+        err_note = f" — {errors[0][:60]}" if errors else ""
+        gate_lines.append(f"[{icon}] **{gate_name}**{err_note}")
+
+    if gate_lines:
+        embed.add_field(name="Gates", value="\n".join(gate_lines[:12]), inline=False)
+
+    # HTML crawl results
+    crawl_lines = []
+    for check_name, check_result in crawl.get("checks", {}).items():
+        icon = "PASS" if check_result.get("passed") else "FAIL"
+        detail = check_result.get("detail", "")[:50]
+        crawl_lines.append(f"[{icon}] {check_name}: {detail}")
+    if crawl_lines:
+        embed.add_field(name="HTML Crawl", value="\n".join(crawl_lines[:10]), inline=False)
+
+    # Summary errors
+    errors = preflight.get("summary_errors", [])
+    if errors:
+        embed.add_field(name="Errors", value="\n".join(f"• {e[:80]}" for e in errors[:8]), inline=False)
+
+    warnings = preflight.get("summary_warnings", [])
+    if warnings:
+        embed.add_field(name="Warnings", value="\n".join(f"• {w[:80]}" for w in warnings[:6]), inline=False)
+
+    if all_passed:
+        embed.add_field(
+            name="Ready",
+            value="Preflight ผ่านแล้ว — ใช้ `/seo-review article_id approve` เพื่อดำเนินการต่อ",
+            inline=False,
+        )
+    else:
+        embed.add_field(
+            name="Blocked",
+            value="แก้ไข errors ข้างต้นก่อน แล้วรัน `/seo-preflight` ใหม่",
+            inline=False,
+        )
+    embed.set_footer(text="แนบ HTML preview และ JSON report ใน attachment")
+    return embed

@@ -19,6 +19,7 @@ from discord_bot.embeds.seo_embeds import (
     build_ideas_embed,
     build_link_status_embed,
     build_list_embed,
+    build_preflight_embed,
     build_preview_embed,
     build_product_manage_embed,
     build_publish_embed,
@@ -204,6 +205,33 @@ class SeoCog(commands.Cog):
         from discord_bot.config import CHANNEL_SEO_ARTICLES
         await interaction.response.defer(thinking=True)
         try:
+            # Guard: preflight must pass before approve
+            if action == "approve":
+                from shopee_engine.seo_engine import _connect, SEO_ARTICLES_TABLE
+                def _check_pf():
+                    con = _connect(read_only=True)
+                    try:
+                        r = con.execute(
+                            f"SELECT preflight_status FROM {SEO_ARTICLES_TABLE} WHERE article_id=?",
+                            [article_id]
+                        ).fetchone()
+                        con.close()
+                        return r[0] if r else "pending"
+                    except Exception:
+                        con.close()
+                        return "pending"
+                pf_status = await asyncio.to_thread(_check_pf)
+                if pf_status != "passed":
+                    from discord_bot.embeds.base import error_embed as _err
+                    await interaction.followup.send(
+                        embed=_err(
+                            f"Preflight ยังไม่ผ่าน (status: `{pf_status}`) — "
+                            f"รัน `/seo-preflight {article_id}` ก่อน"
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+
             result = await asyncio.to_thread(
                 seo_service.review_article_action, article_id, action, note
             )
@@ -219,6 +247,55 @@ class SeoCog(commands.Cog):
             await send_and_confirm(interaction, [embed], CHANNEL_SEO_ARTICLES)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-preflight
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-preflight",
+        description="รัน QA ครบทุก gate ก่อน review/publish พร้อมแนบ HTML preview และ JSON report",
+    )
+    @app_commands.describe(article_id="Article ID ที่ต้องการตรวจ")
+    async def cmd_seo_preflight(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.run_preflight_check, article_id)
+            if not result.get("success"):
+                await interaction.followup.send(
+                    embed=error_embed(result.get("error", "Preflight failed")),
+                    ephemeral=True,
+                )
+                return
+
+            pf        = result["preflight"]
+            html_r    = result["html_result"]
+            json_r    = result["json_report"]
+            all_passed = result["all_passed"]
+
+            # Build Discord embed checklist
+            embed = build_preflight_embed(pf, result["crawl_result"], all_passed)
+
+            # Attachments: HTML preview + JSON report
+            files = []
+
+            html_content = html_r.get("html_content", "")
+            if html_content:
+                html_bytes = html_content.encode("utf-8")
+                files.append(discord.File(io.BytesIO(html_bytes), filename=f"{article_id}_preview.html"))
+
+            import json as _json
+            json_bytes = _json.dumps(json_r, ensure_ascii=False, indent=2).encode("utf-8")
+            files.append(discord.File(io.BytesIO(json_bytes), filename=f"{article_id}_preflight.json"))
+
+            await interaction.followup.send(embed=embed, files=files)
+
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)), ephemeral=True)
 
     # ------------------------------------------------------------------
     # /seo-publish

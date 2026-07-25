@@ -439,3 +439,37 @@ def upgrade_article_prose(article_id: str) -> dict:
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def run_preflight_check(article_id: str) -> dict:
+    """Run full preflight QA pipeline — gates + staging HTML + crawl + JSON report."""
+    try:
+        from shopee_engine.preflight import (
+            run_preflight,
+            build_staging_html,
+            crawl_staging_html,
+            generate_preflight_json,
+        )
+        from shopee_engine.seo_engine import update_preflight_status
+
+        pf_result    = run_preflight(article_id)
+        html_result  = build_staging_html(article_id)
+        html_content = html_result.get("html_content", "")
+        crawl_result = crawl_staging_html(article_id, html_content)
+
+        json_report = generate_preflight_json(article_id, pf_result, html_result, crawl_result)
+
+        # Persist result
+        all_passed = pf_result["passed"] and crawl_result.get("passed", False)
+        update_preflight_status(article_id, all_passed)
+
+        return {
+            "success":      True,
+            "preflight":    pf_result,
+            "html_result":  html_result,
+            "crawl_result": crawl_result,
+            "json_report":  json_report,
+            "all_passed":   all_passed,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
