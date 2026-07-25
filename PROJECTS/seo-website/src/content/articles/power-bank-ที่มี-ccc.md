@@ -9,9 +9,9 @@ title: "5 Power Bank ที่มี CCC ที่ดีที่สุด (อ�
 description: "รวม 5 Power Bank ที่มี CCC คัดสรรจากข้อมูลยอดขายจริงบน Shopee พร้อมตารางเปรียบเทียบราคาและรีวิว"
 product_ids: [26583952360, 57956633734, 53155330120, 28891573105, 54505167959]
 created_at: "2026-07-21 22:34:49.354246"
-updated_at: "2026-07-25T01:44:48.230133+00:00"
+updated_at: "2026-07-25T03:00:39.871160+00:00"
 last_product_sync: "2026-07-22 09:04:44.850200"
-published_at: "2026-07-25T01:44:48.230081+00:00"
+published_at: "2026-07-25 08:44:51.383280"
 article_status: "published"
 affiliate_disclosure: true
 canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
@@ -60,6 +60,8 @@ canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
 
 **คะแนน:** 4.9 ⭐ | **ยอดขาย:** 680 ชิ้น
 
+<span class="ccc-evidence title_bracket">🏷️ CCC: พบใน title [bracket] — `[Qi2+CCC]` (ยืนยันโดย seller)</span>
+
 > ชาร์จเร็ว、ติดแม่เหล็กได้ • ผู้ซื้อ 680 ราย • คะแนน 4.9 ⭐ • ฿739
 
 <a href="https://s.shopee.co.th/8AUgTJlT8F" class="affiliate-btn" target="_blank" rel="sponsored nofollow noopener">ดูสินค้าบน Shopee</a>
@@ -74,6 +76,8 @@ canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
 **ราคา:** ฿959 ~~฿2,499~~ (ลด 62%)
 
 **คะแนน:** 5.0 ⭐ | **ยอดขาย:** 462 ชิ้น
+
+<span class="ccc-evidence title_mention">📋 CCC: พบใน title — `[TIS&CCC]VINKO V9` (seller ระบุไว้ ควรตรวจสอบ)</span>
 
 > คะแนนรีวิวสูงสุดในกลุ่ม 5.0 ⭐ • ชาร์จ USB-C、ชาร์จเร็ว ราคา ฿959
 
@@ -90,6 +94,8 @@ canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
 
 **คะแนน:** 4.9 ⭐ | **ยอดขาย:** 186 ชิ้น
 
+<span class="ccc-evidence title_bracket">🏷️ CCC: พบใน title [bracket] — `[CCC]` (ยืนยันโดย seller)</span>
+
 > ตัวเลือกระดับพรีเมียมในกลุ่ม ฿999 • ชาร์จ USB-C、ชาร์จเร็ว คะแนน 4.9 ⭐ สำหรับคนที่เน้นคุณภาพ
 
 <a href="https://s.shopee.co.th/9ANDf9hf6T" class="affiliate-btn" target="_blank" rel="sponsored nofollow noopener">ดูสินค้าบน Shopee</a>
@@ -105,6 +111,8 @@ canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
 
 **คะแนน:** 4.9 ⭐ | **ยอดขาย:** 725 ชิ้น
 
+<span class="ccc-evidence title_bracket">🏷️ CCC: พบใน title [bracket] — `[CCC]` (ยืนยันโดย seller)</span>
+
 > ขายดีที่สุดในกลุ่ม ยอดขาย 725 ชิ้น • ชาร์จ USB-C、ชาร์จเร็ว — เป็นตัวเลือกที่ผ่านการพิสูจน์จากผู้ซื้อจริงมากที่สุด
 
 <a href="https://s.shopee.co.th/4qEIdbVkQJ" class="affiliate-btn" target="_blank" rel="sponsored nofollow noopener">ดูสินค้าบน Shopee</a>
@@ -119,6 +127,8 @@ canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
 **ราคา:** ฿269
 
 **คะแนน:** 4.8 ⭐ | **ยอดขาย:** 134 ชิ้น
+
+<span class="ccc-evidence description_match">📝 CCC: พบใน description — `#ใบรับรองคู่ CCC และ TIS #รับประกัน 2 ปี` (ควรตรวจสอบก่อนซื้อ)</span>
 
 > ราคาประหยัดที่สุดในกลุ่ม ฿269 • ไร้สาย、ชาร์จเร็ว — เหมาะสำหรับผู้ที่ต้องการทดลองก่อนลงทุนรุ่นสูง
 
@@ -176,7 +186,7 @@ canonical: "https://suenaidee.com/power-bank-ที่มี-ccc"
 
 ## บทความที่เกี่ยวข้อง
 - [5 Power Bank มีสายในตัว รุ่นไหนดี (อัปเดต 2026)](/power-bank-มีสายในตัว-รุ่นไหนดี/)
-- [5 Power Bank 10,000 mAh ไม่เกิน 1,000 บาท ที่ดีที่สุด (อัปเดต 2026)](/power-bank-10000-mah-ไม่เกิน-1000-บาท/)
 - [5 Power Bank ชาร์จเร็ว 20W สำหรับ iPhone ที่ดีที่สุด (อัปเดต 2026)](/power-bank-ชาร์จเร็ว-20w-สำหรับ-iphone/)
+- [5 Power Bank 10,000 mAh ไม่เกิน 1,000 บาท ที่ดีที่สุด (อัปเดต 2026)](/power-bank-10000-mah-ไม่เกิน-1000-บาท/)
 - [5 USB & Mobile Fans ไม่เกิน 1,000 บาท ที่ดีที่สุด (อัปเดต 2026)](/usb-mobile-fans-ไม่เกิน-1000-บาท/)
 
