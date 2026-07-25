@@ -22,6 +22,7 @@ from shopee_engine.seo_engine import (
     _build_product_blocks,
     _connect,
     format_price,
+    get_related_articles,
 )
 from shopee_engine.decision_engine import (
     build_decision_faq,
@@ -360,7 +361,12 @@ def _build_template_summary(keyword: str, products: list[dict]) -> str:
     return f"{para1}\n\n{para2}"
 
 
-def _build_export_body(article: dict, products: list[dict], prose: dict[str, str]) -> str:
+def _build_export_body(
+    article: dict,
+    products: list[dict],
+    prose: dict[str, str],
+    related_articles: list[dict] | None = None,
+) -> str:
     keyword = str(article.get("keyword", ""))
 
     intro        = prose.get("บทนำ") or f"บทความคัดสรร {keyword} จากข้อมูลจริงบน Shopee"
@@ -395,6 +401,16 @@ def _build_export_body(article: dict, products: list[dict], prose: dict[str, str
         if advisor_body else ""
     )
 
+    # Related articles section — rendered as a nav list before the page ends
+    related_section = ""
+    if related_articles:
+        lines = ["## บทความที่เกี่ยวข้อง"]
+        for ra in related_articles:
+            ra_id    = ra.get("article_id", "")
+            ra_title = ra.get("title") or ra.get("keyword") or ra_id
+            lines.append(f"- [{ra_title}](/{ra_id}/)")
+        related_section = "\n".join(lines) + "\n\n"
+
     return (
         f"## บทนำ\n\n{intro}\n\n"
         f"{buying_context_section}"
@@ -404,6 +420,7 @@ def _build_export_body(article: dict, products: list[dict], prose: dict[str, str
         f"{buying_section}"
         f"\n## บทสรุป\n\n{summary}\n\n"
         f"{decision_faq}\n"
+        f"{related_section}"
     )
 
 
@@ -473,12 +490,13 @@ def export_article(
         return _err(article_id, str(e))
 
     # 3. Build content
-    prose        = _extract_prose(str(article.get("content_md", "")))
-    pub_ts       = published_at or datetime.now(timezone.utc).isoformat()
-    product_ids  = [p["itemid"] for p in products]
-    frontmatter  = _build_frontmatter(article, product_ids, as_status, pub_ts, site_url)
-    body         = _build_export_body(article, products, prose)
-    full_content = frontmatter + "\n" + body
+    prose           = _extract_prose(str(article.get("content_md", "")))
+    pub_ts          = published_at or datetime.now(timezone.utc).isoformat()
+    product_ids     = [p["itemid"] for p in products]
+    frontmatter     = _build_frontmatter(article, product_ids, as_status, pub_ts, site_url)
+    related_articles = get_related_articles(article_id, limit=4)
+    body            = _build_export_body(article, products, prose, related_articles)
+    full_content    = frontmatter + "\n" + body
 
     # 4. Placeholder / secret check
     issues = detect_placeholders(full_content)

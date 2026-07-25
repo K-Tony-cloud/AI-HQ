@@ -1399,7 +1399,12 @@ def generate_article_draft(
         }
 
     count = len(products)
-    title = f"{count} {keyword} ที่ดีที่สุด (อัปเดต {datetime.now().year})"
+    # Skip "ที่ดีที่สุด" suffix when keyword already contains a question ending
+    _QUESTION_ENDINGS = ("รุ่นไหนดี", "อันไหนดี", "ตัวไหนดี", "รุ่นไหนเด็ด")
+    _kw_stripped = keyword.strip()
+    _has_question_ending = any(_kw_stripped.endswith(q) for q in _QUESTION_ENDINGS)
+    _title_suffix = "" if _has_question_ending else " ที่ดีที่สุด"
+    title = f"{count} {keyword}{_title_suffix} (อัปเดต {datetime.now().year})"
     meta_desc = (
         f"รวม {count} {keyword} คัดสรรจากข้อมูลยอดขายจริงบน Shopee "
         f"พร้อมตารางเปรียบเทียบราคาและรีวิว"
@@ -2215,6 +2220,41 @@ def validate_article_for_review(article_id: str) -> dict:
                 f"itemids: {iids}. "
                 f"ลบ 1 รายการด้วย /seo-product-remove แล้วแทนที่ด้วยสินค้าอื่น"
             )
+
+    # --- Variant Price / Spec Plausibility Gate (warning) ---
+    if not products.empty:
+        # Pull model_names from products table if available
+        _pv_con = _connect(read_only=True)
+        try:
+            _pv_has_mn = "model_names" in {
+                r[0] for r in _pv_con.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name='products'"
+                ).fetchall()
+            }
+            _pv_mn_map: dict[int, str] = {}
+            if _pv_has_mn:
+                _pv_iids = [int(r["itemid"]) for _, r in products.iterrows()]
+                _pv_iid_str = ",".join(str(i) for i in _pv_iids)
+                if _pv_iid_str:
+                    for _mn_row in _pv_con.execute(
+                        f"SELECT itemid, model_names FROM products WHERE itemid IN ({_pv_iid_str})"
+                    ).fetchall():
+                        _pv_mn_map[int(_mn_row[0])] = str(_mn_row[1] or "")
+        finally:
+            _pv_con.close()
+
+        for _, prow in products.iterrows():
+            ptitle      = str(prow.get("product_title") or "")
+            psale_price = float(prow.get("sale_price") or 0)
+            pitemid     = int(prow["itemid"])
+            pmodel_names = _pv_mn_map.get(pitemid, "")
+            plaus_ok, plaus_reason, _ = check_variant_price_plausibility(
+                ptitle, psale_price, pmodel_names, keyword
+            )
+            if not plaus_ok:
+                warnings.append(
+                    f"itemid {pitemid}: {plaus_reason} — ตรวจ affiliate link ว่าชี้ไปที่ variant ที่ถูกต้อง"
+                )
 
     # --- Task 4: feature copy guard (warning only) ---
     try:
@@ -3304,11 +3344,32 @@ def check_capacity_relevance(
 # Task 3: Duplicate model gate
 # ---------------------------------------------------------------------------
 
+# Brand aliases: map sub-brands / store names to canonical brand for duplicate detection
+_BRAND_ALIASES: dict[str, str] = {
+    "orsen":   "eloop",   # Orsen is the parent company of Eloop
+    "anker":   "anker",
+    "aukey":   "aukey",
+    "ugreen":  "ugreen",
+}
+
+# Model suffix normalization: strip these suffixes before comparing (e.g. "E33 Line" → "E33")
+_MODEL_SUFFIX_STRIP = re.compile(
+    r"\s+(?:line|pro|plus|lite|mini|max|ultra|air|go)\b",
+    re.IGNORECASE,
+)
+# Also collapse run-together suffixes like "E33Line" → "E33", "V90Pro" → "V90"
+_MODEL_SUFFIX_CONCAT = re.compile(
+    r"^([a-z]{1,6}\d{2,6})(line|pro|plus|lite|mini|max|ultra|air|go)$",
+    re.IGNORECASE,
+)
+
+
 def normalize_model_key(title: str) -> tuple:
     """Extract (brand, model_code, capacity_mah) from product title.
 
     Returns tuple with None for missing parts.
     Example: "[CCC] AUKEY PB-Y59 20W PD Power Bank 5000mAh" -> ("aukey", "pb-y59", 5000)
+    Brand aliases and model suffix stripping ensure cross-shop duplicates are caught.
     """
     # Clean bracket tags
     cleaned = re.sub(r"\[[^\]]*\]", " ", title).strip()
@@ -3318,37 +3379,48 @@ def normalize_model_key(title: str) -> tuple:
     model_code: str | None = None
     capacity_mah: int | None = None
 
-    # Brand = first non-numeric alphabetic token
+    # Brand = first non-numeric alphabetic token, then normalize via aliases
     for tok in tokens:
         tok_clean = re.sub(r"[^a-zA-Z0-9]", "", tok)
         if tok_clean and tok_clean[0].isalpha() and len(tok_clean) >= 2:
-            brand = tok_clean.lower()
+            raw_brand = tok_clean.lower()
+            brand = _BRAND_ALIASES.get(raw_brand, raw_brand)
             break
 
-    # Model code — matches: PB-Y59, KP15AC-01, US304, PB561
+    # Model code — matches: PB-Y59, KP15AC-01, US304, PB561, E33, V9
     # Strategy: prefer dash-containing codes (higher specificity), then nodash
-    # Exclude single-letter + number patterns like "D22" (common in wattage tokens like "PD22")
     _mc_dash_re = re.compile(
         r"\b([A-Z]{1,6}[0-9]*[A-Z]*-[A-Z0-9]{1,12}(?:-[A-Z0-9]+)*)\b",
         re.IGNORECASE,
     )
+    # Allow 1+ leading letters so E33 / V9 / A10 are captured
     _mc_nodash_re = re.compile(
-        r"\b([A-Z]{2,6}[0-9]{2,8}[A-Z]{0,4})\b",
+        r"\b([A-Z]{1,6}[0-9]{2,8}[A-Z]{0,4})\b",
         re.IGNORECASE,
     )
+    # Wattage-like false-positive guard (PD20, QC30, etc.)
+    _watt_token = re.compile(r"^(?:PD|QC|FC|SCP|VOOC)\d+$", re.IGNORECASE)
+
     # First pass: find dash-containing model codes
     for m in _mc_dash_re.finditer(cleaned):
         candidate = m.group(1)
-        if any(c.isdigit() for c in candidate):
+        if any(c.isdigit() for c in candidate) and not _watt_token.match(candidate):
             model_code = candidate.lower()
             break
     # Second pass: nodash (only if no dash code found)
     if model_code is None:
         for m in _mc_nodash_re.finditer(cleaned):
             candidate = m.group(1)
-            if any(c.isdigit() for c in candidate):
+            if any(c.isdigit() for c in candidate) and not _watt_token.match(candidate):
                 model_code = candidate.lower()
                 break
+
+    # Normalize model code: strip trailing variant suffixes so E33/E33Line/E33 Line → "e33"
+    if model_code:
+        model_code = _MODEL_SUFFIX_STRIP.sub("", model_code).strip()
+        model_code = _MODEL_SUFFIX_CONCAT.sub(r"\1", model_code).strip()
+        if not model_code:
+            model_code = None
 
     # Capacity — take the first value from multi-variant if present
     cap_m = _MAH_RE.search(title)
@@ -3428,6 +3500,112 @@ def check_content_feature_copy(keyword: str, content_md: str) -> list[str]:
                 offenders.append(phrase)
 
     return offenders
+
+
+# ---------------------------------------------------------------------------
+# Variant Price / Spec Plausibility Gate
+# ---------------------------------------------------------------------------
+
+# (capacity_mah_threshold, min_reasonable_price_thb)
+_CAPACITY_PRICE_FLOORS: list[tuple[int, float]] = [
+    (100_000, 800.0),
+    (50_000,  500.0),
+    (30_000,  350.0),
+    (20_000,  220.0),
+    (10_000,  120.0),
+    (5_000,    70.0),
+]
+# Wattage surcharges added to the floor
+_WATT_SURCHARGES: list[tuple[int, float]] = [
+    (100, 250.0),
+    (65,  150.0),
+    (45,   80.0),
+    (20,   30.0),
+]
+
+
+def check_variant_price_plausibility(
+    title: str,
+    sale_price: float,
+    model_names: str | None = None,
+    keyword: str = "",
+) -> tuple[bool, str, dict]:
+    """Flag listings where sale_price is implausibly low for the advertised spec.
+
+    Multi-variant listings often show the lowest-SKU price while the article
+    targets a higher-capacity/wattage variant.
+
+    Returns (plausible: bool, reason: str, evidence: dict).
+    evidence includes: {"floor_used": float, "capacity_detected": int, "watt_detected": int,
+                        "is_multivariant": bool, "variants": list[str]}
+    """
+    title_lo = title.lower()
+
+    # Parse capacity from title
+    cap_mah = 0
+    cap_m = _MAH_RE.search(title)
+    if cap_m:
+        first_part = re.split(r"[/|]", cap_m.group(1))[0].strip()
+        try:
+            cap_mah = int(first_part.replace(",", ""))
+        except ValueError:
+            pass
+
+    # Parse wattage from title
+    watt_max = 0.0
+    for wm in re.finditer(r"(\d{1,3})(?:\.\d)?W\b", title, re.IGNORECASE):
+        try:
+            w = float(wm.group(1))
+            if 5 <= w <= 200:
+                watt_max = max(watt_max, w)
+        except ValueError:
+            pass
+
+    # Determine price floor from capacity
+    price_floor = 0.0
+    for threshold, floor in _CAPACITY_PRICE_FLOORS:
+        if cap_mah >= threshold:
+            price_floor = floor
+            break
+
+    # Add wattage surcharge
+    for watt_thresh, surcharge in _WATT_SURCHARGES:
+        if watt_max >= watt_thresh:
+            price_floor += surcharge
+            break
+
+    # Detect multi-variant listing
+    variants: list[str] = []
+    if model_names:
+        variants = [v.strip() for v in re.split(r"[|,]", model_names) if v.strip()]
+    is_multivariant = len(variants) > 1
+
+    evidence = {
+        "floor_used":        price_floor,
+        "capacity_detected": cap_mah,
+        "watt_detected":     int(watt_max),
+        "is_multivariant":   is_multivariant,
+        "variants":          variants[:8],  # cap for display
+    }
+
+    if price_floor == 0.0:
+        return True, "ok (no capacity detected)", evidence
+
+    if sale_price < price_floor:
+        mv_note = (
+            f" (multi-variant listing — ราคา ฿{sale_price:,.0f} อาจเป็นของ variant ที่ไม่ตรงกับสเปก)"
+            if is_multivariant else ""
+        )
+        return (
+            False,
+            (
+                f"ราคา ฿{sale_price:,.0f} ต่ำกว่าเกณฑ์ ฿{price_floor:,.0f} "
+                f"สำหรับ {cap_mah:,}mAh {int(watt_max)}W{mv_note}"
+            ),
+            evidence,
+        )
+
+    return True, "ok", evidence
 
 
 # ---------------------------------------------------------------------------
