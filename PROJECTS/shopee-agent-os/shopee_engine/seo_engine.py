@@ -1261,6 +1261,27 @@ def _ai_summary(keyword: str, products: list[dict]) -> str:
         )
 
 
+_TABLE_NAME_MAX = 60
+
+
+def _truncate_table_name(title: str) -> str:
+    """Truncate product title for comparison table at a word boundary.
+
+    Never cuts inside a model code (e.g. RPP-680 must not become RPP-68).
+    Escapes pipe characters so they don't break the markdown table.
+    """
+    safe = title.replace("|", "｜")
+    if len(safe) <= _TABLE_NAME_MAX:
+        return safe
+    # Greedy match up to max chars, ending at the last word boundary (\b)
+    m = re.match(r'^.{1,' + str(_TABLE_NAME_MAX) + r'}\b', safe)
+    if m and len(m.group()) >= _TABLE_NAME_MAX // 2:
+        text = m.group().rstrip()
+        return text + "…" if len(text) < len(safe) else text
+    # Fallback: hard cut (only if no word boundary found in the first half)
+    return safe[:_TABLE_NAME_MAX].rstrip() + "…"
+
+
 def _build_comparison_table(products: list[dict]) -> str:
     """Build a markdown comparison table from real product data only."""
     if not products:
@@ -1271,7 +1292,7 @@ def _build_comparison_table(products: list[dict]) -> str:
         "|---|-------|------|--------|-------|--------|",
     ]
     for i, p in enumerate(products, 1):
-        name = p["title"][:40].replace("|", "｜")
+        name = _truncate_table_name(p["title"])
         price = p["sale_price_fmt"]
         sold = f'{p["item_sold"]:,}'
         rating = f'{p["item_rating"]:.1f}⭐' if p["item_rating"] else f'{p["shop_rating"]:.1f}⭐'
@@ -3268,6 +3289,10 @@ def validate_content_consistency(article_id: str) -> dict:
         code = m.group(1).upper()
         # Only flag codes that look like product model codes (>=4 chars or contain dash)
         if (len(code) >= 4 or "-" in code) and code not in current_models:
+            # Skip truncation artifacts: if code is a strict prefix of any current model,
+            # it was produced by a hard char-limit cut (e.g. RPP-68 from RPP-680).
+            if any(model.startswith(code) and model != code for model in current_models):
+                continue
             if code not in stale_items:
                 stale_items.append(code)
 

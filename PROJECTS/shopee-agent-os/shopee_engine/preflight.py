@@ -551,7 +551,6 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
     # Load DB data for comparison
     products_db: list[dict] = []
     art_title_db = ""
-    related_count = 0
 
     try:
         con = _connect(read_only=True)
@@ -566,25 +565,14 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
             f"FROM {SEO_ARTICLE_PRODUCTS_TABLE} WHERE article_id = ? ORDER BY rank_in_article",
             [article_id],
         ).fetchdf()
+        con.close()
         for _, r in prods_df.iterrows():
             products_db.append({
-                "title":         str(r.get("product_title") or ""),
-                "sale_price":    int(r.get("sale_price") or 0),
-                "affiliate_link": str(r.get("affiliate_link") or ""),
+                "title":              str(r.get("product_title") or ""),
+                "sale_price":         int(r.get("sale_price") or 0),
+                "affiliate_link":     str(r.get("affiliate_link") or ""),
                 "affiliate_link_type": str(r.get("affiliate_link_type") or "none"),
             })
-
-        # Related articles count
-        art_cat_row = con.execute(
-            f"SELECT category FROM {SEO_ARTICLES_TABLE} WHERE article_id = ?", [article_id]
-        ).fetchone()
-        if art_cat_row:
-            related_count = con.execute(
-                f"SELECT COUNT(*) FROM {SEO_ARTICLES_TABLE} "
-                f"WHERE category = ? AND article_id != ? AND status IN ('reviewed','published')",
-                [art_cat_row[0], article_id],
-            ).fetchone()[0]
-        con.close()
     except Exception as exc:
         try:
             con.close()
@@ -594,6 +582,14 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
             "passed": False,
             "checks": {"db_load": {"passed": False, "detail": f"DB error: {exc}"}},
         }
+
+    # Determine expected related articles using the same logic as the export pipeline
+    try:
+        from shopee_engine.seo_engine import get_related_articles
+        related_articles_expected = get_related_articles(article_id, limit=4)
+        related_count = len(related_articles_expected)
+    except Exception:
+        related_count = 0
 
     product_count_db = len(products_db)
 
@@ -644,13 +640,19 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
     }
 
     # ── Check 4: Each product's name appears in HTML ──────────────────────────
+    # Use a word-safe prefix: up to 25 chars, stopping at last word boundary.
+    # This avoids false negatives when the title starts with a bracket tag that
+    # gets stripped in the display, and avoids cutting inside a model code.
     name_check_passed = True
     name_check_detail = []
     for p in products_db:
-        name_prefix = p["title"][:20].strip()
-        if name_prefix and name_prefix not in html_content:
+        raw = p["title"]
+        # Build a search key that stops at a word boundary within the first 25 chars
+        m = re.match(r'^.{1,25}\b', raw)
+        search_key = (m.group() if m else raw[:25]).strip()
+        if search_key and search_key not in html_content:
             name_check_passed = False
-            name_check_detail.append(f"'{name_prefix}' missing")
+            name_check_detail.append(f"'{search_key}' missing")
     checks["product_names"] = {
         "passed": name_check_passed,
         "detail": ", ".join(name_check_detail) if name_check_detail else "All product names found",
@@ -666,16 +668,16 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
             "detail": (
                 "Related articles section found"
                 if related_present
-                else f"Missing related articles section ({related_count} related exist in DB)"
+                else f"Missing related articles section ({related_count} related expected)"
             ),
         }
     else:
         checks["related_articles"] = {
             "passed": True,
-            "detail": "No related articles in DB — section not required",
+            "detail": "No related articles expected — section not required",
         }
 
-    # ── Check 6: No broken [object Object] or placeholder artifacts ──────────
+    # ── Check 6: No unrendered Markdown or broken artifacts ─────────────────
     artifacts = []
     if "[object Object]" in html_content:
         artifacts.append("[object Object]")
@@ -683,25 +685,41 @@ def crawl_staging_html(article_id: str, html_content: str) -> dict:
         artifacts.append("{ARTICLE_ID}")
     if "lorem ipsum" in html_content.lower():
         artifacts.append("lorem ipsum")
+    # Unresolved template tokens e.g. {KEYWORD}, {PRODUCT_NAME}
+    tok = re.search(r'\{[A-Z][A-Z_]{2,}\}', html_content)
+    if tok:
+        artifacts.append(f"unresolved template token: {tok.group()}")
+    # Raw Markdown image syntax  ![alt](url)  → should be <img src="...">
+    if re.search(r'!\[[^\]]*\]\([^)]+\)', html_content):
+        artifacts.append("raw Markdown image syntax: ![...](url)")
+    # Raw Markdown bold **text** not converted to <strong>
+    if re.search(r'\*\*[^*\n]{1,80}\*\*', html_content):
+        artifacts.append("raw Markdown bold: **...**")
+    # Raw blockquote marker: <p>&gt; text</p> or <p>> text  (fallback renderer artefact)
+    if re.search(r'<p>\s*(?:&gt;|>)\s+\S', html_content):
+        artifacts.append("raw Markdown blockquote: > ...")
+    # Markdown table separator cells: <td>---</td> or <td>:---:</td>
+    if re.search(r'<td[^>]*>\s*:?-{2,}:?\s*</td>', html_content, re.IGNORECASE):
+        artifacts.append("Markdown table separator in <td>")
+    # <tr> elements present but no <table> wrapper → orphaned table rows
+    if (re.search(r'<tr[\s>]', html_content, re.IGNORECASE)
+            and not re.search(r'<table[\s>]', html_content, re.IGNORECASE)):
+        artifacts.append("orphaned <tr> without <table> wrapper")
+
     checks["no_artifacts"] = {
         "passed": len(artifacts) == 0,
         "detail": f"Artifacts found: {artifacts}" if artifacts else "No broken artifacts found",
     }
 
     # ── Check 7: affiliate-btn links count matches product count ─────────────
-    # (already computed above — alias for clarity)
     checks["affiliate_btn_count"] = {
         "passed": aff_btn_count == product_count_db,
-        "detail": (
-            f"{aff_btn_count} affiliate-btn found, expected {product_count_db}"
-        ),
+        "detail": f"{aff_btn_count} affiliate-btn found, expected {product_count_db}",
     }
 
     # ── Check 8: Affiliate link href contains shopee.co.th domain ───────────
     aff_hrefs = re.findall(r'class="affiliate-btn"[^>]*href="([^"]+)"', html_content, re.IGNORECASE)
-    # Also pattern: href="..." class="affiliate-btn"
     aff_hrefs += re.findall(r'href="([^"]+)"[^>]*class="affiliate-btn"', html_content, re.IGNORECASE)
-    # Remove duplicates
     aff_hrefs = list(dict.fromkeys(aff_hrefs))
 
     bad_hrefs = [h for h in aff_hrefs if "shopee.co.th" not in h and "shope.ee" not in h]

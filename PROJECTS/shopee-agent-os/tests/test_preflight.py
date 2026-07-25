@@ -545,3 +545,375 @@ class TestCrawlStagingHtml:
             for p in patches:
                 p.stop()
             db.unlink(missing_ok=True)
+
+
+# ===========================================================================
+# TestSmartTableTruncation
+# ===========================================================================
+
+class TestSmartTableTruncation:
+    """_truncate_table_name must never cut inside a model code."""
+
+    def test_rpp_680_preserved_when_bracket_prefix_pushes_it_near_40(self):
+        """RPP-680 must appear intact — not truncated to RPP-68."""
+        from shopee_engine.seo_engine import _truncate_table_name
+        title = "[ แถมถุง มีCCC ] Remax Power Bank RPP-680 20000mAh Fast Charge USB-C หน้าจอ LED"
+        result = _truncate_table_name(title)
+        assert "RPP-680" in result, f"Model code cut: {result!r}"
+        assert "RPP-68" not in result.replace("RPP-680", ""), (
+            f"Truncated version RPP-68 must not appear: {result!r}"
+        )
+
+    def test_rpp_678_preserved_when_bracket_prefix_pushes_it_near_40(self):
+        """RPP-678 must appear intact — not truncated to RPP-67."""
+        from shopee_engine.seo_engine import _truncate_table_name
+        title = "[ CCC ] Remax Wireless Power Bank RPP-678 (N) มีสายในตัว มีประกันศูนย์ไทย"
+        result = _truncate_table_name(title)
+        assert "RPP-678" in result, f"Model code cut: {result!r}"
+
+    def test_truncates_at_word_boundary_not_mid_word(self):
+        """Long title truncated at word boundary, not mid-word or mid-model-code."""
+        from shopee_engine.seo_engine import _truncate_table_name
+        # 70-char title — should truncate somewhere but never in the middle of "ANKER-A1234"
+        title = "Anker PowerBank ANKER-A1234 20000mAh 65W PD Fast Charge with Display"
+        result = _truncate_table_name(title)
+        # "ANKER-A1234" is 11 chars, starts at position 17 — well inside 60 char limit
+        assert "ANKER-A1234" in result, f"Model code not preserved: {result!r}"
+        assert result.endswith("…") or len(result) == len(title.replace("|", "｜")), (
+            f"Unexpected truncation result: {result!r}"
+        )
+
+    def test_short_title_returned_unchanged(self):
+        """Title under 60 chars returned as-is (pipes escaped)."""
+        from shopee_engine.seo_engine import _truncate_table_name
+        title = "Eloop E33 10000mAh Power Bank"
+        assert _truncate_table_name(title) == title
+
+    def test_pipe_in_title_is_escaped(self):
+        """Pipe characters are escaped so they don't break the markdown table."""
+        from shopee_engine.seo_engine import _truncate_table_name
+        title = "Brand X | Y Power Bank"
+        result = _truncate_table_name(title)
+        assert "|" not in result or result.count("｜") >= 1
+
+
+# ===========================================================================
+# TestStaleModelDetection
+# ===========================================================================
+
+class TestStaleModelDetection:
+    """validate_content_consistency must not flag truncation artifacts as stale."""
+
+    def _make_stale_db(self, article_id: str, content_md: str, product_titles: list[str]) -> Path:
+        """DB with given content_md and specified product titles."""
+        import duckdb
+        db = _make_test_db(article_id=article_id)
+        con = duckdb.connect(str(db))
+        # Update content_md with our test body
+        con.execute(
+            "UPDATE seo_articles SET content_md = ? WHERE article_id = ?",
+            [content_md, article_id],
+        )
+        # Update product titles
+        con.execute(f"DELETE FROM seo_article_products WHERE article_id = ?", [article_id])
+        for rank, t in enumerate(product_titles, 1):
+            con.execute("""
+                INSERT INTO seo_article_products
+                    (id, article_id, itemid, shopid, product_title, sale_price,
+                     image_link, affiliate_link, affiliate_link_type, rank_in_article)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [rank + 100, article_id, rank + 3000, rank + 7000, t, 500,
+                  "", "https://s.shopee.co.th/test", "confirmed", rank])
+        con.close()
+        return db
+
+    def test_exact_current_model_not_flagged(self):
+        """RPP-680 in prose is not stale when RPP-680 is in current products."""
+        from shopee_engine.seo_engine import validate_content_consistency
+        body = "## บทนำ\n\nสินค้าที่แนะนำคือ Remax RPP-680 ความจุ 20000mAh\n\n## บทสรุป\n\nดีมาก\n"
+        db = self._make_stale_db("a-rpp680", body, ["[ CCC ] Remax Power Bank RPP-680 20000mAh"])
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            result = validate_content_consistency("a-rpp680")
+            stale = result["stale_items"]
+            assert "RPP-680" not in stale, f"RPP-680 should NOT be stale: {stale}"
+            assert result["consistent"] is True, f"Should be consistent: {stale}"
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_truncated_prefix_rpp_68_not_flagged_when_rpp_680_is_current(self):
+        """RPP-68 in content_md (truncation artifact) must not be flagged as stale."""
+        from shopee_engine.seo_engine import validate_content_consistency
+        # Simulate content_md that contains a comparison table with truncated model code
+        body = (
+            "## บทนำ\n\nบทนำ\n\n"
+            "## ตารางเปรียบเทียบ\n\n"
+            "| # | สินค้า | ราคา |\n"
+            "|---|-------|------|\n"
+            "| 1 | [ แถมถุง มีCCC ] Remax Power Bank RPP-68 | ฿699 |\n"  # truncated
+            "\n## บทสรุป\n\nดีมาก\n"
+        )
+        db = self._make_stale_db("a-prefix68", body, ["[ CCC ] Remax Power Bank RPP-680 20000mAh"])
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            result = validate_content_consistency("a-prefix68")
+            stale = result["stale_items"]
+            assert "RPP-68" not in stale, (
+                f"RPP-68 is a prefix of current model RPP-680 — must NOT be flagged: {stale}"
+            )
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_truncated_prefix_rpp_67_not_flagged_when_rpp_678_is_current(self):
+        """RPP-67 in content_md (truncation artifact) must not be flagged as stale."""
+        from shopee_engine.seo_engine import validate_content_consistency
+        body = (
+            "## ตารางเปรียบเทียบ\n\n"
+            "| 1 | [ CCC ] Remax Wireless Power Bank RPP-67 | ฿799 |\n"  # truncated
+            "\n## บทสรุป\n\nดีมาก\n"
+        )
+        db = self._make_stale_db("a-prefix67", body, ["[ CCC ] Remax Wireless Power Bank RPP-678 (N)"])
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            result = validate_content_consistency("a-prefix67")
+            stale = result["stale_items"]
+            assert "RPP-67" not in stale, (
+                f"RPP-67 is a prefix of current model RPP-678 — must NOT be flagged: {stale}"
+            )
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_genuinely_stale_model_is_still_flagged(self):
+        """A truly stale model code (not a prefix of current) must still be flagged."""
+        from shopee_engine.seo_engine import validate_content_consistency
+        # Old product PB-Y59 in prose, but current product is PB-Y60
+        body = "## บทนำ\n\nสินค้าเก่า PB-Y59 ที่เคยแนะนำ\n\n## บทสรุป\n\nดี\n"
+        db = self._make_stale_db("a-stale-y59", body, ["AUKEY Power Bank PB-Y60 20000mAh"])
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            result = validate_content_consistency("a-stale-y59")
+            stale = result["stale_items"]
+            assert "PB-Y59" in stale, f"PB-Y59 SHOULD be stale (current is PB-Y60): {stale}"
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+
+# ===========================================================================
+# TestCrawlArtifactExtended
+# ===========================================================================
+
+class TestCrawlArtifactExtended:
+    """Extended artifact checks in crawl_staging_html."""
+
+    def _base_html(self, extra_body: str = "") -> str:
+        return (
+            "<html><head><title>Test</title></head>"
+            "<body>"
+            "<h1>5 Power Bank ดีที่สุด</h1>"
+            "<p>ราคา: ฿399</p><p>ราคา: ฿549</p>"
+            "<p>Eloop E33 Power Bank 10000mAh</p>"
+            "<p>Anker 521 Power Bank 10000mAh</p>"
+            '<a href="https://s.shopee.co.th/TestPB001" class="affiliate-btn">ดูสินค้า</a>'
+            '<a href="https://s.shopee.co.th/TestPB002" class="affiliate-btn">ดูสินค้า</a>'
+            + extra_body
+            + "</body></html>"
+        )
+
+    def _run_crawl(self, html: str) -> dict:
+        from shopee_engine.preflight import crawl_staging_html
+        db = _make_test_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            return crawl_staging_html("test-article", html)
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_markdown_image_syntax_fails_no_artifacts(self):
+        """Raw ![alt](url) in HTML body must trigger no_artifacts failure."""
+        html = self._base_html('<p>![product image](https://cf.shopee.co.th/img.jpg)</p>')
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert "no_artifacts" in checks
+        assert checks["no_artifacts"]["passed"] is False, (
+            f"Should fail — raw Markdown image found. Detail: {checks['no_artifacts']['detail']}"
+        )
+        assert "image" in checks["no_artifacts"]["detail"].lower()
+
+    def test_raw_markdown_blockquote_fails_no_artifacts(self):
+        """<p>&gt; text</p> (unrendered blockquote) must trigger no_artifacts failure."""
+        html = self._base_html("<p>&gt; Editorial highlight context here</p>")
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert "no_artifacts" in checks
+        assert checks["no_artifacts"]["passed"] is False, (
+            f"Should fail — raw blockquote marker. Detail: {checks['no_artifacts']['detail']}"
+        )
+
+    def test_markdown_table_separator_fails_no_artifacts(self):
+        """<td>---</td> from unprocessed table separator must trigger no_artifacts failure."""
+        html = self._base_html(
+            "<table><tr><td>---</td><td>---</td></tr></table>"
+        )
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert "no_artifacts" in checks
+        assert checks["no_artifacts"]["passed"] is False, (
+            f"Should fail — Markdown separator in <td>. Detail: {checks['no_artifacts']['detail']}"
+        )
+
+    def test_orphaned_tr_fails_no_artifacts(self):
+        """<tr> without enclosing <table> must trigger no_artifacts failure."""
+        html = self._base_html(
+            "<tr><td>orphaned row</td></tr>"
+        )
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert "no_artifacts" in checks
+        assert checks["no_artifacts"]["passed"] is False, (
+            f"Should fail — orphaned <tr>. Detail: {checks['no_artifacts']['detail']}"
+        )
+
+    def test_clean_html_passes_no_artifacts(self):
+        """Well-formed HTML with no raw Markdown must pass no_artifacts."""
+        html = self._base_html(
+            "<table><thead><tr><th>สินค้า</th><th>ราคา</th></tr></thead>"
+            "<tbody><tr><td>Eloop E33</td><td>฿399</td></tr></tbody></table>"
+        )
+        result = self._run_crawl(html)
+        checks = result["checks"]
+        assert checks.get("no_artifacts", {}).get("passed") is True, (
+            f"Should pass no_artifacts. Detail: {checks.get('no_artifacts', {}).get('detail')}"
+        )
+
+
+# ===========================================================================
+# TestRelatedArticlesInStaging
+# ===========================================================================
+
+class TestRelatedArticlesInStaging:
+    """generate_preview_body must include related articles when they exist."""
+
+    def test_preview_body_includes_related_articles_section(self):
+        """generate_preview_body output includes บทความที่เกี่ยวข้อง when related articles exist."""
+        from unittest.mock import patch as _patch
+        from shopee_engine.article_exporter import generate_preview_body
+
+        db = _make_test_db()
+        patches = _patch_db(db)
+        related_mock = [
+            {"article_id": "power-bank-10000-mah", "title": "Power Bank 10000mAh", "keyword": ""},
+            {"article_id": "power-bank-ccc", "title": "Power Bank CCC", "keyword": ""},
+        ]
+        for p in patches:
+            p.start()
+        try:
+            with _patch("shopee_engine.article_exporter.get_related_articles",
+                        return_value=related_mock):
+                result = generate_preview_body("test-article")
+            assert result.get("success") is True, f"Error: {result.get('error')}"
+            body = result["body"]
+            assert "บทความที่เกี่ยวข้อง" in body, (
+                "Related articles section missing from preview body"
+            )
+            assert "power-bank-10000-mah" in body or "Power Bank 10000mAh" in body, (
+                "Related article link/title not found in body"
+            )
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_preview_body_no_related_section_when_none_exist(self):
+        """generate_preview_body does not include related section when list is empty."""
+        from unittest.mock import patch as _patch
+        from shopee_engine.article_exporter import generate_preview_body
+
+        db = _make_test_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            with _patch("shopee_engine.article_exporter.get_related_articles", return_value=[]):
+                result = generate_preview_body("test-article")
+            assert result.get("success") is True
+            body = result["body"]
+            # Section should be absent or empty when no related articles
+            assert "- [" not in body or "บทความที่เกี่ยวข้อง" not in body, (
+                "Related section should be absent when list is empty"
+            )
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+
+# ===========================================================================
+# TestRendererConsistency
+# ===========================================================================
+
+class TestRendererConsistency:
+    """preview body must use the same pipeline as export_article."""
+
+    def test_preview_body_contains_comparison_table_header(self):
+        """Preview body includes the comparison table with Thai header row."""
+        from unittest.mock import patch as _patch
+        from shopee_engine.article_exporter import generate_preview_body
+
+        db = _make_test_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            with _patch("shopee_engine.article_exporter.get_related_articles", return_value=[]):
+                result = generate_preview_body("test-article")
+            assert result.get("success") is True
+            body = result["body"]
+            assert "ตารางเปรียบเทียบ" in body, "Comparison table section missing from preview"
+            assert "สินค้า" in body and "ราคา" in body, "Comparison table header missing"
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)
+
+    def test_preview_body_contains_product_section(self):
+        """Preview body includes the product detail section (แนะนำสินค้า)."""
+        from unittest.mock import patch as _patch
+        from shopee_engine.article_exporter import generate_preview_body
+
+        db = _make_test_db()
+        patches = _patch_db(db)
+        for p in patches:
+            p.start()
+        try:
+            with _patch("shopee_engine.article_exporter.get_related_articles", return_value=[]):
+                result = generate_preview_body("test-article")
+            assert result.get("success") is True
+            body = result["body"]
+            assert "แนะนำสินค้า" in body, "Product section missing from preview"
+            # Both test products should appear
+            assert "Eloop E33" in body, "First product missing from preview"
+            assert "Anker 521" in body, "Second product missing from preview"
+        finally:
+            for p in patches:
+                p.stop()
+            db.unlink(missing_ok=True)

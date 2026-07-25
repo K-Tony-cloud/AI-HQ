@@ -597,7 +597,8 @@ def generate_preview_body(article_id: str) -> dict:
         return _err(article_id, "No active products found for this article")
 
     prose = _extract_prose(str(article.get("content_md", "")))
-    body  = _build_export_body(article, products, prose)
+    related_articles = get_related_articles(article_id, limit=4)
+    body  = _build_export_body(article, products, prose, related_articles)
     return {"success": True, "article_id": article_id, "body": body}
 
 
