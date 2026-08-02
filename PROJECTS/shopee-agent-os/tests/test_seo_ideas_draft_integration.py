@@ -341,7 +341,8 @@ class TestArticleDraftSafety(unittest.TestCase):
     def test_no_products_returns_error_no_db_write(self):
         """When no products match, must return error without creating article record."""
         with patch("shopee_engine.seo_engine.config") as mock_cfg, \
-             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}):
+             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}), \
+             patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
             mock_cfg.db_path = self.db_path
             from shopee_engine.seo_engine import generate_article_draft
             before = self._count_articles()
@@ -352,7 +353,8 @@ class TestArticleDraftSafety(unittest.TestCase):
     def test_draft_error_shows_search_terms_not_sql(self):
         """Error message on no-product must show search terms, not SQL."""
         with patch("shopee_engine.seo_engine.config") as mock_cfg, \
-             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}):
+             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}), \
+             patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
             mock_cfg.db_path = self.db_path
             from shopee_engine.seo_engine import generate_article_draft
             result = generate_article_draft(keyword="zzz-nonexistent-xyz-product-abc")
@@ -373,7 +375,8 @@ class TestArticleDraftSafety(unittest.TestCase):
         self.assertGreater(len(ideas), 0)
 
         with patch("shopee_engine.seo_engine.config") as mock_cfg, \
-             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}):
+             patch("shopee_engine.seo_engine._get_affiliate_lookup", return_value={}), \
+             patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
             mock_cfg.db_path = self.db_path
             from shopee_engine.seo_engine import generate_article_draft as gad
             result = gad(idea_id=ideas[0]["idea_id"])

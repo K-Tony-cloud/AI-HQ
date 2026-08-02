@@ -410,6 +410,51 @@ def run_preflight(article_id: str) -> dict:
             "variant_evidence": variant_evidence,
         })
 
+    # ── Gate 12: editorial_brief_alignment ───────────────────────────────────
+    try:
+        from shopee_engine.editorial_brief import get_brief_for_keyword, get_brief_for_article
+        brief = get_brief_for_keyword(keyword) or get_brief_for_article(article_id)
+        if brief is None:
+            gates["editorial_brief_alignment"] = _gate(
+                False,
+                ["ไม่มี Editorial Brief — สร้างด้วย /seo-brief-create"],
+            )
+            summary_errors.append("ไม่มี Editorial Brief")
+        else:
+            brief_errors: list[str] = []
+            brief_warnings: list[str] = []
+            brief_status = brief.get("brief_status", "draft")
+            if brief_status != "approved":
+                brief_errors.append(f"Brief status = '{brief_status}' (ต้อง approved)")
+
+            # must_avoid: check if any forbidden phrase appears in content_md
+            must_avoid = brief.get("must_avoid") or []
+            for phrase in must_avoid:
+                if phrase and phrase.lower() in content_md.lower():
+                    brief_errors.append(f"Forbidden phrase in content: '{phrase}'")
+
+            # must_compare_attributes: check that each attribute label appears
+            must_compare = brief.get("must_compare_attributes") or []
+            for attr in must_compare:
+                if attr and attr not in content_md:
+                    brief_warnings.append(f"Compare attribute missing from content: '{attr}'")
+
+            gates["editorial_brief_alignment"] = _gate(
+                len(brief_errors) == 0,
+                brief_errors,
+                brief_warnings,
+                {
+                    "brief_id":     brief.get("brief_id", ""),
+                    "brief_status": brief_status,
+                    "must_avoid_checked":   len(must_avoid),
+                    "must_compare_checked": len(must_compare),
+                },
+            )
+            summary_errors.extend(brief_errors)
+            summary_warnings.extend(brief_warnings)
+    except Exception as exc:
+        gates["editorial_brief_alignment"] = _gate(True, [], [f"Brief check skipped: {exc}"])
+
     # ── Overall pass/fail ────────────────────────────────────────────────────
     all_passed = all(g["passed"] for g in gates.values())
 
@@ -824,6 +869,9 @@ def generate_preflight_json(
             "flags":              clean["flags"] + p.get("flags", []),
         })
 
+    gates = preflight_result.get("gates", {})
+    brief_gate = gates.get("editorial_brief_alignment", {})
+
     return {
         "article_id":        article_id,
         "title":             meta.get("title", ""),
@@ -831,9 +879,16 @@ def generate_preflight_json(
         "preflight_passed":  preflight_result.get("passed", False),
         "html_crawl_passed": crawl_result.get("passed", False),
         "products":          products_out,
-        "gates":             preflight_result.get("gates", {}),
+        "gates":             gates,
         "html_checks":       crawl_result.get("checks", {}),
         "warnings":          preflight_result.get("summary_warnings", []),
         "errors":            preflight_result.get("summary_errors", []),
+        "editorial_brief_alignment": {
+            "passed":       brief_gate.get("passed", False),
+            "brief_id":     (brief_gate.get("evidence") or {}).get("brief_id", ""),
+            "brief_status": (brief_gate.get("evidence") or {}).get("brief_status", ""),
+            "errors":       brief_gate.get("errors", []),
+            "warnings":     brief_gate.get("warnings", []),
+        },
         "generated_at":      datetime.now(timezone.utc).isoformat(),
     }

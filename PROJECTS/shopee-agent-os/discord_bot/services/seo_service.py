@@ -473,3 +473,73 @@ def run_preflight_check(article_id: str) -> dict:
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Editorial Brief services
+# ---------------------------------------------------------------------------
+
+def create_brief(keyword: str, markdown_text: str, source: str = "user") -> dict:
+    try:
+        from shopee_engine.editorial_brief import parse_brief_markdown, create_brief as _create
+        parsed = parse_brief_markdown(markdown_text)
+        # keyword from args takes priority over parsed value
+        parsed.pop("keyword", None)
+        brief = _create(keyword=keyword, brief_data=parsed, source=source)
+        return {"success": True, "brief": brief}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_brief(brief_id: str) -> dict:
+    try:
+        from shopee_engine.editorial_brief import get_brief_by_id
+        brief = get_brief_by_id(brief_id)
+        if not brief:
+            return {"success": False, "error": f"Brief `{brief_id}` ไม่พบ"}
+        return {"success": True, "brief": brief}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_brief_for_keyword(keyword: str) -> dict:
+    try:
+        from shopee_engine.editorial_brief import get_brief_for_keyword as _get
+        brief = _get(keyword)
+        if not brief:
+            return {"success": False, "error": f"ไม่มี brief สำหรับ keyword: {keyword}"}
+        return {"success": True, "brief": brief}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def approve_brief(brief_id: str) -> dict:
+    try:
+        from shopee_engine.editorial_brief import approve_brief as _approve
+        brief = _approve(brief_id)
+        return {"success": True, "brief": brief}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def edit_brief(brief_id: str, markdown_text: str) -> dict:
+    try:
+        from shopee_engine.editorial_brief import parse_brief_markdown, update_brief, get_brief_by_id
+        existing = get_brief_by_id(brief_id)
+        if not existing:
+            return {"success": False, "error": f"Brief `{brief_id}` ไม่พบ"}
+        parsed = parse_brief_markdown(markdown_text)
+        parsed.pop("keyword", None)  # keyword is immutable after creation
+        brief = update_brief(brief_id, parsed)
+        return {"success": True, "brief": brief}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def list_briefs(limit: int = 20) -> dict:
+    try:
+        from shopee_engine.editorial_brief import list_briefs as _list
+        briefs = _list(limit=limit)
+        return {"success": True, "briefs": briefs}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

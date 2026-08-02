@@ -1409,6 +1409,23 @@ def generate_article_draft(
           "error": str | None,
         }
     """
+    # Brief guard: resolve effective keyword first, then check brief status
+    _check_keyword = keyword
+    if idea_id and not keyword:
+        _cached = _idea_cache.get(idea_id, {})
+        _check_keyword = _cached.get("keyword", "")
+    if _check_keyword:
+        from shopee_engine.editorial_brief import get_brief_status as _get_brief_status
+        _bstatus = _get_brief_status(_check_keyword)
+        if _bstatus != "approved":
+            _msg = (
+                f"บทความนี้ยังไม่มี Editorial Brief กรุณาสร้างด้วย `/seo-brief-create` ก่อน"
+                if _bstatus == "none"
+                else f"Editorial Brief ยังไม่ได้รับการ approved (status: `{_bstatus}`) — "
+                f"รัน `/seo-brief-approve brief_id:<id>` ก่อน"
+            )
+            return {"success": False, "error": _msg}
+
     if idea_id:
         # idea_id path: use products selected during /seo-ideas (no keyword text search)
         products = fetch_products_by_idea(idea_id, top=top_products)

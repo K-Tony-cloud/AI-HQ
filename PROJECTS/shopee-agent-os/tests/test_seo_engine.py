@@ -249,7 +249,8 @@ class TestGenerateArticleDraft:
         with patch("shopee_engine.seo_engine.config.db_path", db_path), \
              patch("shopee_engine.affiliate_products_engine.config.db_path", db_path), \
              patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
-             patch("shopee_engine.content_engine.detect_provider", return_value="template"):
+             patch("shopee_engine.content_engine.detect_provider", return_value="template"), \
+             patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
             from shopee_engine.seo_engine import generate_article_draft
             return generate_article_draft(keyword, **kwargs)
 
@@ -319,7 +320,8 @@ class TestGenerateArticleDraft:
                  patch("shopee_engine.seo_engine._ai_intro", return_value="template intro"), \
                  patch("shopee_engine.seo_engine._ai_buying_guide", return_value="template guide"), \
                  patch("shopee_engine.seo_engine._ai_summary", return_value="template summary"), \
-                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}):
+                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
+                 patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
                 from shopee_engine.seo_engine import generate_article_draft
                 result = generate_article_draft("เมาส์เกมมิ่ง")
             assert result["success"] is True
@@ -332,7 +334,8 @@ class TestGenerateArticleDraft:
         try:
             with patch("shopee_engine.seo_engine.config.db_path", db), \
                  patch("shopee_engine.affiliate_products_engine.config.db_path", db), \
-                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}):
+                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
+                 patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
                 from shopee_engine.seo_engine import generate_article_draft
                 r1 = generate_article_draft("เมาส์เกมมิ่ง")
                 r2 = generate_article_draft("เมาส์เกมมิ่ง")
@@ -350,7 +353,8 @@ class TestArticleStatus:
     def _create_draft(self, db: Path) -> str:
         with patch("shopee_engine.seo_engine.config.db_path", db), \
              patch("shopee_engine.affiliate_products_engine.config.db_path", db), \
-             patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}):
+             patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
+             patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
             from shopee_engine.seo_engine import generate_article_draft
             r = generate_article_draft("เมาส์เกมมิ่ง")
         assert r["success"]
@@ -393,7 +397,8 @@ class TestValidation:
         try:
             with patch("shopee_engine.seo_engine.config.db_path", db), \
                  patch("shopee_engine.affiliate_products_engine.config.db_path", db), \
-                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}):
+                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
+                 patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
                 from shopee_engine.seo_engine import generate_article_draft, validate_article_for_publish
                 r = generate_article_draft("เมาส์เกมมิ่ง")
                 result = validate_article_for_publish(r["article_id"])
@@ -419,7 +424,8 @@ class TestValidation:
         try:
             with patch("shopee_engine.seo_engine.config.db_path", db), \
                  patch("shopee_engine.affiliate_products_engine.config.db_path", db), \
-                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}):
+                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
+                 patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
                 from shopee_engine.seo_engine import (
                     generate_article_draft, update_article_status, validate_article_for_publish
                 )
@@ -535,7 +541,8 @@ class TestGitPublishFail:
         try:
             with patch("shopee_engine.seo_engine.config.db_path", db), \
                  patch("shopee_engine.affiliate_products_engine.config.db_path", db), \
-                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}):
+                 patch("shopee_engine.ai_status.get_ai_status", return_value={"active": False}), \
+                 patch("shopee_engine.editorial_brief.get_brief_status", return_value="approved"):
                 from shopee_engine.seo_engine import (
                     generate_article_draft, update_article_status,
                     update_published_info, list_articles

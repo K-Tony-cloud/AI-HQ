@@ -806,3 +806,105 @@ def build_preflight_embed(preflight: dict, crawl: dict, all_passed: bool) -> dis
         )
     embed.set_footer(text="แนบ HTML preview และ JSON report ใน attachment")
     return embed
+
+
+# ---------------------------------------------------------------------------
+# Editorial Brief embeds
+# ---------------------------------------------------------------------------
+
+_STATUS_EMOJI = {
+    "draft":    "📝",
+    "approved": "✅",
+    "archived": "📦",
+}
+
+
+def build_brief_created_embed(brief: dict) -> discord.Embed:
+    e = make_embed(
+        f"📋 Editorial Brief Created — {brief.get('keyword', '')}",
+        color_key="success",
+    )
+    e.add_field(name="Brief ID",   value=f"`{brief.get('brief_id', '')}`",           inline=True)
+    e.add_field(name="Status",     value=f"{_STATUS_EMOJI.get(brief.get('brief_status','draft'), '📝')} {brief.get('brief_status', 'draft')}", inline=True)
+    e.add_field(name="Category",   value=brief.get("canonical_category") or "—",     inline=True)
+    if brief.get("proposed_title"):
+        e.add_field(name="Proposed Title", value=brief["proposed_title"][:256],        inline=False)
+    if brief.get("article_angle"):
+        e.add_field(name="Article Angle",  value=brief["article_angle"][:256],         inline=False)
+    avoids = brief.get("must_avoid") or []
+    if avoids:
+        e.add_field(name="Must Avoid", value="\n".join(f"• {a}" for a in avoids[:5])[:1024], inline=False)
+    e.set_footer(text="ใช้ /seo-brief-approve brief_id:<id> เมื่อพร้อม หรือ /seo-brief-show brief_id:<id> ดูรายละเอียด")
+    return e
+
+
+def build_brief_show_embed(brief: dict) -> discord.Embed:
+    status = brief.get("brief_status", "draft")
+    e = make_embed(
+        f"{_STATUS_EMOJI.get(status, '📝')} Editorial Brief — {brief.get('keyword', '')}",
+        color_key="success" if status == "approved" else "info",
+    )
+    e.add_field(name="Brief ID",   value=f"`{brief.get('brief_id', '')}`",           inline=True)
+    e.add_field(name="Status",     value=f"{status}",                                  inline=True)
+    e.add_field(name="Source",     value=brief.get("source", "user"),                  inline=True)
+    e.add_field(name="Category",   value=brief.get("canonical_category") or "—",       inline=True)
+    e.add_field(name="Products",   value=str(brief.get("recommended_product_count", 5)), inline=True)
+    linked = brief.get("article_id") or "—"
+    e.add_field(name="Article ID", value=f"`{linked}`",                                inline=True)
+
+    for field_name, label in [
+        ("proposed_title",    "Proposed Title"),
+        ("why_now",           "Why Now"),
+        ("user_problem",      "User Problem"),
+        ("search_intent",     "Search Intent"),
+        ("target_audience",   "Target Audience"),
+        ("article_angle",     "Article Angle"),
+        ("product_diversity_requirements", "Product Diversity"),
+        ("seasonal_context",  "Seasonal Context"),
+        ("editorial_notes",   "Editorial Notes"),
+    ]:
+        val = brief.get(field_name, "") or ""
+        if val:
+            e.add_field(name=label, value=val[:1024], inline=False)
+
+    for field_name, label in [
+        ("must_compare_attributes",   "Must Compare"),
+        ("must_include",              "Must Include"),
+        ("must_avoid",                "Must Avoid"),
+        ("claims_requiring_evidence", "Claims Requiring Evidence"),
+    ]:
+        items = brief.get(field_name) or []
+        if items:
+            e.add_field(name=label, value="\n".join(f"• {i}" for i in items[:8])[:1024], inline=False)
+
+    return e
+
+
+def build_brief_approved_embed(brief: dict) -> discord.Embed:
+    e = make_embed(
+        f"✅ Brief Approved — {brief.get('keyword', '')}",
+        color_key="success",
+    )
+    e.add_field(name="Brief ID", value=f"`{brief.get('brief_id', '')}`", inline=True)
+    e.add_field(name="Status",   value="✅ approved",                     inline=True)
+    e.set_footer(text="บทความนี้พร้อมสร้างด้วย /seo-draft แล้ว")
+    return e
+
+
+def build_brief_list_embed(briefs: list[dict]) -> discord.Embed:
+    e = make_embed("📋 Editorial Briefs", color_key="info")
+    if not briefs:
+        e.description = "ยังไม่มี brief — สร้างด้วย /seo-brief-create"
+        return e
+    for b in briefs[:10]:
+        status = b.get("brief_status", "draft")
+        icon   = _STATUS_EMOJI.get(status, "📝")
+        kw     = b.get("keyword", "")[:40]
+        bid    = b.get("brief_id", "")
+        cat    = b.get("canonical_category", "") or "—"
+        e.add_field(
+            name=f"{icon} {kw}",
+            value=f"`{bid}` | {cat} | {status}",
+            inline=False,
+        )
+    return e

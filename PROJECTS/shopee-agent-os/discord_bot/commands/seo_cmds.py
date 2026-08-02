@@ -12,6 +12,10 @@ from discord.ext import commands
 
 from discord_bot.embeds.base import error_embed, send_and_confirm
 from discord_bot.embeds.seo_embeds import (
+    build_brief_approved_embed,
+    build_brief_created_embed,
+    build_brief_list_embed,
+    build_brief_show_embed,
     build_draft_duplicate_embed,
     build_draft_embed,
     build_edit_embed,
@@ -700,6 +704,151 @@ class SeoCog(commands.Cog):
                 await interaction.followup.send(embed=error_embed(result.get("error", "Unknown error")))
                 return
             embed = build_upgrade_embed(result)
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-brief-create
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-brief-create",
+        description="สร้าง Editorial Brief สำหรับบทความใหม่ (ต้องทำก่อน /seo-draft)",
+    )
+    @app_commands.describe(
+        keyword="Keyword หลักของบทความ (เช่น 'เครื่องอบรองเท้า รุ่นไหนดี')",
+        brief_text="Brief ในรูปแบบ Markdown (วาง brief เต็มได้เลย)",
+    )
+    async def cmd_seo_brief_create(
+        self,
+        interaction: discord.Interaction,
+        keyword: str,
+        brief_text: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(
+                seo_service.create_brief, keyword, brief_text
+            )
+            if not result["success"]:
+                await interaction.followup.send(embed=error_embed(result["error"]))
+                return
+            embed = build_brief_created_embed(result["brief"])
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-brief-show
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-brief-show",
+        description="แสดงรายละเอียด Editorial Brief",
+    )
+    @app_commands.describe(
+        brief_id="Brief ID (เช่น brief-abc12345) — หรือใส่ keyword เพื่อค้นหา",
+    )
+    async def cmd_seo_brief_show(
+        self,
+        interaction: discord.Interaction,
+        brief_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.get_brief, brief_id)
+            if not result["success"]:
+                # Try keyword lookup
+                result = await asyncio.to_thread(seo_service.get_brief_for_keyword, brief_id)
+            if not result["success"]:
+                await interaction.followup.send(embed=error_embed(result["error"]))
+                return
+            embed = build_brief_show_embed(result["brief"])
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-brief-edit
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-brief-edit",
+        description="แก้ไข Editorial Brief ด้วย Markdown ใหม่",
+    )
+    @app_commands.describe(
+        brief_id="Brief ID ที่ต้องการแก้ไข",
+        brief_text="Brief ใหม่ในรูปแบบ Markdown (ใส่แค่ sections ที่ต้องการเปลี่ยน)",
+    )
+    async def cmd_seo_brief_edit(
+        self,
+        interaction: discord.Interaction,
+        brief_id: str,
+        brief_text: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.edit_brief, brief_id, brief_text)
+            if not result["success"]:
+                await interaction.followup.send(embed=error_embed(result["error"]))
+                return
+            embed = build_brief_show_embed(result["brief"])
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-brief-approve
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-brief-approve",
+        description="Approve Editorial Brief — บทความพร้อมสร้างด้วย /seo-draft",
+    )
+    @app_commands.describe(
+        brief_id="Brief ID ที่ต้องการ approve",
+    )
+    async def cmd_seo_brief_approve(
+        self,
+        interaction: discord.Interaction,
+        brief_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.approve_brief, brief_id)
+            if not result["success"]:
+                await interaction.followup.send(embed=error_embed(result["error"]))
+                return
+            embed = build_brief_approved_embed(result["brief"])
+            await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-brief-list
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-brief-list",
+        description="แสดงรายการ Editorial Briefs ทั้งหมด",
+    )
+    @app_commands.describe(
+        limit="จำนวนที่แสดง (1-25, default 15)",
+    )
+    async def cmd_seo_brief_list(
+        self,
+        interaction: discord.Interaction,
+        limit: int = 15,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        limit = max(1, min(25, limit))
+        try:
+            result = await asyncio.to_thread(seo_service.list_briefs, limit)
+            if not result["success"]:
+                await interaction.followup.send(embed=error_embed(result["error"]))
+                return
+            embed = build_brief_list_embed(result["briefs"])
             await interaction.followup.send(embed=embed)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))
