@@ -908,3 +908,60 @@ def build_brief_list_embed(briefs: list[dict]) -> discord.Embed:
             inline=False,
         )
     return e
+
+
+# ---------------------------------------------------------------------------
+# Product Research embeds
+# ---------------------------------------------------------------------------
+
+_AFF_ICON = {"confirmed": "✅", "datafeed": "🔗", "none": "❌"}
+
+
+def build_research_summary_embed(result: dict) -> discord.Embed:
+    summary = result.get("summary", {})
+    oem     = result.get("oem_alerts", [])
+    brief   = result.get("brief") or {}
+
+    color = "warning" if oem or summary.get("products_missing_info", 0) > 1 else "info"
+    e = make_embed(
+        f"🔬 Product Research — {result.get('keyword', '')}",
+        color_key=color,
+    )
+    e.add_field(name="Article ID", value=f"`{result.get('article_id', '')}`", inline=True)
+    e.add_field(name="Status",     value=result.get("status", ""), inline=True)
+    e.add_field(name="Brief",      value=brief.get("brief_status", "none"), inline=True)
+
+    e.add_field(
+        name="สินค้า",
+        value=(
+            f"รวม: {summary.get('total_products', 0)}\n"
+            f"Affiliate ✅: {summary.get('affiliate_confirmed', 0)}\n"
+            f"ขาด Aff: {summary.get('affiliate_missing', 0)}"
+        ),
+        inline=True,
+    )
+    e.add_field(
+        name="OEM Alerts",
+        value=f"{'⚠️ ' + str(len(oem)) + ' คู่' if oem else '✅ ไม่พบ'}",
+        inline=True,
+    )
+    e.add_field(
+        name="ข้อมูลไม่ครบ",
+        value=f"{summary.get('products_missing_info', 0)} สินค้า",
+        inline=True,
+    )
+
+    if oem:
+        oem_text = "\n".join(
+            f"• {o['product_a_title'][:35]}... ↔ {o['product_b_title'][:35]}..."
+            for o in oem[:3]
+        )
+        e.add_field(name="⚠️ OEM Suspects", value=oem_text[:1024], inline=False)
+
+    e.add_field(
+        name="คำแนะนำ",
+        value=summary.get("draft_recommendation", "")[:1024],
+        inline=False,
+    )
+    e.set_footer(text="ดูรายละเอียดใน research_report.txt ที่แนบมา")
+    return e

@@ -543,3 +543,11 @@ def list_briefs(limit: int = 20) -> dict:
         return {"success": True, "briefs": briefs}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def research_article(article_id: str) -> dict:
+    try:
+        from shopee_engine.product_research import research_article_products
+        return research_article_products(article_id)
+    except Exception as e:
+        return {"success": False, "error": str(e)}

@@ -16,6 +16,7 @@ from discord_bot.embeds.seo_embeds import (
     build_brief_created_embed,
     build_brief_list_embed,
     build_brief_show_embed,
+    build_research_summary_embed,
     build_draft_duplicate_embed,
     build_draft_embed,
     build_edit_embed,
@@ -850,5 +851,95 @@ class SeoCog(commands.Cog):
                 return
             embed = build_brief_list_embed(result["briefs"])
             await interaction.followup.send(embed=embed)
+        except Exception as exc:
+            await interaction.followup.send(embed=error_embed(str(exc)))
+
+    # ------------------------------------------------------------------
+    # /seo-research
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="seo-research",
+        description="วิเคราะห์สินค้าแต่ละตัวใน article — ต้องตรวจ Research Report ก่อน /seo-draft",
+    )
+    @app_commands.describe(
+        article_id="Article ID ที่ต้องการวิจัยสินค้า",
+    )
+    async def cmd_seo_research(
+        self,
+        interaction: discord.Interaction,
+        article_id: str,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            result = await asyncio.to_thread(seo_service.research_article, article_id)
+            if not result.get("success"):
+                await interaction.followup.send(embed=error_embed(result.get("error", "Unknown error")))
+                return
+
+            embed = build_research_summary_embed(result)
+
+            # Build detailed text report
+            lines: list[str] = [
+                f"# Research Report — {result.get('keyword', '')}",
+                f"article_id: {article_id}",
+                f"status: {result.get('status', '')}",
+                f"brief_status: {(result.get('brief') or {}).get('brief_status', 'none')}",
+                "",
+            ]
+            for p in result.get("products", []):
+                lines += [
+                    f"---",
+                    f"## [{p['rank']}] {p['title'][:80]}",
+                    f"itemid: {p['itemid']} | shopid: {p['shopid']}",
+                    f"ราคา: ฿{p['sale_price']} | คะแนน: {p['item_rating']} | ยอดขาย: {p['item_sold']}",
+                    f"Affiliate: {p['affiliate_status']}",
+                    f"",
+                    f"### Domain Evidence",
+                    f"วิธีทำให้แห้ง: {p['drying_method']}",
+                    f"กำลังไฟ: {p['watt']}W" if p['watt'] else "กำลังไฟ: ไม่ระบุ",
+                    f"Timer: {p['timer']}" + (f" ({p['timer_levels']} ระดับ)" if p['timer_levels'] else ""),
+                    f"พับเก็บได้: {'✅' if p['foldable'] else '❌'}",
+                    f"Auto Shutoff: {'✅' if p['auto_shutoff'] else '❌ ไม่พบ'}",
+                    f"Overheat Protection: {'✅' if p['overheat_protection'] else '❌ ไม่พบ'}",
+                    f"รองเท้าที่รองรับ: {', '.join(p['suitable_shoe_types'])}",
+                    f"วัสดุที่ห้ามใช้: {', '.join(p['unsuitable_materials']) if p['unsuitable_materials'] else 'ไม่ระบุ'}",
+                    f"",
+                    f"### Seller Claims (ต้องระบุ 'ผู้ขายระบุว่า...')",
+                ]
+                if p["seller_claims"]:
+                    for c in p["seller_claims"]:
+                        lines.append(f"  ⚠️ {c}")
+                else:
+                    lines.append("  ไม่มี claim พิเศษ")
+                lines += [
+                    f"",
+                    f"### ข้อมูลที่ไม่พบ / ไม่ระบุ",
+                ]
+                if p["missing_info"]:
+                    for m in p["missing_info"]:
+                        lines.append(f"  ❓ {m}")
+                else:
+                    lines.append("  ครบ")
+                lines.append("")
+
+            # OEM alerts
+            oem = result.get("oem_alerts", [])
+            if oem:
+                lines += ["---", "## ⚠️ OEM Alerts"]
+                for o in oem:
+                    lines += [
+                        f"คู่: itemid {o['product_a_itemid']} ↔ itemid {o['product_b_itemid']}",
+                        f"  A: {o['product_a_title']}",
+                        f"  B: {o['product_b_title']}",
+                        f"  Shared: {'; '.join(o['shared_phrases'])}",
+                        f"  {o['recommendation']}",
+                        "",
+                    ]
+
+            report_text = "\n".join(lines)
+            f_attach = io.BytesIO(report_text.encode("utf-8"))
+            discord_file = discord.File(f_attach, filename=f"research_{article_id}.txt")
+            await interaction.followup.send(embed=embed, file=discord_file)
         except Exception as exc:
             await interaction.followup.send(embed=error_embed(str(exc)))
